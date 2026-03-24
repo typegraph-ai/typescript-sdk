@@ -89,6 +89,7 @@ export interface d8umInstance {
   index(sourceId?: string, opts?: IndexOpts): Promise<IndexResult | IndexResult[]>
   query(text: string, opts?: QueryOpts): Promise<QueryResponse>
   searchWithContext(text: string, opts?: ContextSearchOpts): Promise<ContextSearchResponse>
+  ingest(sourceId: string, doc: RawDocument, opts?: IndexOpts): Promise<IndexResult>
   ingestWithChunks(sourceId: string, doc: RawDocument, chunks: Chunk[], opts?: IndexOpts): Promise<IndexResult>
   assemble(results: d8umResult[], opts?: AssembleOpts): string
   destroy(): Promise<void>
@@ -215,6 +216,22 @@ class d8umImpl implements d8umInstance {
     )
     await this.config.hooks?.onQueryResults?.(text, response.rawResults)
     return response
+  }
+
+  async ingest(
+    sourceId: string,
+    doc: RawDocument,
+    opts?: IndexOpts
+  ): Promise<IndexResult> {
+    await this.ensureInitialized()
+    const source = this.sources.get(sourceId)
+    if (!source) throw new Error(`Source "${sourceId}" not found`)
+    if (!source.index) throw new Error(`Source "${sourceId}" has no index config`)
+    const { defaultChunker: chunker } = await import('./index-engine/chunker.js')
+    const chunks = source.connector.chunk
+      ? source.connector.chunk(doc, source.index)
+      : chunker(doc, source.index)
+    return this.ingestWithChunks(sourceId, doc, chunks, opts)
   }
 
   async ingestWithChunks(

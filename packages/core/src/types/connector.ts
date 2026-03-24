@@ -1,5 +1,5 @@
 export interface RawDocument<TMeta extends Record<string, unknown> = Record<string, unknown>> {
-  id: string
+  id?: string | undefined
   content: string
   title: string
   updatedAt: Date

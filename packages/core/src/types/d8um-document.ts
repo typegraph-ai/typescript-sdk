@@ -1,5 +1,5 @@
 export type DocumentStatus = 'pending' | 'processing' | 'complete' | 'failed'
-export type DocumentScope = 'tenant' | 'folder' | 'user'
+export type DocumentScope = 'tenant' | 'group' | 'user'
 
 export interface d8umDocument {
   /** UUID primary key. */
@@ -16,8 +16,8 @@ export interface d8umDocument {
   status: DocumentStatus
   /** Access scope. Optional — not all apps need scoped access. */
   scope?: DocumentScope | undefined
-  /** UUID. For folder-scoped documents. */
-  folderId?: string | undefined
+  /** UUID. For group-scoped documents. */
+  groupId?: string | undefined
   /** UUID. Owner/creator of the document. */
   userId?: string | undefined
   /** App-specific document type (e.g. 'pdf', 'csv', 'webpage'). */
@@ -36,7 +36,7 @@ export interface DocumentFilter {
   status?: DocumentStatus | DocumentStatus[] | undefined
   scope?: DocumentScope | DocumentScope[] | undefined
   userId?: string | undefined
-  folderId?: string | undefined
+  groupId?: string | undefined
   documentType?: string | string[] | undefined
   sourceType?: string | string[] | undefined
   documentIds?: string[] | undefined
@@ -51,7 +51,7 @@ export interface UpsertDocumentInput {
   chunkCount: number
   status: DocumentStatus
   scope?: DocumentScope | undefined
-  folderId?: string | undefined
+  groupId?: string | undefined
   userId?: string | undefined
   documentType?: string | undefined
   sourceType?: string | undefined

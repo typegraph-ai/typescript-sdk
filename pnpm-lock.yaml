@@ -106,6 +106,26 @@ importers:
         specifier: ^5.4.0
         version: 5.9.3
 
+  packages/connectors/fathom:
+    dependencies:
+      '@d8um/core':
+        specifier: workspace:*
+        version: link:../../core
+    devDependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+
+  packages/connectors/google-drive:
+    dependencies:
+      '@d8um/core':
+        specifier: workspace:*
+        version: link:../../core
+    devDependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+
   packages/connectors/notion:
     dependencies:
       '@d8um/core':
@@ -114,6 +134,16 @@ importers:
       '@notionhq/client':
         specifier: ^2.2.0
         version: 2.3.0
+    devDependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+
+  packages/connectors/slack:
+    dependencies:
+      '@d8um/core':
+        specifier: workspace:*
+        version: link:../../core
     devDependencies:
       typescript:
         specifier: ^5.4.0
@@ -140,6 +170,16 @@ importers:
       vitest:
         specifier: ^1.0.0
         version: 1.6.1(@types/node@20.19.37)
+
+  packages/hosted:
+    dependencies:
+      '@d8um/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
 
 packages:
 

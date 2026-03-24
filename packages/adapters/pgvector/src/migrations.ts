@@ -95,8 +95,8 @@ export const DOCUMENTS_TABLE_SQL = (documentsTable: string) => `
     chunk_count     INTEGER NOT NULL DEFAULT 0,
     status          TEXT NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending', 'processing', 'complete', 'failed')),
-    scope           TEXT CHECK (scope IS NULL OR scope IN ('tenant', 'folder', 'user')),
-    folder_id       UUID,
+    scope           TEXT CHECK (scope IS NULL OR scope IN ('tenant', 'group', 'user')),
+    group_id       UUID,
     user_id         UUID,
     document_type   TEXT,
     source_type     TEXT,

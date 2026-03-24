@@ -160,7 +160,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     const vectorStr = `[${embedding.join(',')}]`
     const { where, params } = buildWhere(opts.filter)
     const filterClause = where ? `WHERE ${where}` : ''
-    const topK = opts.topK
+    const count = opts.count
 
     const runQuery = async (sql: SqlExecutor): Promise<ScoredChunk[]> => {
       if (opts.iterativeScan !== false) {
@@ -173,7 +173,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
          ${filterClause}
          ORDER BY embedding <=> $${paramOffset + 1}::vector
          LIMIT $${paramOffset + 2}`,
-        [...params, vectorStr, topK]
+        [...params, vectorStr, count]
       )
       return rows.map(row => mapRowToScoredChunk(row, { vector: row.similarity as number }))
     }
@@ -192,11 +192,11 @@ export class PgVectorAdapter implements VectorStoreAdapter {
   ): Promise<ScoredChunk[]> {
     const table = this.getTable(model)
     const vectorStr = `[${embedding.join(',')}]`
-    const topK = opts.topK
+    const count = opts.count
     const { where: filterWhere, params: filterParams } = buildWhere(opts.filter)
     const filterClause = filterWhere ? `AND ${filterWhere}` : ''
 
-    // Offset param indices past filter params: $1=vectorStr, $2=query, $3=topK, then filter params
+    // Offset param indices past filter params: $1=vectorStr, $2=query, $3=count, then filter params
     const baseOffset = 3
     const reindexedFilter = filterClause.replace(
       /\$(\d+)/g,
@@ -262,7 +262,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
                  embedding_model, chunk_index, total_chunks, metadata, indexed_at
         ORDER BY SUM(rrf_score) DESC
         LIMIT $3`,
-        [vectorStr, query, topK, ...filterParams]
+        [vectorStr, query, count, ...filterParams]
       )
 
       return rows.map(row => mapRowToScoredChunk(row, {
@@ -321,12 +321,12 @@ export class PgVectorAdapter implements VectorStoreAdapter {
   ): Promise<ScoredChunkWithDocument[]> {
     const table = this.getTable(model)
     const vectorStr = `[${embedding.join(',')}]`
-    const topK = opts.topK
+    const count = opts.count
     const { where: chunkFilterWhere, params: chunkFilterParams } = buildWhere(opts.filter)
     const chunkFilterClause = chunkFilterWhere ? `AND ${chunkFilterWhere}` : ''
     const { where: docFilterWhere, params: docFilterParams } = buildDocWhere(opts.documentFilter ?? {})
 
-    // Base params: $1=vector, $2=query, $3=topK
+    // Base params: $1=vector, $2=query, $3=count
     // Then chunk filter params, then doc filter params
     const baseOffset = 3
     const reindexedChunkFilter = chunkFilterClause.replace(
@@ -338,7 +338,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
       ? `AND ${docFilterWhere.replace(/\$(\d+)/g, (_, n) => `$${parseInt(n) + docParamOffset}`)}`
       : ''
 
-    const allParams = [vectorStr, query, topK, ...chunkFilterParams, ...docFilterParams]
+    const allParams = [vectorStr, query, count, ...chunkFilterParams, ...docFilterParams]
 
     const runQuery = async (sql: SqlExecutor): Promise<ScoredChunkWithDocument[]> => {
       if (opts.iterativeScan !== false) {
@@ -407,7 +407,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
                d.id AS doc_id, d.title AS doc_title, d.url AS doc_url,
                d.content_hash AS doc_content_hash, d.chunk_count AS doc_chunk_count,
                d.status AS doc_status, d.scope AS doc_scope,
-               d.folder_id AS doc_folder_id, d.user_id AS doc_user_id,
+               d.group_id AS doc_group_id, d.user_id AS doc_user_id,
                d.document_type AS doc_document_type, d.source_type AS doc_source_type,
                d.indexed_at AS doc_indexed_at, d.created_at AS doc_created_at,
                d.updated_at AS doc_updated_at, d.metadata AS doc_metadata
@@ -520,7 +520,7 @@ function mapRowToDocument(row: Record<string, unknown>): d8umDocument {
     chunkCount: row.doc_chunk_count as number,
     status: row.doc_status as d8umDocument['status'],
     scope: (row.doc_scope as d8umDocument['scope']) ?? undefined,
-    folderId: (row.doc_folder_id as string) ?? undefined,
+    groupId: (row.doc_group_id as string) ?? undefined,
     userId: (row.doc_user_id as string) ?? undefined,
     documentType: (row.doc_document_type as string) ?? undefined,
     sourceType: (row.doc_source_type as string) ?? undefined,

@@ -15,7 +15,7 @@ export interface EmbeddingProviderConfig {
 export type EmbeddingInput = EmbeddingProvider | EmbeddingProviderConfig | AISDKEmbeddingInput
 
 export interface IndexConfig extends ChunkOpts {
-  idempotencyKey: string[] | ((doc: import('./connector.js').RawDocument) => string)
+  deduplicateBy: string[] | ((doc: import('./connector.js').RawDocument) => string)
   propagateMetadata?: string[] | undefined
   /** If true, strip markdown syntax from chunk content before embedding. Original content is stored as-is. */
   stripMarkdownForEmbedding?: boolean | undefined

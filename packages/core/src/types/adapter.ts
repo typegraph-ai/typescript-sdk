@@ -2,7 +2,7 @@ import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from './document.js'
 import type { d8umDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from './d8um-document.js'
 
 export interface SearchOpts {
-  topK: number
+  count: number
   filter?: ChunkFilter | undefined
   approximate?: boolean | undefined
   iterativeScan?: boolean | undefined

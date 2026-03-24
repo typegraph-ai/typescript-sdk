@@ -43,8 +43,12 @@ function assembleXml(results: d8umResult[], _opts: { citeSources: boolean }): st
 }
 
 function assembleMarkdown(results: d8umResult[], _opts: { citeSources: boolean }): string {
-  // TODO: implement
-  return results.map(r => r.content).join('\n\n---\n\n')
+  return results.map(r => {
+    const title = r.source.title
+    const url = r.source.url
+    const heading = url ? `# (${title})[${url}]` : `# ${title}`
+    return `${heading}\n${r.content}`
+  }).join('\n\n---\n\n')
 }
 
 function assemblePlain(results: d8umResult[]): string {

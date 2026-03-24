@@ -12,7 +12,7 @@ function mapDocRow(row: Record<string, unknown>): d8umDocument {
     chunkCount: row.chunk_count as number,
     status: row.status as d8umDocument['status'],
     scope: (row.scope as d8umDocument['scope']) ?? undefined,
-    folderId: (row.folder_id as string) ?? undefined,
+    groupId: (row.group_id as string) ?? undefined,
     userId: (row.user_id as string) ?? undefined,
     documentType: (row.document_type as string) ?? undefined,
     sourceType: (row.source_type as string) ?? undefined,
@@ -33,7 +33,7 @@ export class PgDocumentStore {
     const rows = await this.sql(
       `INSERT INTO ${this.tableName}
         (source_id, tenant_id, title, url, content_hash, chunk_count, status,
-         scope, folder_id, user_id, document_type, source_type, metadata, indexed_at, updated_at)
+         scope, group_id, user_id, document_type, source_type, metadata, indexed_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
        ON CONFLICT (source_id, COALESCE(tenant_id, ''), content_hash)
          DO UPDATE SET
@@ -42,7 +42,7 @@ export class PgDocumentStore {
            chunk_count = EXCLUDED.chunk_count,
            status = EXCLUDED.status,
            scope = EXCLUDED.scope,
-           folder_id = EXCLUDED.folder_id,
+           group_id = EXCLUDED.group_id,
            user_id = EXCLUDED.user_id,
            document_type = EXCLUDED.document_type,
            source_type = EXCLUDED.source_type,
@@ -59,7 +59,7 @@ export class PgDocumentStore {
         input.chunkCount,
         input.status,
         input.scope ?? null,
-        input.folderId ?? null,
+        input.groupId ?? null,
         input.userId ?? null,
         input.documentType ?? null,
         input.sourceType ?? null,
@@ -151,9 +151,9 @@ function buildDocWhere(filter: DocumentFilter): { where: string; params: unknown
     params.push(filter.userId)
     conditions.push(`user_id = $${params.length}`)
   }
-  if (filter.folderId != null) {
-    params.push(filter.folderId)
-    conditions.push(`folder_id = $${params.length}`)
+  if (filter.groupId != null) {
+    params.push(filter.groupId)
+    conditions.push(`group_id = $${params.length}`)
   }
   if (filter.documentType != null) {
     if (Array.isArray(filter.documentType)) {

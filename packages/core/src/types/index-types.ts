@@ -1,7 +1,7 @@
 export interface IndexOpts {
   mode?: 'upsert' | 'replace' | undefined
   tenantId?: string | undefined
-  pruneDeleted?: boolean | undefined
+  removeDeleted?: boolean | undefined
   dryRun?: boolean | undefined
   onProgress?: ((event: IndexProgressEvent) => void) | undefined
 }

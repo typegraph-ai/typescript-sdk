@@ -3,6 +3,7 @@ import type { VectorStoreAdapter } from '../types/adapter.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import type { IndexOpts, IndexResult } from '../types/index-types.js'
 import type { RawDocument, Chunk } from '../types/connector.js'
+import { randomUUID } from 'crypto'
 import { IndexError } from '../types/index-types.js'
 import { sha256, resolveIdempotencyKey, buildHashStoreKey } from './hash.js'
 import { defaultChunker } from './chunker.js'
@@ -18,7 +19,7 @@ export class IndexEngine {
     const {
       mode = 'upsert',
       tenantId,
-      pruneDeleted = false,
+      removeDeleted = false,
       dryRun = false,
       onProgress,
     } = opts
@@ -66,7 +67,7 @@ export class IndexEngine {
     try {
       for await (const doc of docs) {
         result.total++
-        const ikey = resolveIdempotencyKey(doc, source.index.idempotencyKey)
+        const ikey = resolveIdempotencyKey(doc, source.index.deduplicateBy)
         const contentHash = sha256(doc.content)
         const storeKey = buildHashStoreKey(tenantId, source.id, ikey)
         seenKeys.add(ikey)
@@ -111,7 +112,7 @@ export class IndexEngine {
         }
 
         // Create/update document record
-        let documentId = doc.id
+        let documentId = doc.id ?? randomUUID()
         if (this.adapter.upsertDocumentRecord && !dryRun) {
           const docRecord = await this.adapter.upsertDocumentRecord({
             sourceId: source.id,
@@ -198,7 +199,7 @@ export class IndexEngine {
       )
     }
 
-    if (pruneDeleted && mode === 'upsert' && !dryRun) {
+    if (removeDeleted && mode === 'upsert' && !dryRun) {
       const storedRecords = await this.adapter.hashStore.listBySource(source.id, tenantId)
       const deletedKeys = storedRecords
         .map(r => r.idempotencyKey)
@@ -250,10 +251,10 @@ export class IndexEngine {
     }
 
     const contentHash = sha256(doc.content)
-    const ikey = resolveIdempotencyKey(doc, source.index.idempotencyKey)
+    const ikey = resolveIdempotencyKey(doc, source.index.deduplicateBy)
 
     // Create/update document record
-    let documentId = doc.id
+    let documentId = doc.id ?? randomUUID()
     if (this.adapter.upsertDocumentRecord && !dryRun) {
       const docRecord = await this.adapter.upsertDocumentRecord({
         sourceId: source.id,

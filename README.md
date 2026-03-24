@@ -26,7 +26,7 @@
 **d8um** (pronounced "datum") is a TypeScript SDK and open protocol for supplying context to LLMs. Define your data sources once - websites, documents, integrations, APIs, databases - and query all of them with a single call. d8um handles chunking, embedding, storage, retrieval, score merging, and prompt assembly so you can focus on building your application.
 
 ```ts
-const { results } = await d8um.query('how do I configure SSO?', { topK: 8 })
+const { results } = await d8um.query('how do I configure SSO?', { count: 8 })
 const context = d8um.assemble(results, { format: 'xml', maxTokens: 4000 })
 ```
 
@@ -95,26 +95,103 @@ A single `d8um.query()` call fans out across all three modes in parallel, normal
 
 ## Quick Start
 
-### Install
+### Option A: Hosted (zero infrastructure)
+
+```bash
+npm install @d8um/core @d8um/hosted
+```
+
+```ts
+import { d8umHosted } from '@d8um/hosted'
+
+const d8um = d8umHosted({ apiKey: process.env.D8UM_API_KEY! })
+
+// 1. Create a source you send documents to - FAQ questions and answers
+d8um.addSource({
+  id: 'faq',
+  mode: 'indexed',
+  index: { chunkSize: 512, chunkOverlap: 64, deduplicateBy: ['content'] },
+})
+
+// 2. Send documents to your FAQ source - d8um handles chunking and embedding
+//    document id is optional - d8um generates an UUID id if none is sent, and automatically deduplicates by content hash
+await d8um.ingest('faq', {
+  title: 'How do I set up SSO?',
+  content: 'To enable SSO, navigate to Settings > Authentication and select your identity provider. We support SAML 2.0 and OpenID Connect.',
+  updatedAt: new Date(),
+  metadata: {},
+})
+
+await d8um.ingest('faq', {
+  title: 'How do I reset my password?',
+  content: 'Click "Forgot password" on the login page. You will receive a reset link via email within 5 minutes.',
+  updatedAt: new Date(),
+  metadata: {},
+})
+
+// 3. Check source statuses - FAQ is ready
+const sources = await d8um.listSources()
+// [
+//   { id: 'faq', status: 'ready', documentCount: 2 }
+// ]
+
+// 4. Query - fans out across faq (and any other sources), merges, re-ranks
+const response = await d8um.query('how do I configure SSO?')
+
+// response.results contains ranked chunks from your sources:
+// [
+//   {
+//     content: 'To enable SSO, navigate to Settings > Authentication...',
+//     score: 0.9142,
+//     source: { id: 'faq', title: 'How do I set up SSO?' },
+//   },
+//   ...
+// ]
+
+// 5. Assemble ranked chunks into structured LLM context
+const xml = d8um.assemble(response.results) // defaults to XML format
+// <context>
+// <source id="faq" title="How do I set up SSO?">
+//   <passage score="0.9142">
+//     To enable SSO, navigate to Settings > Authentication...
+//   </passage>
+// </source>
+// ...
+// </context>
+
+// Also available as markdown:
+const md = d8um.assemble(response.results, { format: 'markdown' })
+// # How do I set up SSO?
+// To enable SSO, navigate to Settings > Authentication...
+//
+// ---
+//...
+```
+
+### Option B: Self-Hosted (full control)
 
 ```bash
 # Core SDK
 npm install @d8um/core
 
 # Pick an embedding provider (any AI SDK provider works)
-npm install @ai-sdk/openai           # OpenAI
-npm install @ai-sdk/anthropic        # Anthropic
-npm install @ai-sdk/cohere           # Cohere
+npm install @ai-sdk/openai           
+# npm install @ai-sdk/anthropic      
+# npm install @ai-sdk/cohere          
 # ... or any of 40+ AI SDK providers
 
 # Pick a vector store adapter
-npm install @d8um/adapter-pgvector    # Production - Postgres + pgvector
-npm install @d8um/adapter-sqlite-vec  # Local dev - zero external dependencies
+npm install @d8um/adapter-pgvector      # Production - Postgres + pgvector
+# npm install @d8um/adapter-sqlite-vec  # Local dev - zero external dependencies
 
 # Pick connectors
-npm install @d8um/connector-domain    # Recursively crawl a domain/website
-npm install @d8um/connector-url       # Scrape individual web pages
-npm install @d8um/connector-notion    # Sync Notion pages and databases
+npm install @d8um/connector-domain          # Recursively crawl a domain/website
+npm install @d8um/connector-url             # Scrape individual web pages
+npm install @d8um/connector-slack           # Sync Slack conversations
+npm install @d8um/connector-google-drive    # Sync Google Drive documents and files
+npm install @d8um/connector-fathom          # Sync Fathom call transcripts
+npm install @d8um/connector-notion          # Sync Notion pages and databases
+# ... or any other pre-built, or custom connectors
 ```
 
 ### Define sources, index, query
@@ -123,82 +200,92 @@ npm install @d8um/connector-notion    # Sync Notion pages and databases
 import { d8um } from '@d8um/core'
 import { PgVectorAdapter } from '@d8um/adapter-pgvector'
 import { DomainConnector } from '@d8um/connector-domain'
-import { UrlConnector } from '@d8um/connector-url'
 import { openai } from '@ai-sdk/openai'
 import { neon } from '@neondatabase/serverless'
 
-// 1. Initialize d8um — bring your own Postgres driver
-const sql = neon(process.env.DATABASE_URL!)
-
+// 1. Initialize d8um
 d8um.initialize({
   embedding: {
     model: openai.embedding('text-embedding-3-small'),
     dimensions: 1536,
   },
-  vectorStore: new PgVectorAdapter({ sql }),
+  vectorStore: new PgVectorAdapter({ sql: neon(process.env.DATABASE_URL!) }),
 })
 
-// Need multiple instances? Use d8umCreate():
-// import { d8umCreate } from '@d8um/core'
-// const other = d8umCreate({ embedding: ..., vectorStore: ... })
-
-// 2. Add your data sources
+// 2. Create a source you send documents to - "faq" for Q&A pairs
 d8um.addSource({
-  id: 'marketing-site',
-  connector: new DomainConnector({
-    startUrl: 'https://acme.com',
-    denyPatterns: ['/blog/*'],
-    maxPages: 200,
-  }),
+  id: 'faq',
   mode: 'indexed',
-  index: {
-    chunkSize: 512,
-    chunkOverlap: 64,
-    idempotencyKey: ['url'],
-  },
+  index: { chunkSize: 512, chunkOverlap: 64, deduplicateBy: ['content'] },
 })
 
+// 3. Create a source that d8um crawls - your docs site
 d8um.addSource({
   id: 'docs',
-  connector: new DomainConnector({
-    startUrl: 'https://docs.acme.com',
-    maxPages: 500,
-  }),
+  connector: new DomainConnector({ startUrl: 'https://docs.acme.com', maxPages: 200 }),
   mode: 'indexed',
-  index: {
-    chunkSize: 512,
-    chunkOverlap: 64,
-    idempotencyKey: ['url'],
-  },
+  index: { chunkSize: 512, chunkOverlap: 64, deduplicateBy: ['url'] },
 })
 
-d8um.addSource({
-  id: 'changelog',
-  connector: new UrlConnector({
-    urls: ['https://acme.com/changelog'],
-  }),
-  mode: 'indexed',
-  index: {
-    chunkSize: 512,
-    chunkOverlap: 64,
-    idempotencyKey: ['url'],
-  },
+// 4. Send documents to your FAQ source - d8um handles chunking and embedding
+//    No id needed - d8um generates one, and deduplicates by content hash
+await d8um.ingest('faq', {
+  title: 'How do I set up SSO?',
+  content: 'To enable SSO, navigate to Settings > Authentication and select your identity provider. We support SAML 2.0 and OpenID Connect.',
+  updatedAt: new Date(),
+  metadata: {},
 })
 
-// 3. Index (run in a background job, cron, or on deploy)
-await d8um.index('marketing-site', { mode: 'upsert' })
-await d8um.index('docs', { mode: 'upsert', pruneDeleted: true })
-await d8um.index('changelog', { mode: 'upsert' })
-
-// 4. Query - fans out across all sources, merges, re-ranks
-const { results } = await d8um.query('how do I configure SSO?', { topK: 8 })
-
-// 5. Get prompt-ready context
-const context = d8um.assemble(results, {
-  format: 'xml',
-  maxTokens: 4000,
-  citeSources: true,
+await d8um.ingest('faq', {
+  title: 'How do I reset my password?',
+  content: 'Click "Forgot password" on the login page. You will receive a reset link via email within 5 minutes.',
+  updatedAt: new Date(),
+  metadata: {},
 })
+
+// 5. Index the docs site (FAQ docs were already indexed on ingest)
+await d8um.index('docs')
+
+// 6. Query - fans out across FAQ + docs, merges, re-ranks
+const response = await d8um.query('how do I configure SSO?')
+
+// response.results contains ranked chunks from both sources:
+// [
+//   {
+//     content: 'To enable SSO, navigate to Settings > Authentication...',
+//     score: 0.9142,
+//     source: { id: 'faq', title: 'How do I set up SSO?' },
+//   },
+//   {
+//     content: 'SSO Configuration Guide: Step-by-step instructions for...',
+//     score: 0.8731,
+//     source: { id: 'docs', title: 'SSO Configuration', url: 'https://docs.acme.com/sso' },
+//   },
+// ]
+
+// 7. Assemble ranked chunks into structured LLM context
+const xml = d8um.assemble(response.results) // defaults to XML
+// <context>
+// <source id="faq" title="How do I set up SSO?">
+//   <passage score="0.9142">
+//     To enable SSO, navigate to Settings > Authentication...
+//   </passage>
+// </source>
+// <source id="docs" title="SSO Configuration" url="https://docs.acme.com/sso">
+//   <passage score="0.8731">
+//     SSO Configuration Guide: Step-by-step instructions for...
+//   </passage>
+// </source>
+// </context>
+
+const md = d8um.assemble(response.results, { format: 'markdown' })
+// # How do I set up SSO?
+// To enable SSO, navigate to Settings > Authentication...
+//
+// ---
+//
+// # (SSO Configuration)[https://docs.acme.com/sso]
+// SSO Configuration Guide: Step-by-step instructions for...
 ```
 
 ### Output
@@ -242,7 +329,7 @@ const context = d8um.assemble(results, {
 await d8um.index('docs', {
   mode: 'upsert',       // 'upsert' (incremental) or 'replace' (full rebuild)
   tenantId: 'acme',     // Multi-tenant isolation
-  pruneDeleted: true,    // Remove chunks for documents no longer in the source
+  removeDeleted: true,    // Remove chunks for documents no longer in the source
   dryRun: true,          // Preview what would change without writing
   onProgress: (event) => console.log(event),  // Progress callbacks
 })
@@ -252,7 +339,7 @@ await d8um.index('docs', {
 
 ```ts
 const response = await d8um.query('search text', {
-  topK: 10,
+  count: 10,
   sources: ['docs', 'wiki'],     // Filter to specific sources
   tenantId: 'acme',
   mergeStrategy: 'rrf',          // 'rrf', 'linear', or 'custom'
@@ -266,11 +353,15 @@ const response = await d8um.query('search text', {
 | Package | Description | Status |
 |---------|-------------|--------|
 | [`@d8um/core`](packages/core) | Query engine, index engine, types, embedding providers | Alpha |
+| [`@d8um/hosted`](packages/hosted) | Hosted client SDK - zero infrastructure, just an API key | Alpha |
 | [`@d8um/adapter-pgvector`](packages/adapters/pgvector) | PostgreSQL + pgvector - driver-agnostic (bring your own Postgres client) | Alpha |
 | [`@d8um/adapter-sqlite-vec`](packages/adapters/sqlite-vec) | SQLite + sqlite-vec - zero-infra local development | Alpha |
 | [`@d8um/connector-domain`](packages/connectors/domain) | Recursively crawl a domain with BFS, respecting depth/page limits | Alpha |
 | [`@d8um/connector-url`](packages/connectors/url) | Scrape individual web pages, strip HTML to clean text | Alpha |
 | [`@d8um/connector-notion`](packages/connectors/notion) | Sync Notion pages and databases with block-aware chunking | Alpha |
+| [`@d8um/connector-slack`](packages/connectors/slack) | Sync Slack conversations, threads, and messages | Stub |
+| [`@d8um/connector-google-drive`](packages/connectors/google-drive) | Sync Google Drive documents, spreadsheets, and files | Stub |
+| [`@d8um/connector-fathom`](packages/connectors/fathom) | Sync Fathom call recordings and transcripts | Stub |
 
 ### Build Your Own
 
@@ -296,7 +387,7 @@ d8um.addSource({
   id: 'my-source',
   connector: myConnector,
   mode: 'indexed',
-  index: { chunkSize: 512, chunkOverlap: 64, idempotencyKey: ['id'] },
+  index: { chunkSize: 512, chunkOverlap: 64, deduplicateBy: ['id'] },
 })
 ```
 
@@ -361,7 +452,7 @@ d8um.addSource({
   id: 'docs',
   connector: docsConnector,
   mode: 'indexed',
-  index: { chunkSize: 512, chunkOverlap: 64, idempotencyKey: ['url'] },
+  index: { chunkSize: 512, chunkOverlap: 64, deduplicateBy: ['url'] },
 })
 
 // Overrides with Cohere (1024 dims) - gets its own vector table automatically
@@ -369,7 +460,7 @@ d8um.addSource({
   id: 'wiki',
   connector: wikiConnector,
   mode: 'indexed',
-  index: { chunkSize: 512, chunkOverlap: 64, idempotencyKey: ['metadata.pageId'] },
+  index: { chunkSize: 512, chunkOverlap: 64, deduplicateBy: ['metadata.pageId'] },
   embedding: {
     model: cohere.embedding('embed-english-v3.0'),
     dimensions: 1024,
@@ -441,6 +532,7 @@ The repo uses [Turborepo](https://turbo.build) for build orchestration and [pnpm
 - [x] Driver-agnostic pgvector adapter (bring your own Postgres client)
 - [x] URL connector with HTML stripping and link extraction
 - [x] Domain connector with BFS crawling, domain boundaries, and allow/deny patterns
+- [x] Hosted client SDK (`@d8um/hosted`) - zero-infra SaaS mode
 - [ ] Live and cached query runners
 - [ ] SQLite-vec adapter implementation
 - [ ] Notion connector with block tree traversal

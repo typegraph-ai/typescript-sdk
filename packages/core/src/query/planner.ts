@@ -14,7 +14,7 @@ export class QueryPlanner {
 
   async execute(text: string, opts: QueryOpts = {}): Promise<QueryResponse> {
     const startMs = Date.now()
-    const topK = opts.topK ?? 10
+    const count = opts.count ?? 10
     const tenantId = opts.tenantId
     const warnings: string[] = []
 
@@ -59,7 +59,7 @@ export class QueryPlanner {
     if (modelGroups.size > 0) {
       const runnerStart = Date.now()
       const runner = new IndexedRunner(this.adapter)
-      const results = await runner.run(text, modelGroups, topK, tenantId, opts.documentFilter)
+      const results = await runner.run(text, modelGroups, count, tenantId, opts.documentFilter)
       const runnerDuration = Date.now() - runnerStart
 
       // Record per-source timings
@@ -83,8 +83,8 @@ export class QueryPlanner {
         )
       : undefined
     const mergedResults = modelGroups.size > 1
-      ? mergeAndRank([allResults], topK, weights)
-      : allResults.slice(0, topK)
+      ? mergeAndRank([allResults], count, weights)
+      : allResults.slice(0, count)
 
     // Map NormalizedResult → d8umResult
     const results: d8umResult[] = mergedResults.map(r => ({
@@ -106,7 +106,7 @@ export class QueryPlanner {
         documentType: r.documentType,
         sourceType: r.sourceType,
         userId: r.userId,
-        folderId: r.folderId,
+        groupId: r.groupId,
       },
       chunk: r.chunk ?? { index: 0, total: 1, isNeighbor: false },
       metadata: r.metadata,

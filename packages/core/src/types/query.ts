@@ -1,7 +1,7 @@
 export interface d8umQuery {
   text: string
   sources?: string[] | undefined
-  topK?: number | undefined
+  count?: number | undefined
   filters?: Record<string, unknown> | undefined
 }
 
@@ -26,7 +26,7 @@ export interface d8umResult {
     documentType?: string | undefined
     sourceType?: string | undefined
     userId?: string | undefined
-    folderId?: string | undefined
+    groupId?: string | undefined
   }
 
   chunk: {
@@ -41,7 +41,7 @@ export interface d8umResult {
 
 export interface QueryOpts {
   sources?: string[] | undefined
-  topK?: number | undefined
+  count?: number | undefined
   tenantId?: string | undefined
   filters?: Record<string, unknown> | undefined
   /** Filter results by document-level fields (status, scope, type, etc.). */

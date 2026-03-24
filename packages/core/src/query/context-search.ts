@@ -7,7 +7,7 @@ import { QueryPlanner } from './planner.js'
 
 export interface ContextSearchOpts extends QueryOpts {
   /** Number of neighbor chunks to expand around each hit. Default: 1 */
-  neighborRadius?: number | undefined
+  surroundingChunks?: number | undefined
 }
 
 export interface ContextPassage {
@@ -49,7 +49,7 @@ export async function searchWithContext(
   opts: ContextSearchOpts = {}
 ): Promise<ContextSearchResponse> {
   const startMs = Date.now()
-  const radius = opts.neighborRadius ?? 1
+  const radius = opts.surroundingChunks ?? 1
 
   // Run the standard query to get top hits
   const planner = new QueryPlanner(adapter, sources, sourceEmbeddings)

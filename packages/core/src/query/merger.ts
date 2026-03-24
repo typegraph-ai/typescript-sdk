@@ -19,7 +19,7 @@ export interface NormalizedResult {
   documentType?: string | undefined
   sourceType?: string | undefined
   userId?: string | undefined
-  folderId?: string | undefined
+  groupId?: string | undefined
 }
 
 export function dedupKey(r: NormalizedResult): string {
@@ -48,7 +48,7 @@ const DEFAULT_WEIGHTS: Record<string, number> = {
 
 export function mergeAndRank(
   runnerResults: NormalizedResult[][],
-  topK: number,
+  count: number,
   weights?: Record<string, number>
 ): NormalizedResult[] {
   const ranked = runnerResults.flatMap((results) =>
@@ -74,5 +74,5 @@ export function mergeAndRank(
 
   return merged
     .sort((a, b) => b.finalScore - a.finalScore)
-    .slice(0, topK)
+    .slice(0, count)
 }

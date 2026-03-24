@@ -15,7 +15,7 @@ export class IndexedRunner {
   async run(
     text: string,
     sourcesByModel: Map<string, { embedding: EmbeddingProvider; sourceIds: string[] }>,
-    topK: number,
+    count: number,
     tenantId?: string,
     documentFilter?: DocumentFilter
   ): Promise<NormalizedResult[]> {
@@ -32,7 +32,7 @@ export class IndexedRunner {
       // Prefer searchWithDocuments if available and documentFilter is set
       if (this.adapter.searchWithDocuments && documentFilter) {
         const chunks = await this.adapter.searchWithDocuments(modelId, queryEmbedding, text, {
-          topK,
+          count,
           filter,
           documentFilter,
         })
@@ -68,14 +68,14 @@ export class IndexedRunner {
             documentType: chunk.document?.documentType,
             sourceType: chunk.document?.sourceType,
             userId: chunk.document?.userId,
-            folderId: chunk.document?.folderId,
+            groupId: chunk.document?.groupId,
           })
         }
       } else {
         // Fall back to standard hybrid/vector search
         const chunks = this.adapter.hybridSearch
-          ? await this.adapter.hybridSearch(modelId, queryEmbedding, text, { topK, filter })
-          : await this.adapter.search(modelId, queryEmbedding, { topK, filter })
+          ? await this.adapter.hybridSearch(modelId, queryEmbedding, text, { count, filter })
+          : await this.adapter.search(modelId, queryEmbedding, { count, filter })
 
         for (const chunk of chunks) {
           if (group.sourceIds.length > 1 && !group.sourceIds.includes(chunk.sourceId)) {
