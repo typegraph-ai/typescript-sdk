@@ -1,14 +1,29 @@
-// Zero-infra quickstart — no Postgres, no API keys needed
-// Uses SqliteVecAdapter + a mock embedding function
+// Zero-infra quickstart — no Postgres, no external services needed
+// Uses SqliteVecAdapter + AI SDK embedding provider
+
+// To use a real embedding model, install a provider:
+//   npm install @ai-sdk/openai
+//
+// import { openai } from '@ai-sdk/openai'
+// embedding: { model: openai.embedding('text-embedding-3-small'), dimensions: 1536 }
 
 import { D8um } from '@d8um/core'
 import { SqliteVecAdapter } from '@d8um/adapter-sqlite-vec'
 
 async function main() {
   const ctx = new D8um({
+    // For local dev, you can use a custom EmbeddingProvider directly
     embedding: {
-      provider: 'openai',
-      apiKey: process.env.OPENAI_API_KEY ?? 'sk-mock',
+      model: 'mock/local-dev',
+      dimensions: 3,
+      async embed(text: string) {
+        // Mock: return a simple hash-based vector
+        const hash = [...text].reduce((h, c) => ((h << 5) - h + c.charCodeAt(0)) | 0, 0)
+        return [Math.sin(hash), Math.cos(hash), Math.sin(hash * 2)]
+      },
+      async embedBatch(texts: string[]) {
+        return Promise.all(texts.map(t => this.embed(t)))
+      },
     },
     vectorStore: new SqliteVecAdapter({ dbPath: './local-dev.db' }),
   })

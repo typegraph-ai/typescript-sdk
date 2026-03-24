@@ -10,6 +10,8 @@ export type {
   IndexConfig,
   CacheConfig,
   D8umSource,
+  EmbeddingInput,
+  EmbeddingProviderConfig,
 } from './source.js'
 
 export type {

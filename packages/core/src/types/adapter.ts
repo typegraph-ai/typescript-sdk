@@ -12,6 +12,7 @@ export interface HashRecord {
   contentHash: string
   sourceId: string
   tenantId?: string | undefined
+  embeddingModel: string
   indexedAt: Date
   chunkCount: number
 }
@@ -31,12 +32,15 @@ export interface VectorStoreAdapter {
   initialize(): Promise<void>
   destroy?(): Promise<void>
 
-  upsertDocument(chunks: EmbeddedChunk[]): Promise<void>
-  delete(filter: ChunkFilter): Promise<void>
+  /** Ensure a model's storage (e.g., table) exists. Called lazily before first write. */
+  ensureModel(model: string, dimensions: number): Promise<void>
 
-  search(embedding: number[], opts: SearchOpts): Promise<ScoredChunk[]>
-  hybridSearch?(embedding: number[], query: string, opts: SearchOpts): Promise<ScoredChunk[]>
-  countChunks(filter: ChunkFilter): Promise<number>
+  upsertDocument(model: string, chunks: EmbeddedChunk[]): Promise<void>
+  delete(model: string, filter: ChunkFilter): Promise<void>
+
+  search(model: string, embedding: number[], opts: SearchOpts): Promise<ScoredChunk[]>
+  hybridSearch?(model: string, embedding: number[], query: string, opts: SearchOpts): Promise<ScoredChunk[]>
+  countChunks(model: string, filter: ChunkFilter): Promise<number>
 
   hashStore: HashStoreAdapter
 }

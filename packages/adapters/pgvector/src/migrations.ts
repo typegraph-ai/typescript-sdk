@@ -1,6 +1,22 @@
-export const INIT_SQL = (chunksTable: string, hashesTable: string, dimensions: number) => `
-  CREATE EXTENSION IF NOT EXISTS vector;
+/**
+ * DDL for the model registry table — tracks which embedding models
+ * have been initialized and their table names / dimensions.
+ */
+export const REGISTRY_SQL = (registryTable: string) => `
+  CREATE TABLE IF NOT EXISTS ${registryTable} (
+    model_key   TEXT PRIMARY KEY,
+    model_id    TEXT NOT NULL,
+    table_name  TEXT NOT NULL,
+    dimensions  INTEGER NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+`
 
+/**
+ * DDL for a per-model chunks table. Called lazily via ensureModel().
+ * Each embedding model gets its own table with the correct VECTOR(n) column.
+ */
+export const MODEL_TABLE_SQL = (chunksTable: string, dimensions: number) => `
   CREATE TABLE IF NOT EXISTS ${chunksTable} (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     source_id       TEXT NOT NULL,
@@ -9,6 +25,7 @@ export const INIT_SQL = (chunksTable: string, hashesTable: string, dimensions: n
     idempotency_key TEXT NOT NULL,
     content         TEXT NOT NULL,
     embedding       VECTOR(${dimensions}),
+    embedding_model TEXT NOT NULL,
     chunk_index     INTEGER NOT NULL,
     total_chunks    INTEGER NOT NULL,
     metadata        JSONB NOT NULL DEFAULT '{}',
@@ -35,13 +52,19 @@ export const INIT_SQL = (chunksTable: string, hashesTable: string, dimensions: n
 
   CREATE UNIQUE INDEX IF NOT EXISTS ${chunksTable}_ikey_chunk_idx
     ON ${chunksTable} (idempotency_key, chunk_index, source_id);
+`
 
+/**
+ * DDL for the shared hash store table (dimension-agnostic).
+ */
+export const HASH_TABLE_SQL = (hashesTable: string) => `
   CREATE TABLE IF NOT EXISTS ${hashesTable} (
     store_key       TEXT PRIMARY KEY,
     idempotency_key TEXT NOT NULL,
     content_hash    TEXT NOT NULL,
     source_id       TEXT NOT NULL,
     tenant_id       TEXT,
+    embedding_model TEXT NOT NULL,
     indexed_at      TIMESTAMPTZ NOT NULL,
     chunk_count     INTEGER NOT NULL
   );
@@ -56,3 +79,15 @@ export const INIT_SQL = (chunksTable: string, hashesTable: string, dimensions: n
     PRIMARY KEY (source_id, COALESCE(tenant_id, ''))
   );
 `
+
+/**
+ * Sanitize a model identifier into a valid SQL table name suffix.
+ * e.g., "openai/text-embedding-3-small" → "openai_text_embedding_3_small"
+ */
+export function sanitizeModelKey(model: string): string {
+  return model
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+}

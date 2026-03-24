@@ -25,6 +25,13 @@ export class IndexEngine {
     if (!source.index) throw new Error(`Source "${source.id}" has no index config`)
     if (!source.connector.fetch) throw new Error(`Source "${source.id}" connector has no fetch()`)
 
+    const modelId = this.embedding.model
+
+    // Ensure the adapter has storage for this model's dimensions
+    if (!dryRun) {
+      await this.adapter.ensureModel(modelId, this.embedding.dimensions)
+    }
+
     const startMs = Date.now()
     const result: IndexResult = {
       sourceId: source.id,
@@ -39,7 +46,7 @@ export class IndexEngine {
     }
 
     if (mode === 'replace' && !dryRun) {
-      await this.adapter.delete({ sourceId: source.id, tenantId })
+      await this.adapter.delete(modelId, { sourceId: source.id, tenantId })
       await this.adapter.hashStore.deleteBySource(source.id, tenantId)
     }
 
@@ -72,8 +79,10 @@ export class IndexEngine {
         })
 
         const stored = await this.adapter.hashStore.get(storeKey)
-        if (stored?.contentHash === contentHash) {
-          const actualChunks = await this.adapter.countChunks({
+
+        // Skip if content unchanged AND embedding model unchanged
+        if (stored?.contentHash === contentHash && stored.embeddingModel === modelId) {
+          const actualChunks = await this.adapter.countChunks(modelId, {
             sourceId: source.id,
             tenantId,
             idempotencyKey: ikey,
@@ -89,6 +98,15 @@ export class IndexEngine {
             })
             continue
           }
+        }
+
+        // If embedding model changed, delete old chunks from the old model's table
+        if (stored && stored.embeddingModel !== modelId) {
+          await this.adapter.delete(stored.embeddingModel, {
+            sourceId: source.id,
+            tenantId,
+            idempotencyKey: ikey,
+          })
         }
 
         const chunks = source.connector.chunk
@@ -113,6 +131,7 @@ export class IndexEngine {
           documentId: doc.id,
           content: chunk.content,
           embedding: embeddings[i]!,
+          embeddingModel: modelId,
           chunkIndex: chunk.chunkIndex,
           totalChunks: chunks.length,
           metadata: { ...propagated, ...chunk.metadata },
@@ -127,13 +146,14 @@ export class IndexEngine {
             failed: 0,
             current: { idempotencyKey: ikey, reason: stored ? 'hash_changed' : 'new' },
           })
-          await this.adapter.upsertDocument(embeddedChunks)
+          await this.adapter.upsertDocument(modelId, embeddedChunks)
 
           await this.adapter.hashStore.set(storeKey, {
             idempotencyKey: ikey,
             contentHash,
             sourceId: source.id,
             tenantId,
+            embeddingModel: modelId,
             indexedAt: new Date(),
             chunkCount: chunks.length,
           })
@@ -163,7 +183,10 @@ export class IndexEngine {
           done: result.skipped + result.updated + result.inserted,
           failed: 0,
         })
-        await this.adapter.delete({ sourceId: source.id, tenantId, idempotencyKey: key })
+        // Delete from the model table recorded in the hash store
+        const record = storedRecords.find(r => r.idempotencyKey === key)
+        const deleteModel = record?.embeddingModel ?? modelId
+        await this.adapter.delete(deleteModel, { sourceId: source.id, tenantId, idempotencyKey: key })
         await this.adapter.hashStore.delete(buildHashStoreKey(tenantId, source.id, key))
         result.pruned++
       }

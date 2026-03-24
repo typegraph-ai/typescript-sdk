@@ -7,7 +7,7 @@ export class PgHashStore implements HashStoreAdapter {
   ) {}
 
   async initialize(): Promise<void> {
-    // Tables created via migrations.ts INIT_SQL
+    // Tables created via migrations.ts HASH_TABLE_SQL
   }
 
   async get(key: string): Promise<HashRecord | null> {
@@ -17,6 +17,7 @@ export class PgHashStore implements HashStoreAdapter {
 
   async set(key: string, record: HashRecord): Promise<void> {
     // TODO: INSERT ... ON CONFLICT (store_key) DO UPDATE
+    // Must include embedding_model column
     throw new Error('Not implemented')
   }
 

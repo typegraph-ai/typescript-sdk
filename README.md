@@ -9,6 +9,7 @@
 <p align="center">
   <a href="#quick-start">Quick Start</a> &nbsp;&bull;&nbsp;
   <a href="#how-it-works">How It Works</a> &nbsp;&bull;&nbsp;
+  <a href="#embedding-providers">Embedding</a> &nbsp;&bull;&nbsp;
   <a href="#packages">Packages</a> &nbsp;&bull;&nbsp;
   <a href="#api-overview">API</a> &nbsp;&bull;&nbsp;
   <a href="#contributing">Contributing</a>
@@ -22,7 +23,7 @@
 
 ---
 
-**d8um** (pronounced "datum") is a TypeScript SDK and open protocol for supplying context to LLMs. Define your data sources once — docs, wikis, APIs, databases — and query all of them with a single call. d8um handles chunking, embedding, storage, retrieval, score merging, and prompt assembly so you can focus on building your application.
+**d8um** (pronounced "datum") is a TypeScript SDK and open protocol for supplying context to LLMs. Define your data sources once - websites, documents, integrations, APIs, databases - and query all of them with a single call. d8um handles chunking, embedding, storage, retrieval, score merging, and prompt assembly so you can focus on building your application.
 
 ```ts
 const { results } = await ctx.query('how do I configure SSO?', { topK: 8 })
@@ -31,11 +32,13 @@ const context = ctx.assemble(results, { format: 'xml', maxTokens: 4000 })
 
 ## Why d8um?
 
-Most RAG setups devolve into bespoke plumbing — a different retrieval path for each data source, ad-hoc score normalization, and fragile prompt formatting. d8um replaces that with a single, composable interface.
+Most RAG setups devolve into bespoke plumbing - a different retrieval path for each data source, ad-hoc score normalization, and fragile prompt formatting. d8um replaces that with a single, composable interface.
 
 | | Frameworks (LangChain, LlamaIndex) | **d8um** |
 |---|---|---|
 | **Philosophy** | Build *inside* the framework | Compose *alongside* your stack |
+| **Embeddings** | Baked-in provider wrappers | [Vercel AI SDK](https://ai-sdk.dev) ecosystem — 40+ providers, zero lock-in |
+| **Multi-model** | One model for everything | Per-source embedding models, merged at query time |
 | **Data sources** | Per-source wiring | Unified `Connector` interface |
 | **Retrieval** | Manual per-source | Fan-out + merge + re-rank in one call |
 | **Storage** | Tightly coupled | Swappable adapters (Postgres, SQLite, ...) |
@@ -48,33 +51,46 @@ d8um organizes every data source into one of three modes:
 | Mode | Behavior | Best for |
 |------|----------|----------|
 | **`indexed`** | Content is chunked, embedded, and stored. Semantic search runs against the vector store. | Docs, wikis, knowledge bases |
-| **`live`** | Fetched at query time. Never stored — always fresh. | APIs, search engines, real-time data |
+| **`live`** | Fetched at query time. Never stored - always fresh. | APIs, search engines, real-time data |
 | **`cached`** | Fetched once, stored until a TTL expires, then re-fetched. | Slowly-changing reference data |
 
 A single `ctx.query()` call fans out across all three modes in parallel, normalizes scores, merges results via [Reciprocal Rank Fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf), and returns a unified ranked result set.
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   indexed   │     │    live      │     │   cached     │
-│  (vector +  │     │  (connector  │     │  (TTL-based  │
-│   keyword)  │     │   .query())  │     │   refresh)   │
-└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
-       │                   │                   │
-       └───────────┬───────┴───────────────────┘
-                   ▼
-          ┌────────────────┐
-          │  Score Merger   │
-          │  (normalize +   │
-          │   RRF + dedup)  │
-          └────────┬───────┘
-                   ▼
-          ┌────────────────┐
-          │   assemble()   │
-          │  (xml/md/plain) │
-          └────────────────┘
-                   ▼
-            Prompt-ready
-              context
+                        ctx.query("how do I configure SSO?")
+                                      │
+                     ┌────────────────┼────────────────┐
+                     ▼                ▼                ▼
+              ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+              │   indexed   │  │    live      │  │   cached     │
+              │  (vector +  │  │  (connector  │  │  (TTL-based  │
+              │   keyword)  │  │   .query())  │  │   refresh)   │
+              └──────┬──────┘  └──────┬──────┘  └──────┬──────┘
+                     │                │                │
+      ┌──────────────┤                │                │
+      ▼              ▼                │                │
+ ┌─────────┐   ┌─────────┐           │                │
+ │ Model A  │   │ Model B  │           │                │
+ │ (OpenAI) │   │ (Cohere) │           │                │
+ │ embed +  │   │ embed +  │           │                │
+ │ search   │   │ search   │           │                │
+ └────┬─────┘   └────┬─────┘           │                │
+      │              │                 │                │
+      └──────┬───────┴─────────────────┴────────────────┘
+             ▼
+    ┌────────────────┐
+    │  Score Merger   │
+    │  (normalize +   │
+    │   RRF + dedup)  │
+    └────────┬───────┘
+             ▼
+    ┌────────────────┐
+    │   assemble()   │
+    │  (xml/md/plain) │
+    └────────────────┘
+             ▼
+       Prompt-ready
+         context
 ```
 
 ## Quick Start
@@ -85,9 +101,15 @@ A single `ctx.query()` call fans out across all three modes in parallel, normali
 # Core SDK
 npm install @d8um/core
 
-# Pick an adapter
-npm install @d8um/adapter-pgvector    # Production — Postgres + pgvector
-npm install @d8um/adapter-sqlite-vec  # Local dev — zero external dependencies
+# Pick an embedding provider (any AI SDK provider works)
+npm install @ai-sdk/openai           # OpenAI
+npm install @ai-sdk/anthropic        # Anthropic
+npm install @ai-sdk/cohere           # Cohere
+# ... or any of 40+ AI SDK providers
+
+# Pick a vector store adapter
+npm install @d8um/adapter-pgvector    # Production - Postgres + pgvector
+npm install @d8um/adapter-sqlite-vec  # Local dev - zero external dependencies
 
 # Pick connectors
 npm install @d8um/connector-url       # Crawl URLs and sitemaps
@@ -101,10 +123,14 @@ import { D8um } from '@d8um/core'
 import { PgVectorAdapter } from '@d8um/adapter-pgvector'
 import { UrlConnector } from '@d8um/connector-url'
 import { NotionConnector } from '@d8um/connector-notion'
+import { openai } from '@ai-sdk/openai'
 
-// 1. Create a d8um instance
+// 1. Create a d8um instance with an AI SDK embedding model
 const ctx = new D8um({
-  embedding: { provider: 'openai', apiKey: process.env.OPENAI_API_KEY! },
+  embedding: {
+    model: openai.embedding('text-embedding-3-small'),
+    dimensions: 1536,
+  },
   vectorStore: new PgVectorAdapter({
     connectionString: process.env.DATABASE_URL!,
   }),
@@ -142,7 +168,7 @@ ctx.addSource({
 await ctx.index('docs', { mode: 'upsert' })
 await ctx.index('wiki', { mode: 'upsert', pruneDeleted: true })
 
-// 4. Query — fans out across all sources, merges, re-ranks
+// 4. Query - fans out across all sources, merges, re-ranks
 const { results } = await ctx.query('how do I configure SSO?', { topK: 8 })
 
 // 5. Get prompt-ready context
@@ -182,10 +208,10 @@ const context = ctx.assemble(results, {
 |--------|-------------|
 | `new D8um(config)` | Create an instance with a vector store adapter and embedding provider |
 | `.addSource(source)` | Register a data source (indexed, live, or cached) |
-| `.index(sourceId?, opts?)` | Index one or all indexed sources — idempotent, incremental by default |
+| `.index(sourceId?, opts?)` | Index one or all indexed sources - idempotent, incremental by default |
 | `.query(text, opts?)` | Fan-out query across all sources, merge, and rank |
 | `.assemble(results, opts?)` | Format results for prompt injection (`xml`, `markdown`, `plain`, or custom) |
-| `.initialize()` | Initialize the vector store (idempotent — safe to call on every cold start) |
+| `.initialize()` | Initialize the vector store (idempotent - safe to call on every cold start) |
 | `.destroy()` | Clean up connections |
 
 ### Indexing Options
@@ -218,8 +244,8 @@ const response = await ctx.query('search text', {
 | Package | Description | Status |
 |---------|-------------|--------|
 | [`@d8um/core`](packages/core) | Query engine, index engine, types, embedding providers | Alpha |
-| [`@d8um/adapter-pgvector`](packages/adapters/pgvector) | PostgreSQL + pgvector — production-ready vector store | Alpha |
-| [`@d8um/adapter-sqlite-vec`](packages/adapters/sqlite-vec) | SQLite + sqlite-vec — zero-infra local development | Alpha |
+| [`@d8um/adapter-pgvector`](packages/adapters/pgvector) | PostgreSQL + pgvector - production-ready vector store | Alpha |
+| [`@d8um/adapter-sqlite-vec`](packages/adapters/sqlite-vec) | SQLite + sqlite-vec - zero-infra local development | Alpha |
 | [`@d8um/connector-url`](packages/connectors/url) | Crawl URLs and sitemaps, strip HTML to clean text | Alpha |
 | [`@d8um/connector-notion`](packages/connectors/notion) | Sync Notion pages and databases with block-aware chunking | Alpha |
 
@@ -228,7 +254,7 @@ const response = await ctx.query('search text', {
 d8um is designed to be extended. Implement the `Connector` interface to add any data source, or the `VectorStoreAdapter` interface to bring your own storage.
 
 ```ts
-// Custom connector — just implement fetch()
+// Custom connector - just implement fetch()
 const myConnector: Connector = {
   async *fetch() {
     for (const item of await getMyData()) {
@@ -255,24 +281,109 @@ ctx.addSource({
 
 ```
 @d8um/core
-├── D8um              Main orchestrator
-├── IndexEngine       Chunk, embed, store with idempotency
-├── QueryPlanner      Fan-out, timeout, error handling
-├── ScoreMerger       Normalize + RRF + dedup across modes
-├── assemble()        Format results for prompt injection
-└── types/            Full TypeScript type system
+├── D8um                Main orchestrator, per-source embedding resolution
+├── embedding/
+│   ├── provider.ts     EmbeddingProvider interface
+│   └── ai-sdk-adapter  Wraps any AI SDK model via structural typing (zero deps)
+├── IndexEngine         Chunk, embed, store — model-aware, idempotent
+├── QueryPlanner        Multi-model fan-out, timeout, error handling
+├── ScoreMerger         Normalize + RRF + dedup across modes and models
+├── assemble()          Format results for prompt injection
+└── types/              Full TypeScript type system
 
-@d8um/adapter-*       Swappable vector store backends
-@d8um/connector-*     Pluggable data source integrations
+@d8um/adapter-*         Swappable vector store backends (per-model table isolation)
+@d8um/connector-*       Pluggable data source integrations
 ```
 
 **Key design decisions:**
 
-- **Idempotent indexing** — Content is hashed. Unchanged documents are skipped. Partial failures are recoverable.
-- **Atomic writes** — All chunks for a document are written in a single operation. No partial states.
-- **Multi-tenant** — Every operation accepts an optional `tenantId` for data isolation.
-- **Hybrid search** — pgvector adapter supports both semantic (HNSW) and keyword (tsvector) search with RRF fusion.
-- **Connector-owned chunking** — Connectors can override the default token-count chunker with structure-aware splitting (e.g., Notion chunks by block hierarchy).
+- **AI SDK native** - Embedding providers use the [Vercel AI SDK](https://ai-sdk.dev) ecosystem. Any of 40+ providers work out of the box.
+- **Per-source embedding models** - Each source can use a different embedding model. d8um manages separate vector tables per model and merges results at query time.
+- **Idempotent indexing** - Content is hashed. Unchanged documents are skipped. Partial failures are recoverable. Model changes are detected and trigger re-embedding.
+- **Atomic writes** - All chunks for a document are written in a single operation. No partial states.
+- **Multi-tenant** - Every operation accepts an optional `tenantId` for data isolation.
+- **Hybrid search** - pgvector adapter supports both semantic (HNSW) and keyword (tsvector) search with RRF fusion.
+- **Connector-owned chunking** - Connectors can override the default token-count chunker with structure-aware splitting (e.g., Notion chunks by block hierarchy).
+
+## Embedding Providers
+
+d8um uses the [Vercel AI SDK](https://ai-sdk.dev) provider ecosystem for embeddings. Install the provider package you need, pass the model — done. No wrapper code, no API key plumbing, no HTTP client to maintain.
+
+> **Zero new dependencies.** `@d8um/core` doesn't import `@ai-sdk/provider` or any provider package. It uses [structural typing](https://www.typescriptlang.org/docs/handbook/type-compatibility.html) — any object that looks like an AI SDK embedding model works, whether it comes from `@ai-sdk/openai`, a custom implementation, or a test mock.
+
+### Global default + per-source overrides
+
+Set a default embedding model on the `D8um` instance, then optionally override it on any source:
+
+```ts
+import { openai } from '@ai-sdk/openai'
+import { cohere } from '@ai-sdk/cohere'
+
+const ctx = new D8um({
+  // Global default - used for all sources unless overridden
+  embedding: {
+    model: openai.embedding('text-embedding-3-small'),
+    dimensions: 1536,
+  },
+  vectorStore: adapter,
+})
+
+// Uses the global default (OpenAI, 1536 dims)
+ctx.addSource({
+  id: 'docs',
+  connector: docsConnector,
+  mode: 'indexed',
+  index: { chunkSize: 512, chunkOverlap: 64, idempotencyKey: ['url'] },
+})
+
+// Overrides with Cohere (1024 dims) - gets its own vector table automatically
+ctx.addSource({
+  id: 'wiki',
+  connector: wikiConnector,
+  mode: 'indexed',
+  index: { chunkSize: 512, chunkOverlap: 64, idempotencyKey: ['metadata.pageId'] },
+  embedding: {
+    model: cohere.embedding('embed-english-v3.0'),
+    dimensions: 1024,
+  },
+})
+```
+
+### What happens at query time
+
+When you call `ctx.query()`, d8um:
+
+1. Groups sources by their embedding model
+2. Embeds the query text **once per distinct model** (not once per source)
+3. Searches each model's dedicated vector table
+4. Merges all results via RRF across models and modes
+
+You don't think about which model applies to which source — d8um handles the fan-out and merge.
+
+### Per-model table isolation
+
+Each embedding model gets its own vector table (e.g., `d8um_chunks_openai_text_embedding_3_small`, `d8um_chunks_cohere_embed_english_v3_0`). This means:
+
+- No dimension conflicts — each table has the correct `VECTOR(n)` column
+- Clean HNSW indexes per model — no mixed vector spaces
+- Safe model migration — switching a source's model triggers automatic re-embedding, with old chunks cleaned up
+- Works identically across all adapters (pgvector, sqlite-vec, etc.)
+
+### Custom embedding providers
+
+For full control, pass a raw `EmbeddingProvider` object — no AI SDK required:
+
+```ts
+const ctx = new D8um({
+  embedding: {
+    model: 'custom/my-model',
+    dimensions: 768,
+    async embed(text) { /* your logic */ },
+    async embedBatch(texts) { /* your logic */ },
+  },
+  vectorStore: adapter,
+})
+```
 
 ## Development
 
@@ -294,10 +405,12 @@ The repo uses [Turborepo](https://turbo.build) for build orchestration and [pnpm
 
 ## Roadmap
 
+- [x] AI SDK embedding provider integration (40+ providers)
+- [x] Per-source embedding model support with automatic multi-model query fan-out
+- [x] Per-model vector table isolation
 - [ ] Query runners (indexed, live, cached) and QueryPlanner implementation
 - [ ] Full pgvector adapter with hybrid search (iterative HNSW + tsvector RRF)
 - [ ] SQLite-vec adapter implementation
-- [ ] OpenAI and Cohere embedding API integrations
 - [ ] URL connector with sitemap expansion and HTML stripping
 - [ ] Notion connector with block tree traversal
 - [ ] Neighbor chunk joining in `assemble()`
@@ -308,7 +421,7 @@ The repo uses [Turborepo](https://turbo.build) for build orchestration and [pnpm
 
 ## Contributing
 
-d8um is open source and contributions are welcome. Whether it's a new connector, adapter, bug fix, or documentation improvement — we'd love your help.
+d8um is open source and contributions are welcome. Whether it's a new connector, adapter, bug fix, or documentation improvement - we'd love your help.
 
 1. Fork the repo
 2. Create a feature branch (`git checkout -b feat/my-connector`)

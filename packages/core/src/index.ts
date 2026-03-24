@@ -1,6 +1,8 @@
 // Main public API
-export { D8um } from './d8um.js'
-export type { D8umConfig, EmbeddingProviderConfig } from './d8um.js'
+export { D8um, resolveEmbeddingProvider } from './d8um.js'
+export type { D8umConfig } from './d8um.js'
+/** @deprecated Use AI SDK providers instead. */
+export type { EmbeddingProviderConfig } from './d8um.js'
 
 // Types
 export type {
@@ -12,6 +14,7 @@ export type {
   IndexConfig,
   CacheConfig,
   D8umSource,
+  EmbeddingInput,
   EmbeddedChunk,
   ChunkFilter,
   ScoredChunk,
@@ -32,9 +35,12 @@ export { IndexError } from './types/index.js'
 
 // Embedding
 export type { EmbeddingProvider } from './embedding/index.js'
+export { aiSdkEmbeddingProvider, isAISDKEmbeddingInput } from './embedding/index.js'
+export type { AISDKEmbeddingModel, AISDKEmbeddingInput } from './embedding/index.js'
+/** @deprecated Use AI SDK providers instead. */
 export { OpenAIEmbedding, CohereEmbedding } from './embedding/index.js'
-export type { OpenAIEmbeddingConfig } from './embedding/index.js'
-export type { CohereEmbeddingConfig } from './embedding/index.js'
+/** @deprecated Use AI SDK providers instead. */
+export type { OpenAIEmbeddingConfig, CohereEmbeddingConfig } from './embedding/index.js'
 
 // Index engine
 export { IndexEngine, defaultChunker, sha256 } from './index-engine/index.js'

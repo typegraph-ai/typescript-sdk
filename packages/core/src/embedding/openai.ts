@@ -1,11 +1,13 @@
 import type { EmbeddingProvider } from './provider.js'
 
+/** @deprecated Use `@ai-sdk/openai` with `aiSdkEmbeddingProvider()` instead. */
 export interface OpenAIEmbeddingConfig {
   apiKey: string
   model?: string | undefined
   dimensions?: number | undefined
 }
 
+/** @deprecated Use `@ai-sdk/openai` with `aiSdkEmbeddingProvider()` instead. */
 export class OpenAIEmbedding implements EmbeddingProvider {
   readonly dimensions: number
   readonly model: string

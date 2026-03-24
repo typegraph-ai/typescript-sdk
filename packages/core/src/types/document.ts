@@ -6,6 +6,7 @@ export interface EmbeddedChunk {
 
   content: string
   embedding: number[]
+  embeddingModel: string
   chunkIndex: number
   totalChunks: number
 

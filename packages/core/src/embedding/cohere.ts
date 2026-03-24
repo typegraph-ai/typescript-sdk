@@ -1,11 +1,13 @@
 import type { EmbeddingProvider } from './provider.js'
 
+/** @deprecated Use `@ai-sdk/cohere` with `aiSdkEmbeddingProvider()` instead. */
 export interface CohereEmbeddingConfig {
   apiKey: string
   model?: string | undefined
   dimensions?: number | undefined
 }
 
+/** @deprecated Use `@ai-sdk/cohere` with `aiSdkEmbeddingProvider()` instead. */
 export class CohereEmbedding implements EmbeddingProvider {
   readonly dimensions: number
   readonly model: string
