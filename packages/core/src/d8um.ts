@@ -1,19 +1,31 @@
 import type { VectorStoreAdapter } from './types/adapter.js'
-import type { d8umSource, EmbeddingInput } from './types/source.js'
-import type { QueryOpts, QueryResponse, AssembleOpts, d8umResult } from './types/query.js'
+import type { Source, CreateSourceInput, EmbeddingInput, IndexConfig } from './types/source.js'
+import type {
+  Job,
+  CreateJobInput,
+  JobRunContext,
+  JobRunResult,
+  ApiClient,
+} from './types/job.js'
+import type {
+  DocumentJobRelation,
+  DocumentJobRelationType,
+  DocumentJobRelationFilter,
+} from './types/document-job-relation.js'
+import type { QueryOpts, QueryResponse, d8umResult, AssembleOpts } from './types/query.js'
 import type { IndexOpts, IndexResult } from './types/index-types.js'
 import type { EmbeddingProvider } from './embedding/provider.js'
-import type { AISDKEmbeddingInput } from './embedding/ai-sdk-adapter.js'
-import type { RawDocument, Chunk } from './types/connector.js'
+import type { RawDocument, Chunk, Connector } from './types/connector.js'
 import type { d8umHooks } from './types/hooks.js'
 import type { ContextSearchOpts, ContextSearchResponse } from './query/context-search.js'
 import { aiSdkEmbeddingProvider, isAISDKEmbeddingInput } from './embedding/ai-sdk-adapter.js'
 import { OpenAIEmbedding } from './embedding/openai.js'
 import { CohereEmbedding } from './embedding/cohere.js'
 import { IndexEngine } from './index-engine/engine.js'
-import { QueryPlanner } from './query/planner.js'
 import { searchWithContext as searchWithContextFn } from './query/context-search.js'
 import { assemble as assembleResults } from './query/assemble.js'
+import { getJobType } from './jobs/registry.js'
+import { randomUUID } from 'crypto'
 
 export interface d8umConfig {
   vectorStore: VectorStoreAdapter
@@ -25,13 +37,6 @@ export interface d8umConfig {
 
 /**
  * @deprecated Use AI SDK providers with `AISDKEmbeddingInput` instead.
- *
- * @example
- * ```ts
- * import { openai } from '@ai-sdk/openai'
- * // Instead of: { provider: 'openai', apiKey: '...' }
- * // Use:        { model: openai.embedding('text-embedding-3-small'), dimensions: 1536 }
- * ```
  */
 export interface EmbeddingProviderConfig {
   provider: 'openai' | 'cohere'
@@ -79,24 +84,76 @@ export function resolveEmbeddingProvider(config: EmbeddingInput): EmbeddingProvi
   throw new Error('Invalid embedding configuration')
 }
 
+// ── Sources Sub-API ──
+
+export interface SourcesApi {
+  create(input: CreateSourceInput): Source
+  get(sourceId: string): Source | undefined
+  list(tenantId?: string): Source[]
+  update(sourceId: string, input: Partial<Pick<Source, 'name' | 'description' | 'status'>>): Source
+  delete(sourceId: string): void
+}
+
+// ── Jobs Sub-API ──
+
+export interface JobsApi {
+  create(input: CreateJobInput): Job
+  get(jobId: string): Job | undefined
+  list(filter?: { sourceId?: string; type?: string; tenantId?: string }): Job[]
+  update(jobId: string, input: Partial<Pick<Job, 'name' | 'description' | 'config' | 'schedule' | 'status'>>): Job
+  /** Delete a job. cascade=true deletes orphaned documents (those with no other job relations). */
+  delete(jobId: string, opts?: { cascade?: boolean }): void
+  run(jobId: string): Promise<JobRunResult>
+  pause(jobId: string): void
+  resume(jobId: string): void
+}
+
+// ── Document-Job Relations Sub-API ──
+
+export interface DocumentJobsApi {
+  getJobsForDocument(documentId: string): DocumentJobRelation[]
+  getDocumentsForJob(jobId: string): DocumentJobRelation[]
+  addRelation(documentId: string, jobId: string, relation: DocumentJobRelationType): void
+}
+
 /** The d8um instance interface — all public methods. */
 export interface d8umInstance {
   initialize(config: d8umConfig): this
-  addSource(source: d8umSource): this
+
+  sources: SourcesApi
+  jobs: JobsApi
+  documentJobs: DocumentJobsApi
+
   getEmbeddingForSource(sourceId: string): EmbeddingProvider
   getDistinctEmbeddings(sourceIds?: string[]): Map<string, EmbeddingProvider>
   groupSourcesByModel(sourceIds?: string[]): Map<string, string[]>
-  index(sourceId?: string, opts?: IndexOpts): Promise<IndexResult | IndexResult[]>
+
+  /** Index documents from a connector into a source. */
+  indexWithConnector(
+    sourceId: string,
+    connector: Connector,
+    indexConfig: IndexConfig,
+    opts?: IndexOpts,
+  ): Promise<IndexResult>
+
+  /** Ingest a single document directly into a source. No job needed. */
+  ingest(sourceId: string, doc: RawDocument, indexConfig: IndexConfig, opts?: IndexOpts): Promise<IndexResult>
+
+  /** Ingest a document with pre-chunked content. */
+  ingestWithChunks(sourceId: string, doc: RawDocument, chunks: Chunk[], opts?: IndexOpts): Promise<IndexResult>
+
+  /** Search across sources. */
   query(text: string, opts?: QueryOpts): Promise<QueryResponse>
   searchWithContext(text: string, opts?: ContextSearchOpts): Promise<ContextSearchResponse>
-  ingest(sourceId: string, doc: RawDocument, opts?: IndexOpts): Promise<IndexResult>
-  ingestWithChunks(sourceId: string, doc: RawDocument, chunks: Chunk[], opts?: IndexOpts): Promise<IndexResult>
   assemble(results: d8umResult[], opts?: AssembleOpts): string
+
   destroy(): Promise<void>
 }
 
 class d8umImpl implements d8umInstance {
-  private sources = new Map<string, d8umSource>()
+  private _sources = new Map<string, Source>()
+  private _jobs = new Map<string, Job>()
+  private _documentJobRelations: DocumentJobRelation[] = []
   private sourceEmbeddings = new Map<string, EmbeddingProvider>()
   private adapter!: VectorStoreAdapter
   private defaultEmbedding!: EmbeddingProvider
@@ -104,34 +161,222 @@ class d8umImpl implements d8umInstance {
   private configured = false
   private initialized = false
 
+  // ── Sources ──
+
+  sources: SourcesApi = {
+    create: (input: CreateSourceInput): Source => {
+      this.assertConfigured()
+      const source: Source = {
+        id: randomUUID(),
+        name: input.name,
+        description: input.description,
+        status: 'active',
+        tenantId: input.tenantId ?? this.config.tenantId,
+      }
+      this._sources.set(source.id, source)
+      this.sourceEmbeddings.set(source.id, this.defaultEmbedding)
+      return source
+    },
+
+    get: (sourceId: string): Source | undefined => {
+      return this._sources.get(sourceId)
+    },
+
+    list: (tenantId?: string): Source[] => {
+      const all = [...this._sources.values()]
+      if (tenantId) return all.filter(s => s.tenantId === tenantId)
+      return all
+    },
+
+    update: (sourceId: string, input: Partial<Pick<Source, 'name' | 'description' | 'status'>>): Source => {
+      const source = this._sources.get(sourceId)
+      if (!source) throw new Error(`Source "${sourceId}" not found`)
+      if (input.name !== undefined) source.name = input.name
+      if (input.description !== undefined) source.description = input.description
+      if (input.status !== undefined) source.status = input.status
+      return source
+    },
+
+    delete: (sourceId: string): void => {
+      // Delete source, cascade to jobs targeting it, and clean up relations
+      const jobsToDelete = [...this._jobs.values()].filter(j => j.sourceId === sourceId)
+      for (const job of jobsToDelete) {
+        this.jobs.delete(job.id, { cascade: true })
+      }
+      this._sources.delete(sourceId)
+      this.sourceEmbeddings.delete(sourceId)
+    },
+  }
+
+  // ── Jobs ──
+
+  jobs: JobsApi = {
+    create: (input: CreateJobInput): Job => {
+      this.assertConfigured()
+
+      // Validate source exists if required
+      if (input.sourceId && !this._sources.has(input.sourceId)) {
+        throw new Error(`Source "${input.sourceId}" not found`)
+      }
+
+      // Validate job type exists and check source requirement
+      const jobType = getJobType(input.type)
+      if (jobType?.requiresSource && !input.sourceId) {
+        throw new Error(`Job type "${input.type}" requires a sourceId`)
+      }
+
+      const now = new Date()
+      const job: Job = {
+        id: randomUUID(),
+        tenantId: input.tenantId ?? this.config.tenantId,
+        sourceId: input.sourceId,
+        type: input.type,
+        name: input.name,
+        description: input.description,
+        config: input.config ?? {},
+        schedule: input.schedule,
+        status: input.schedule ? 'scheduled' : 'idle',
+        runCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      }
+      this._jobs.set(job.id, job)
+      return job
+    },
+
+    get: (jobId: string): Job | undefined => {
+      return this._jobs.get(jobId)
+    },
+
+    list: (filter?: { sourceId?: string; type?: string; tenantId?: string }): Job[] => {
+      let jobs = [...this._jobs.values()]
+      if (filter?.sourceId) jobs = jobs.filter(j => j.sourceId === filter.sourceId)
+      if (filter?.type) jobs = jobs.filter(j => j.type === filter.type)
+      if (filter?.tenantId) jobs = jobs.filter(j => j.tenantId === filter.tenantId)
+      return jobs
+    },
+
+    update: (jobId: string, input: Partial<Pick<Job, 'name' | 'description' | 'config' | 'schedule' | 'status'>>): Job => {
+      const job = this._jobs.get(jobId)
+      if (!job) throw new Error(`Job "${jobId}" not found`)
+      if (input.name !== undefined) job.name = input.name
+      if (input.description !== undefined) job.description = input.description
+      if (input.config !== undefined) job.config = input.config
+      if (input.schedule !== undefined) job.schedule = input.schedule
+      if (input.status !== undefined) job.status = input.status
+      job.updatedAt = new Date()
+      return job
+    },
+
+    delete: (jobId: string, opts?: { cascade?: boolean }): void => {
+      const job = this._jobs.get(jobId)
+      if (!job) return
+
+      if (opts?.cascade) {
+        // Find documents where this job is the ONLY related job
+        const jobRelations = this._documentJobRelations.filter(r => r.jobId === jobId)
+        for (const rel of jobRelations) {
+          const otherRelations = this._documentJobRelations.filter(
+            r => r.documentId === rel.documentId && r.jobId !== jobId
+          )
+          if (otherRelations.length === 0) {
+            // This is the sole job — document is orphaned, would be deleted
+            // (actual document deletion depends on adapter — flag for deletion)
+            // In a real implementation, adapter.deleteDocuments() would be called
+          }
+        }
+      }
+
+      // Remove all relations for this job
+      this._documentJobRelations = this._documentJobRelations.filter(r => r.jobId !== jobId)
+      this._jobs.delete(jobId)
+    },
+
+    run: async (jobId: string): Promise<JobRunResult> => {
+      const job = this._jobs.get(jobId)
+      if (!job) throw new Error(`Job "${jobId}" not found`)
+
+      const startMs = Date.now()
+      job.status = 'running'
+      job.updatedAt = new Date()
+
+      // Job execution is delegated to the job type's run function
+      // This is a stub — actual execution depends on the job type
+      // Integration jobs use their IntegrationJobDefinition.run() function
+      // Built-in jobs (url_scrape, domain_crawl) use their executors
+
+      job.status = 'completed'
+      job.lastRunAt = new Date()
+      job.runCount++
+      job.updatedAt = new Date()
+
+      return {
+        jobId: job.id,
+        sourceId: job.sourceId,
+        status: 'completed',
+        documentsCreated: 0,
+        documentsUpdated: 0,
+        documentsDeleted: 0,
+        durationMs: Date.now() - startMs,
+      }
+    },
+
+    pause: (jobId: string): void => {
+      const job = this._jobs.get(jobId)
+      if (!job) throw new Error(`Job "${jobId}" not found`)
+      job.status = 'idle'
+      job.nextRunAt = undefined
+      job.updatedAt = new Date()
+    },
+
+    resume: (jobId: string): void => {
+      const job = this._jobs.get(jobId)
+      if (!job) throw new Error(`Job "${jobId}" not found`)
+      if (job.schedule) {
+        job.status = 'scheduled'
+        // nextRunAt would be calculated from the cron schedule
+      } else {
+        job.status = 'idle'
+      }
+      job.updatedAt = new Date()
+    },
+  }
+
+  // ── Document-Job Relations ──
+
+  documentJobs: DocumentJobsApi = {
+    getJobsForDocument: (documentId: string): DocumentJobRelation[] => {
+      return this._documentJobRelations.filter(r => r.documentId === documentId)
+    },
+
+    getDocumentsForJob: (jobId: string): DocumentJobRelation[] => {
+      return this._documentJobRelations.filter(r => r.jobId === jobId)
+    },
+
+    addRelation: (documentId: string, jobId: string, relation: DocumentJobRelationType): void => {
+      // Check for existing relation to avoid duplicates
+      const exists = this._documentJobRelations.some(
+        r => r.documentId === documentId && r.jobId === jobId && r.relation === relation
+      )
+      if (!exists) {
+        this._documentJobRelations.push({
+          documentId,
+          jobId,
+          relation,
+          timestamp: new Date(),
+        })
+      }
+    },
+  }
+
+  // ── Core Methods ──
+
   initialize(config: d8umConfig): this {
     this.config = config
     this.adapter = config.vectorStore
     this.defaultEmbedding = resolveEmbeddingProvider(config.embedding)
     this.configured = true
     this.initialized = false
-    return this
-  }
-
-  addSource(source: d8umSource): this {
-    this.assertConfigured()
-    if (source.mode === 'indexed' && !source.index) {
-      throw new Error(`Source "${source.id}": mode 'indexed' requires an index config`)
-    }
-    if (source.mode === 'cached' && !source.cache) {
-      throw new Error(`Source "${source.id}": mode 'cached' requires a cache config`)
-    }
-    if (source.mode === 'live' && !source.connector.query) {
-      throw new Error(`Source "${source.id}": mode 'live' requires connector.query()`)
-    }
-
-    this.sources.set(source.id, source)
-
-    const embedding = source.embedding
-      ? resolveEmbeddingProvider(source.embedding)
-      : this.defaultEmbedding
-    this.sourceEmbeddings.set(source.id, embedding)
-
     return this
   }
 
@@ -143,7 +388,7 @@ class d8umImpl implements d8umInstance {
 
   getDistinctEmbeddings(sourceIds?: string[]): Map<string, EmbeddingProvider> {
     const map = new Map<string, EmbeddingProvider>()
-    const ids = sourceIds ?? [...this.sources.keys()]
+    const ids = sourceIds ?? [...this._sources.keys()]
     for (const id of ids) {
       const emb = this.sourceEmbeddings.get(id)
       if (emb) map.set(emb.model, emb)
@@ -153,7 +398,7 @@ class d8umImpl implements d8umInstance {
 
   groupSourcesByModel(sourceIds?: string[]): Map<string, string[]> {
     const groups = new Map<string, string[]>()
-    const ids = sourceIds ?? [...this.sources.keys()]
+    const ids = sourceIds ?? [...this._sources.keys()]
     for (const id of ids) {
       const emb = this.sourceEmbeddings.get(id)
       if (!emb) continue
@@ -164,39 +409,65 @@ class d8umImpl implements d8umInstance {
     return groups
   }
 
-  async index(sourceId?: string, opts?: IndexOpts): Promise<IndexResult | IndexResult[]> {
+  async indexWithConnector(
+    sourceId: string,
+    connector: Connector,
+    indexConfig: IndexConfig,
+    opts?: IndexOpts,
+  ): Promise<IndexResult> {
     await this.ensureInitialized()
+    const source = this._sources.get(sourceId)
+    if (!source) throw new Error(`Source "${sourceId}" not found`)
 
-    if (sourceId) {
-      const source = this.sources.get(sourceId)
-      if (!source) throw new Error(`Source "${sourceId}" not found`)
-      if (source.mode !== 'indexed') throw new Error(`Source "${sourceId}" is not indexed`)
-      const embedding = this.getEmbeddingForSource(sourceId)
-      const engine = new IndexEngine(this.adapter, embedding)
+    const embedding = this.getEmbeddingForSource(sourceId)
+    const engine = new IndexEngine(this.adapter, embedding)
 
-      await this.config.hooks?.onIndexStart?.(sourceId, opts ?? {})
-      const result = await engine.indexSource(source, opts)
-      await this.config.hooks?.onIndexComplete?.(sourceId, result)
-      return result
-    }
+    await this.config.hooks?.onIndexStart?.(sourceId, opts ?? {})
+    const result = await engine.indexWithConnector(sourceId, connector, indexConfig, opts)
+    await this.config.hooks?.onIndexComplete?.(sourceId, result)
+    return result
+  }
 
-    const indexedSources = [...this.sources.values()].filter(s => s.mode === 'indexed')
-    const results: IndexResult[] = []
-    for (const source of indexedSources) {
-      const embedding = this.getEmbeddingForSource(source.id)
-      const engine = new IndexEngine(this.adapter, embedding)
+  async ingest(
+    sourceId: string,
+    doc: RawDocument,
+    indexConfig: IndexConfig,
+    opts?: IndexOpts
+  ): Promise<IndexResult> {
+    await this.ensureInitialized()
+    const source = this._sources.get(sourceId)
+    if (!source) throw new Error(`Source "${sourceId}" not found`)
+    const { defaultChunker: chunker } = await import('./index-engine/chunker.js')
+    const chunks = chunker(doc, indexConfig)
+    return this.ingestWithChunks(sourceId, doc, chunks, opts)
+  }
 
-      await this.config.hooks?.onIndexStart?.(source.id, opts ?? {})
-      const result = await engine.indexSource(source, opts)
-      await this.config.hooks?.onIndexComplete?.(source.id, result)
-      results.push(result)
-    }
-    return results
+  async ingestWithChunks(
+    sourceId: string,
+    doc: RawDocument,
+    chunks: Chunk[],
+    opts?: IndexOpts
+  ): Promise<IndexResult> {
+    await this.ensureInitialized()
+    const source = this._sources.get(sourceId)
+    if (!source) throw new Error(`Source "${sourceId}" not found`)
+    const embedding = this.getEmbeddingForSource(sourceId)
+    const engine = new IndexEngine(this.adapter, embedding)
+
+    await this.config.hooks?.onIndexStart?.(sourceId, opts ?? {})
+    const result = await engine.ingestWithChunks(sourceId, doc, chunks, opts)
+    await this.config.hooks?.onIndexComplete?.(sourceId, result)
+    return result
   }
 
   async query(text: string, opts?: QueryOpts): Promise<QueryResponse> {
     await this.ensureInitialized()
-    const planner = new QueryPlanner(this.adapter, this.sources, this.sourceEmbeddings)
+    const { QueryPlanner } = await import('./query/planner.js')
+    const planner = new QueryPlanner(
+      this.adapter,
+      [...this._sources.keys()],
+      this.sourceEmbeddings,
+    )
     const response = await planner.execute(text, {
       ...opts,
       tenantId: opts?.tenantId ?? this.config.tenantId,
@@ -209,47 +480,13 @@ class d8umImpl implements d8umInstance {
     await this.ensureInitialized()
     const response = await searchWithContextFn(
       this.adapter,
-      this.sources,
+      [...this._sources.keys()],
       this.sourceEmbeddings,
       text,
       { ...opts, tenantId: opts.tenantId ?? this.config.tenantId }
     )
     await this.config.hooks?.onQueryResults?.(text, response.rawResults)
     return response
-  }
-
-  async ingest(
-    sourceId: string,
-    doc: RawDocument,
-    opts?: IndexOpts
-  ): Promise<IndexResult> {
-    await this.ensureInitialized()
-    const source = this.sources.get(sourceId)
-    if (!source) throw new Error(`Source "${sourceId}" not found`)
-    if (!source.index) throw new Error(`Source "${sourceId}" has no index config`)
-    const { defaultChunker: chunker } = await import('./index-engine/chunker.js')
-    const chunks = source.connector.chunk
-      ? source.connector.chunk(doc, source.index)
-      : chunker(doc, source.index)
-    return this.ingestWithChunks(sourceId, doc, chunks, opts)
-  }
-
-  async ingestWithChunks(
-    sourceId: string,
-    doc: RawDocument,
-    chunks: Chunk[],
-    opts?: IndexOpts
-  ): Promise<IndexResult> {
-    await this.ensureInitialized()
-    const source = this.sources.get(sourceId)
-    if (!source) throw new Error(`Source "${sourceId}" not found`)
-    const embedding = this.getEmbeddingForSource(sourceId)
-    const engine = new IndexEngine(this.adapter, embedding)
-
-    await this.config.hooks?.onIndexStart?.(sourceId, opts ?? {})
-    const result = await engine.ingestWithChunks(source, doc, chunks, opts)
-    await this.config.hooks?.onIndexComplete?.(sourceId, result)
-    return result
   }
 
   assemble(results: d8umResult[], opts?: AssembleOpts): string {

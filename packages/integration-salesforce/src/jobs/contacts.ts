@@ -1,0 +1,87 @@
+import type { IntegrationJobDefinition } from '@d8um/integration-core'
+import type { RawDocument } from '@d8um/core'
+import type { JobRunContext } from '@d8um/core'
+
+/**
+ * Fetches contacts from a Salesforce instance using SOQL.
+ *
+ * High-level flow:
+ * 1. Build a SOQL SELECT query for Contact fields
+ * 2. Execute the query against the /services/data/v59.0/query endpoint
+ * 3. Parse the query response which contains a records array
+ * 4. Transform each record into a RawDocument via toSalesforceContact mapper
+ * 5. Yield each document
+ * 6. If response.done is false, follow nextRecordsUrl for more pages
+ */
+export const contactsJob: IntegrationJobDefinition = {
+  name: 'contacts',
+  description: 'Fetches contacts from Salesforce',
+  entity: 'SalesforceContact',
+  frequency: 'daily',
+  type: 'full',
+  scopes: ['api'],
+  configSchema: [
+    {
+      key: 'max_records',
+      label: 'Max Records',
+      type: 'number',
+      required: false,
+      placeholder: '10000',
+    },
+    {
+      key: 'custom_where',
+      label: 'Additional WHERE clause',
+      type: 'text',
+      required: false,
+      placeholder: "e.g. Department = 'Sales'",
+    },
+  ],
+
+  async *run(ctx: JobRunContext): AsyncIterable<RawDocument> {
+    // 1. Build SOQL query
+    // const fields = [
+    //   'Id', 'FirstName', 'LastName', 'Email', 'Phone', 'AccountId',
+    //   'Title', 'Department', 'MailingStreet', 'MailingCity', 'MailingState',
+    //   'MailingPostalCode', 'MailingCountry', 'CreatedDate', 'LastModifiedDate'
+    // ].join(', ')
+    //
+    // let soql = `SELECT ${fields} FROM Contact`
+    // if (ctx.job.config.custom_where) {
+    //   soql += ` WHERE ${ctx.job.config.custom_where}`
+    // }
+    // soql += ' ORDER BY LastModifiedDate DESC'
+    // if (ctx.job.config.max_records) {
+    //   soql += ` LIMIT ${ctx.job.config.max_records}`
+    // }
+    //
+    // 2. Execute query with pagination
+    // let queryUrl = `query?q=${encodeURIComponent(soql)}`
+    // let recordCount = 0
+    //
+    // do {
+    //   const response = await ctx.client!.get<SalesforceQueryResponse<SalesforceRawContact>>(
+    //     queryUrl
+    //   )
+    //
+    //   for (const record of response.data.records) {
+    //     const contact = toSalesforceContact(record)
+    //     yield {
+    //       id: `salesforce-contact-${record.Id}`,
+    //       content: [contact.firstName, contact.lastName, contact.title, contact.email].filter(Boolean).join(' - '),
+    //       title: [contact.firstName, contact.lastName].filter(Boolean).join(' '),
+    //       updatedAt: new Date(record.LastModifiedDate),
+    //       metadata: contact,
+    //     }
+    //     recordCount++
+    //   }
+    //
+    //   if (!response.data.done && response.data.nextRecordsUrl) {
+    //     queryUrl = response.data.nextRecordsUrl
+    //   } else {
+    //     break
+    //   }
+    // } while (true)
+
+    throw new Error('SalesforceIntegration contacts job is not yet implemented')
+  },
+}

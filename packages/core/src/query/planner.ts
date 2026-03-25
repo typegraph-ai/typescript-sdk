@@ -1,4 +1,4 @@
-import type { d8umSource } from '../types/source.js'
+import type { Source } from '../types/source.js'
 import type { QueryOpts, QueryResponse, d8umResult } from '../types/query.js'
 import type { VectorStoreAdapter } from '../types/adapter.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
@@ -8,7 +8,7 @@ import { mergeAndRank, type NormalizedResult } from './merger.js'
 export class QueryPlanner {
   constructor(
     private adapter: VectorStoreAdapter,
-    private sources: Map<string, d8umSource>,
+    private sourceIds: string[],
     private sourceEmbeddings: Map<string, EmbeddingProvider>
   ) {}
 
@@ -16,39 +16,27 @@ export class QueryPlanner {
     const startMs = Date.now()
     const count = opts.count ?? 10
     const tenantId = opts.tenantId
-    const warnings: string[] = []
 
     // Filter to requested sources or use all
-    const sourceIds = opts.sources ?? [...this.sources.keys()]
-    const activeSources = sourceIds
-      .map(id => this.sources.get(id))
-      .filter((s): s is d8umSource => s != null)
+    const activeSourceIds = opts.sources
+      ? opts.sources.filter(id => this.sourceIds.includes(id))
+      : this.sourceIds
 
-    // Separate by mode — only indexed supported in this iteration
-    const indexedSources = activeSources.filter(s => s.mode === 'indexed')
-    const liveSources = activeSources.filter(s => s.mode === 'live')
-    const cachedSources = activeSources.filter(s => s.mode === 'cached')
-
-    if (liveSources.length > 0) {
-      warnings.push(`${liveSources.length} live source(s) skipped — live mode not yet supported`)
-    }
-    if (cachedSources.length > 0) {
-      warnings.push(`${cachedSources.length} cached source(s) skipped — cached mode not yet supported`)
-    }
-
-    // Group indexed sources by embedding model
+    // Group sources by embedding model
     const modelGroups = new Map<string, { embedding: EmbeddingProvider; sourceIds: string[] }>()
-    for (const source of indexedSources) {
-      const emb = this.sourceEmbeddings.get(source.id)
+    const warnings: string[] = []
+
+    for (const sourceId of activeSourceIds) {
+      const emb = this.sourceEmbeddings.get(sourceId)
       if (!emb) {
-        warnings.push(`Source "${source.id}" has no embedding provider — skipped`)
+        warnings.push(`Source "${sourceId}" has no embedding provider — skipped`)
         continue
       }
       const existing = modelGroups.get(emb.model)
       if (existing) {
-        existing.sourceIds.push(source.id)
+        existing.sourceIds.push(sourceId)
       } else {
-        modelGroups.set(emb.model, { embedding: emb, sourceIds: [source.id] })
+        modelGroups.set(emb.model, { embedding: emb, sourceIds: [sourceId] })
       }
     }
 
@@ -62,10 +50,9 @@ export class QueryPlanner {
       const results = await runner.run(text, modelGroups, count, tenantId, opts.documentFilter)
       const runnerDuration = Date.now() - runnerStart
 
-      // Record per-source timings
-      for (const source of indexedSources) {
-        const sourceResults = results.filter(r => r.sourceId === source.id)
-        sourceTimings[source.id] = {
+      for (const sourceId of activeSourceIds) {
+        const sourceResults = results.filter(r => r.sourceId === sourceId)
+        sourceTimings[sourceId] = {
           mode: 'indexed',
           resultCount: sourceResults.length,
           durationMs: runnerDuration,
@@ -76,7 +63,7 @@ export class QueryPlanner {
       allResults = results
     }
 
-    // Merge and rank if we have results from multiple model groups
+    // Merge and rank
     const weights = opts.mergeWeights
       ? Object.fromEntries(
           Object.entries(opts.mergeWeights).filter((e): e is [string, number] => e[1] != null)

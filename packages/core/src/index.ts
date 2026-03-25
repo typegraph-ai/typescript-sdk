@@ -1,6 +1,6 @@
 // Main public API
 export { d8um, d8umCreate, resolveEmbeddingProvider } from './d8um.js'
-export type { d8umConfig, d8umInstance } from './d8um.js'
+export type { d8umConfig, d8umInstance, SourcesApi, JobsApi, DocumentJobsApi } from './d8um.js'
 /** @deprecated Use AI SDK providers instead. */
 export type { EmbeddingProviderConfig } from './d8um.js'
 
@@ -10,10 +10,9 @@ export type {
   ChunkOpts,
   Chunk,
   Connector,
-  SyncMode,
+  Source,
+  CreateSourceInput,
   IndexConfig,
-  CacheConfig,
-  d8umSource,
   EmbeddingInput,
   EmbeddedChunk,
   ChunkFilter,
@@ -36,6 +35,19 @@ export type {
   DocumentScope,
   DocumentFilter,
   UpsertDocumentInput,
+  JobCategory,
+  JobStatus,
+  JobTypeDefinition,
+  ConfigField,
+  Job,
+  CreateJobInput,
+  JobRunContext,
+  JobRunResult,
+  ApiClient,
+  ApiResponse,
+  DocumentJobRelationType,
+  DocumentJobRelation,
+  DocumentJobRelationFilter,
   d8umHooks,
 } from './types/index.js'
 export { IndexError } from './types/index.js'
@@ -58,3 +70,13 @@ export { mergeAndRank, minMaxNormalize } from './query/index.js'
 export { searchWithContext } from './query/index.js'
 export type { NormalizedResult } from './query/index.js'
 export type { ContextSearchOpts, ContextPassage, ContextSearchResponse } from './query/index.js'
+
+// Jobs
+export {
+  registerJobType,
+  unregisterJobType,
+  getJobType,
+  listJobTypes,
+  listJobTypesByCategory,
+  builtInJobTypes,
+} from './jobs/index.js'

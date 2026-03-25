@@ -5,6 +5,15 @@ import { createMockEmbedding } from './helpers/mock-embedding.js'
 import { createMockSource } from './helpers/mock-source.js'
 import { createTestDocument } from './helpers/mock-connector.js'
 import type { d8umInstance } from '../d8um.js'
+import type { Source } from '../types/source.js'
+import type { EmbeddingProvider } from '../embedding/provider.js'
+
+/** Register a pre-built Source + embedding on an instance (bypasses sources.create UUID generation). */
+function registerTestSource(instance: d8umInstance, source: Source, embedding: EmbeddingProvider) {
+  const impl = instance as any
+  impl._sources.set(source.id, source)
+  impl.sourceEmbeddings.set(source.id, embedding)
+}
 
 describe('searchWithContext', () => {
   let adapter: ReturnType<typeof createMockAdapter>
@@ -26,13 +35,13 @@ describe('searchWithContext', () => {
       title: 'Long Document',
       url: 'https://example.com/long',
     })
-    const source = createMockSource({
+    const { source, connector, indexConfig } = createMockSource({
       documents: [doc],
       chunkSize: 50,
       chunkOverlap: 10,
     })
-    instance.addSource(source)
-    await instance.index(source.id)
+    registerTestSource(instance, source, embedding)
+    await instance.indexWithConnector(source.id, connector, indexConfig)
   })
 
   it('returns passages with neighbor chunks', async () => {
@@ -57,9 +66,10 @@ describe('searchWithContext', () => {
   })
 
   it('returns empty passages when no results', async () => {
-    const emptyInstance = d8umCreate({ vectorStore: createMockAdapter(), embedding })
-    const source = createMockSource({ documents: [] })
-    emptyInstance.addSource(source)
+    const emptyAdapter = createMockAdapter()
+    const emptyInstance = d8umCreate({ vectorStore: emptyAdapter, embedding })
+    const { source: emptySource } = createMockSource({ documents: [] })
+    registerTestSource(emptyInstance, emptySource, embedding)
     const response = await emptyInstance.searchWithContext('nonexistent')
     expect(response.passages).toHaveLength(0)
   })

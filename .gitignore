@@ -9,3 +9,4 @@ dist/
 *.onnx
 local_cache/
 coverage/
+CLAUDE.local.md

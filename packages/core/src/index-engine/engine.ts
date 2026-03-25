@@ -1,8 +1,8 @@
-import type { d8umSource } from '../types/source.js'
+import type { IndexConfig } from '../types/source.js'
 import type { VectorStoreAdapter } from '../types/adapter.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import type { IndexOpts, IndexResult } from '../types/index-types.js'
-import type { RawDocument, Chunk } from '../types/connector.js'
+import type { RawDocument, Chunk, Connector } from '../types/connector.js'
 import { randomUUID } from 'crypto'
 import { IndexError } from '../types/index-types.js'
 import { sha256, resolveIdempotencyKey, buildHashStoreKey } from './hash.js'
@@ -15,7 +15,16 @@ export class IndexEngine {
     private embedding: EmbeddingProvider
   ) {}
 
-  async indexSource(source: d8umSource, opts: IndexOpts = {}): Promise<IndexResult> {
+  /**
+   * Index documents from a connector into a source.
+   * This is the primary method for ingestion jobs.
+   */
+  async indexWithConnector(
+    sourceId: string,
+    connector: Connector,
+    indexConfig: IndexConfig,
+    opts: IndexOpts = {},
+  ): Promise<IndexResult> {
     const {
       mode = 'upsert',
       tenantId,
@@ -24,19 +33,17 @@ export class IndexEngine {
       onProgress,
     } = opts
 
-    if (!source.index) throw new Error(`Source "${source.id}" has no index config`)
-    if (!source.connector.fetch) throw new Error(`Source "${source.id}" connector has no fetch()`)
+    if (!connector.fetch) throw new Error(`Connector for source "${sourceId}" has no fetch()`)
 
     const modelId = this.embedding.model
 
-    // Ensure the adapter has storage for this model's dimensions
     if (!dryRun) {
       await this.adapter.ensureModel(modelId, this.embedding.dimensions)
     }
 
     const startMs = Date.now()
     const result: IndexResult = {
-      sourceId: source.id,
+      sourceId,
       tenantId,
       mode,
       total: 0,
@@ -48,28 +55,28 @@ export class IndexEngine {
     }
 
     if (mode === 'replace' && !dryRun) {
-      await this.adapter.delete(modelId, { sourceId: source.id, tenantId })
-      await this.adapter.hashStore.deleteBySource(source.id, tenantId)
+      await this.adapter.delete(modelId, { sourceId, tenantId })
+      await this.adapter.hashStore.deleteBySource(sourceId, tenantId)
     }
 
     const lastRunTime = mode === 'upsert'
-      ? await this.adapter.hashStore.getLastRunTime(source.id, tenantId)
+      ? await this.adapter.hashStore.getLastRunTime(sourceId, tenantId)
       : null
 
-    const supportsIncremental = typeof source.connector.fetchSince === 'function'
+    const supportsIncremental = typeof connector.fetchSince === 'function'
     const docs: AsyncIterable<RawDocument> =
       (supportsIncremental && lastRunTime && mode === 'upsert')
-        ? source.connector.fetchSince!(lastRunTime)
-        : source.connector.fetch!()
+        ? connector.fetchSince!(lastRunTime)
+        : connector.fetch!()
 
     const seenKeys = new Set<string>()
 
     try {
       for await (const doc of docs) {
         result.total++
-        const ikey = resolveIdempotencyKey(doc, source.index.deduplicateBy)
+        const ikey = resolveIdempotencyKey(doc, indexConfig.deduplicateBy)
         const contentHash = sha256(doc.content)
-        const storeKey = buildHashStoreKey(tenantId, source.id, ikey)
+        const storeKey = buildHashStoreKey(tenantId, sourceId, ikey)
         seenKeys.add(ikey)
 
         onProgress?.({
@@ -82,10 +89,9 @@ export class IndexEngine {
 
         const stored = await this.adapter.hashStore.get(storeKey)
 
-        // Skip if content unchanged AND embedding model unchanged
         if (stored?.contentHash === contentHash && stored.embeddingModel === modelId) {
           const actualChunks = await this.adapter.countChunks(modelId, {
-            sourceId: source.id,
+            sourceId,
             tenantId,
             idempotencyKey: ikey,
           })
@@ -102,37 +108,35 @@ export class IndexEngine {
           }
         }
 
-        // If embedding model changed, delete old chunks from the old model's table
         if (stored && stored.embeddingModel !== modelId) {
           await this.adapter.delete(stored.embeddingModel, {
-            sourceId: source.id,
+            sourceId,
             tenantId,
             idempotencyKey: ikey,
           })
         }
 
-        // Create/update document record
         let documentId = doc.id ?? randomUUID()
         if (this.adapter.upsertDocumentRecord && !dryRun) {
           const docRecord = await this.adapter.upsertDocumentRecord({
-            sourceId: source.id,
+            sourceId,
             tenantId,
             title: doc.title,
             url: doc.url,
             contentHash,
             chunkCount: 0,
             status: 'processing',
-            documentType: source.index.documentType,
-            sourceType: source.index.sourceType,
-            scope: source.index.scope,
+            documentType: indexConfig.documentType,
+            sourceType: indexConfig.sourceType,
+            scope: indexConfig.scope,
             metadata: doc.metadata,
           })
           documentId = docRecord.id
         }
 
-        const chunks = source.connector.chunk
-          ? source.connector.chunk(doc, source.index)
-          : defaultChunker(doc, source.index)
+        const chunks = connector.chunk
+          ? connector.chunk(doc, indexConfig)
+          : defaultChunker(doc, indexConfig)
 
         onProgress?.({
           ...result,
@@ -142,15 +146,14 @@ export class IndexEngine {
           current: { idempotencyKey: ikey, reason: stored ? 'hash_changed' : 'new' },
         })
 
-        // Apply embedding preprocessing
-        const textsForEmbedding = chunks.map(c => this.preprocessForEmbedding(c.content, source))
+        const textsForEmbedding = chunks.map(c => this.preprocessForEmbedding(c.content, indexConfig))
         const embeddings = await this.embedding.embedBatch(textsForEmbedding)
 
-        const propagated = this.propagateMetadata(doc, source.index.propagateMetadata)
+        const propagated = this.propagateMetadata(doc, indexConfig.propagateMetadata)
 
         const embeddedChunks = chunks.map((chunk, i) => ({
           idempotencyKey: ikey,
-          sourceId: source.id,
+          sourceId,
           tenantId,
           documentId,
           content: chunk.content,
@@ -172,7 +175,6 @@ export class IndexEngine {
           })
           await this.adapter.upsertDocument(modelId, embeddedChunks)
 
-          // Update document status to complete
           if (this.adapter.updateDocumentStatus) {
             await this.adapter.updateDocumentStatus(documentId, 'complete', chunks.length)
           }
@@ -180,7 +182,7 @@ export class IndexEngine {
           await this.adapter.hashStore.set(storeKey, {
             idempotencyKey: ikey,
             contentHash,
-            sourceId: source.id,
+            sourceId,
             tenantId,
             embeddingModel: modelId,
             indexedAt: new Date(),
@@ -193,14 +195,14 @@ export class IndexEngine {
     } catch (error) {
       result.durationMs = Date.now() - startMs
       throw new IndexError(
-        `Index failed for source "${source.id}"`,
+        `Index failed for source "${sourceId}"`,
         result,
         error as Error
       )
     }
 
     if (removeDeleted && mode === 'upsert' && !dryRun) {
-      const storedRecords = await this.adapter.hashStore.listBySource(source.id, tenantId)
+      const storedRecords = await this.adapter.hashStore.listBySource(sourceId, tenantId)
       const deletedKeys = storedRecords
         .map(r => r.idempotencyKey)
         .filter(k => !seenKeys.has(k))
@@ -212,17 +214,16 @@ export class IndexEngine {
           done: result.skipped + result.updated + result.inserted,
           failed: 0,
         })
-        // Delete from the model table recorded in the hash store
         const record = storedRecords.find(r => r.idempotencyKey === key)
         const deleteModel = record?.embeddingModel ?? modelId
-        await this.adapter.delete(deleteModel, { sourceId: source.id, tenantId, idempotencyKey: key })
-        await this.adapter.hashStore.delete(buildHashStoreKey(tenantId, source.id, key))
+        await this.adapter.delete(deleteModel, { sourceId, tenantId, idempotencyKey: key })
+        await this.adapter.hashStore.delete(buildHashStoreKey(tenantId, sourceId, key))
         result.pruned++
       }
     }
 
     if (!dryRun) {
-      await this.adapter.hashStore.setLastRunTime(source.id, tenantId, new Date())
+      await this.adapter.hashStore.setLastRunTime(sourceId, tenantId, new Date())
     }
 
     result.durationMs = Date.now() - startMs
@@ -230,18 +231,17 @@ export class IndexEngine {
   }
 
   /**
-   * Ingest a document with pre-built chunks (e.g. spreadsheet rows).
+   * Ingest a document with pre-built chunks.
    * Skips the default chunker — uses the provided chunks directly.
    */
   async ingestWithChunks(
-    source: d8umSource,
+    sourceId: string,
     doc: RawDocument,
     chunks: Chunk[],
-    opts: IndexOpts = {}
+    opts: IndexOpts = {},
+    indexConfig?: IndexConfig,
   ): Promise<IndexResult> {
     const { tenantId, dryRun = false } = opts
-
-    if (!source.index) throw new Error(`Source "${source.id}" has no index config`)
 
     const modelId = this.embedding.model
     const startMs = Date.now()
@@ -251,37 +251,38 @@ export class IndexEngine {
     }
 
     const contentHash = sha256(doc.content)
-    const ikey = resolveIdempotencyKey(doc, source.index.deduplicateBy)
+    const deduplicateBy = indexConfig?.deduplicateBy ?? ['url']
+    const ikey = resolveIdempotencyKey(doc, deduplicateBy)
 
-    // Create/update document record
     let documentId = doc.id ?? randomUUID()
     if (this.adapter.upsertDocumentRecord && !dryRun) {
       const docRecord = await this.adapter.upsertDocumentRecord({
-        sourceId: source.id,
+        sourceId,
         tenantId,
         title: doc.title,
         url: doc.url,
         contentHash,
         chunkCount: chunks.length,
         status: 'processing',
-        documentType: source.index.documentType,
-        sourceType: source.index.sourceType,
-        scope: source.index.scope,
+        documentType: indexConfig?.documentType,
+        sourceType: indexConfig?.sourceType,
+        scope: indexConfig?.scope,
         metadata: doc.metadata,
       })
       documentId = docRecord.id
     }
 
     try {
-      // Apply embedding preprocessing
-      const textsForEmbedding = chunks.map(c => this.preprocessForEmbedding(c.content, source))
+      const textsForEmbedding = indexConfig
+        ? chunks.map(c => this.preprocessForEmbedding(c.content, indexConfig))
+        : chunks.map(c => c.content)
       const embeddings = await this.embedding.embedBatch(textsForEmbedding)
 
-      const propagated = this.propagateMetadata(doc, source.index.propagateMetadata)
+      const propagated = this.propagateMetadata(doc, indexConfig?.propagateMetadata)
 
       const embeddedChunks = chunks.map((chunk, i) => ({
         idempotencyKey: ikey,
-        sourceId: source.id,
+        sourceId,
         tenantId,
         documentId,
         content: chunk.content,
@@ -300,11 +301,11 @@ export class IndexEngine {
           await this.adapter.updateDocumentStatus(documentId, 'complete', chunks.length)
         }
 
-        const storeKey = buildHashStoreKey(tenantId, source.id, ikey)
+        const storeKey = buildHashStoreKey(tenantId, sourceId, ikey)
         await this.adapter.hashStore.set(storeKey, {
           idempotencyKey: ikey,
           contentHash,
-          sourceId: source.id,
+          sourceId,
           tenantId,
           embeddingModel: modelId,
           indexedAt: new Date(),
@@ -313,7 +314,7 @@ export class IndexEngine {
       }
 
       return {
-        sourceId: source.id,
+        sourceId,
         tenantId,
         mode: 'upsert',
         total: 1,
@@ -331,12 +332,11 @@ export class IndexEngine {
     }
   }
 
-  /** Apply embedding preprocessing based on source config. */
-  private preprocessForEmbedding(content: string, source: d8umSource): string {
-    if (source.index?.preprocessForEmbedding) {
-      return source.index.preprocessForEmbedding(content)
+  private preprocessForEmbedding(content: string, indexConfig: IndexConfig): string {
+    if (indexConfig.preprocessForEmbedding) {
+      return indexConfig.preprocessForEmbedding(content)
     }
-    if (source.index?.stripMarkdownForEmbedding) {
+    if (indexConfig.stripMarkdownForEmbedding) {
       return stripMarkdown(content)
     }
     return content

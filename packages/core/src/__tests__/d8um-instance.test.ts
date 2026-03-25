@@ -5,6 +5,15 @@ import { createMockEmbedding } from './helpers/mock-embedding.js'
 import { createMockSource } from './helpers/mock-source.js'
 import { createTestDocument, createTestDocuments } from './helpers/mock-connector.js'
 import type { d8umInstance } from '../d8um.js'
+import type { Source } from '../types/source.js'
+import type { EmbeddingProvider } from '../embedding/provider.js'
+
+/** Register a pre-built Source + embedding on an instance (bypasses sources.create UUID generation). */
+function registerTestSource(instance: d8umInstance, source: Source, embedding: EmbeddingProvider) {
+  const impl = instance as any
+  impl._sources.set(source.id, source)
+  impl.sourceEmbeddings.set(source.id, embedding)
+}
 
 describe('d8umCreate', () => {
   let adapter: ReturnType<typeof createMockAdapter>
@@ -17,55 +26,32 @@ describe('d8umCreate', () => {
     instance = d8umCreate({ vectorStore: adapter, embedding })
   })
 
-  describe('addSource', () => {
-    it('creates instance and adds source', () => {
-      const source = createMockSource({ documents: [] })
-      instance.addSource(source)
+  describe('sources.create', () => {
+    it('creates a source with a generated id', () => {
+      const source = instance.sources.create({ name: 'Test Source' })
+      expect(source.id).toBeDefined()
+      expect(source.name).toBe('Test Source')
+      expect(source.status).toBe('active')
+    })
+
+    it('registers embedding for new source', () => {
+      const source = instance.sources.create({ name: 'Test Source' })
       expect(instance.getEmbeddingForSource(source.id)).toBeDefined()
-    })
-
-    it('returns this for chaining', () => {
-      const source = createMockSource({ documents: [] })
-      const result = instance.addSource(source)
-      expect(result).toBe(instance)
-    })
-
-    it('throws for indexed without index config', () => {
-      const source = createMockSource({ mode: 'indexed', documents: [] })
-      delete (source as any).index
-      expect(() => instance.addSource(source)).toThrow("requires an index config")
-    })
-
-    it('throws for cached without cache config', () => {
-      expect(() => instance.addSource({
-        id: 'cached-src',
-        connector: {},
-        mode: 'cached',
-      })).toThrow("requires a cache config")
-    })
-
-    it('throws for live without query method', () => {
-      expect(() => instance.addSource({
-        id: 'live-src',
-        connector: {},
-        mode: 'live',
-      })).toThrow("requires connector.query()")
     })
   })
 
   describe('getEmbeddingForSource', () => {
     it('returns default embedding', () => {
-      const source = createMockSource({ documents: [] })
-      instance.addSource(source)
+      const { source } = createMockSource({ documents: [] })
+      registerTestSource(instance, source, embedding)
       const emb = instance.getEmbeddingForSource(source.id)
       expect(emb.model).toBe(embedding.model)
     })
 
     it('returns per-source override', () => {
       const customEmb = createMockEmbedding({ model: 'custom-v2' })
-      const source = createMockSource({ documents: [] })
-      source.embedding = customEmb
-      instance.addSource(source)
+      const { source } = createMockSource({ documents: [] })
+      registerTestSource(instance, source, customEmb)
       const emb = instance.getEmbeddingForSource(source.id)
       expect(emb.model).toBe('custom-v2')
     })
@@ -77,19 +63,21 @@ describe('d8umCreate', () => {
 
   describe('getDistinctEmbeddings', () => {
     it('returns unique embeddings by model name', () => {
-      const s1 = createMockSource({ id: 'src-1', documents: [] })
-      const s2 = createMockSource({ id: 'src-2', documents: [] })
-      instance.addSource(s1).addSource(s2)
+      const { source: s1 } = createMockSource({ id: 'src-1', documents: [] })
+      const { source: s2 } = createMockSource({ id: 'src-2', documents: [] })
+      registerTestSource(instance, s1, embedding)
+      registerTestSource(instance, s2, embedding)
       const distinct = instance.getDistinctEmbeddings()
       expect(distinct.size).toBe(1) // Both use the same default embedding
     })
 
     it('filters to sourceIds', () => {
-      const s1 = createMockSource({ id: 'src-1', documents: [] })
-      s1.embedding = createMockEmbedding({ model: 'model-a' })
-      const s2 = createMockSource({ id: 'src-2', documents: [] })
-      s2.embedding = createMockEmbedding({ model: 'model-b' })
-      instance.addSource(s1).addSource(s2)
+      const embA = createMockEmbedding({ model: 'model-a' })
+      const embB = createMockEmbedding({ model: 'model-b' })
+      const { source: s1 } = createMockSource({ id: 'src-1', documents: [] })
+      const { source: s2 } = createMockSource({ id: 'src-2', documents: [] })
+      registerTestSource(instance, s1, embA)
+      registerTestSource(instance, s2, embB)
       const distinct = instance.getDistinctEmbeddings(['src-1'])
       expect(distinct.size).toBe(1)
       expect(distinct.has('model-a')).toBe(true)
@@ -98,77 +86,71 @@ describe('d8umCreate', () => {
 
   describe('groupSourcesByModel', () => {
     it('groups sources by model', () => {
-      const s1 = createMockSource({ id: 'src-1', documents: [] })
-      const s2 = createMockSource({ id: 'src-2', documents: [] })
-      s2.embedding = createMockEmbedding({ model: 'different-model' })
-      instance.addSource(s1).addSource(s2)
+      const { source: s1 } = createMockSource({ id: 'src-1', documents: [] })
+      const { source: s2 } = createMockSource({ id: 'src-2', documents: [] })
+      const differentEmb = createMockEmbedding({ model: 'different-model' })
+      registerTestSource(instance, s1, embedding)
+      registerTestSource(instance, s2, differentEmb)
       const groups = instance.groupSourcesByModel()
       expect(groups.size).toBe(2)
     })
   })
 
-  describe('index', () => {
+  describe('indexWithConnector', () => {
     it('indexes a specific source', async () => {
-      const source = createMockSource({ documents: createTestDocuments(2) })
-      instance.addSource(source)
-      const result = await instance.index(source.id)
-      expect((result as any).total).toBe(2)
-    })
-
-    it('indexes all sources', async () => {
-      const s1 = createMockSource({ id: 'src-1', documents: createTestDocuments(2) })
-      const s2 = createMockSource({ id: 'src-2', documents: createTestDocuments(1, 'Other') })
-      instance.addSource(s1).addSource(s2)
-      const results = await instance.index()
-      expect(Array.isArray(results)).toBe(true)
-      expect((results as any[]).length).toBe(2)
+      const { source, connector, indexConfig } = createMockSource({ documents: createTestDocuments(2) })
+      registerTestSource(instance, source, embedding)
+      const result = await instance.indexWithConnector(source.id, connector, indexConfig)
+      expect(result.total).toBe(2)
     })
 
     it('throws for unknown source', async () => {
-      await expect(instance.index('unknown')).rejects.toThrow('not found')
-    })
-
-    it('throws for non-indexed source', async () => {
-      instance.addSource({
-        id: 'live-src',
-        connector: { async query() { return [] } },
-        mode: 'live',
-      })
-      await expect(instance.index('live-src')).rejects.toThrow('not indexed')
+      const { connector, indexConfig } = createMockSource({ documents: [] })
+      await expect(instance.indexWithConnector('unknown', connector, indexConfig)).rejects.toThrow('not found')
     })
 
     it('calls adapter.initialize lazily', async () => {
-      const source = createMockSource({ documents: [createTestDocument()] })
-      instance.addSource(source)
+      const { source, connector, indexConfig } = createMockSource({ documents: [createTestDocument()] })
+      registerTestSource(instance, source, embedding)
       expect(adapter.calls.filter(c => c.method === 'initialize')).toHaveLength(0)
-      await instance.index(source.id)
+      await instance.indexWithConnector(source.id, connector, indexConfig)
       expect(adapter.calls.filter(c => c.method === 'initialize')).toHaveLength(1)
+    })
+  })
+
+  describe('ingest', () => {
+    it('ingests a single document', async () => {
+      const { source, indexConfig } = createMockSource({ documents: [] })
+      registerTestSource(instance, source, embedding)
+      const doc = createTestDocument({ content: 'Some content to ingest' })
+      const result = await instance.ingest(source.id, doc, indexConfig)
+      expect(result.inserted).toBe(1)
     })
   })
 
   describe('query', () => {
     it('returns results', async () => {
-      const source = createMockSource({ documents: createTestDocuments(3) })
-      instance.addSource(source)
-      await instance.index(source.id)
+      const { source, connector, indexConfig } = createMockSource({ documents: createTestDocuments(3) })
+      registerTestSource(instance, source, embedding)
+      await instance.indexWithConnector(source.id, connector, indexConfig)
       const response = await instance.query('Document 1')
       expect(response.results.length).toBeGreaterThan(0)
     })
 
     it('passes tenantId from config', async () => {
       const inst = d8umCreate({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
-      const source = createMockSource({ documents: createTestDocuments(1) })
-      inst.addSource(source)
-      await inst.index(source.id)
+      const { source, connector, indexConfig } = createMockSource({ documents: createTestDocuments(1) })
+      registerTestSource(inst, source, embedding)
+      await inst.indexWithConnector(source.id, connector, indexConfig)
       const response = await inst.query('test')
       expect(response.query.tenantId).toBe('config-tenant')
     })
 
     it('per-query tenantId overrides config', async () => {
       const inst = d8umCreate({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
-      const source = createMockSource({ documents: createTestDocuments(1) })
-      inst.addSource(source)
-      await inst.index(source.id)
+      const { source, connector, indexConfig } = createMockSource({ documents: createTestDocuments(1) })
+      registerTestSource(inst, source, embedding)
+      await inst.indexWithConnector(source.id, connector, indexConfig)
       const response = await inst.query('test', { tenantId: 'query-tenant' })
       expect(response.query.tenantId).toBe('query-tenant')
     })
@@ -176,18 +158,18 @@ describe('d8umCreate', () => {
 
   describe('assemble', () => {
     it('assembles XML by default', async () => {
-      const source = createMockSource({ documents: createTestDocuments(1) })
-      instance.addSource(source)
-      await instance.index(source.id)
+      const { source, connector, indexConfig } = createMockSource({ documents: createTestDocuments(1) })
+      registerTestSource(instance, source, embedding)
+      await instance.indexWithConnector(source.id, connector, indexConfig)
       const response = await instance.query('test')
       const xml = instance.assemble(response.results)
       expect(xml).toContain('<context>')
     })
 
     it('assembles plain text', async () => {
-      const source = createMockSource({ documents: createTestDocuments(1) })
-      instance.addSource(source)
-      await instance.index(source.id)
+      const { source, connector, indexConfig } = createMockSource({ documents: createTestDocuments(1) })
+      registerTestSource(instance, source, embedding)
+      await instance.indexWithConnector(source.id, connector, indexConfig)
       const response = await instance.query('test')
       const plain = instance.assemble(response.results, { format: 'plain' })
       expect(plain).not.toContain('<context>')
@@ -203,9 +185,9 @@ describe('d8umCreate', () => {
         embedding,
         hooks: { onIndexStart, onIndexComplete },
       })
-      const source = createMockSource({ documents: [createTestDocument()] })
-      inst.addSource(source)
-      await inst.index(source.id)
+      const { source, connector, indexConfig } = createMockSource({ documents: [createTestDocument()] })
+      registerTestSource(inst, source, embedding)
+      await inst.indexWithConnector(source.id, connector, indexConfig)
       expect(onIndexStart).toHaveBeenCalledOnce()
       expect(onIndexComplete).toHaveBeenCalledOnce()
     })
@@ -217,9 +199,9 @@ describe('d8umCreate', () => {
         embedding,
         hooks: { onQueryResults },
       })
-      const source = createMockSource({ documents: [createTestDocument()] })
-      inst.addSource(source)
-      await inst.index(source.id)
+      const { source, connector, indexConfig } = createMockSource({ documents: [createTestDocument()] })
+      registerTestSource(inst, source, embedding)
+      await inst.indexWithConnector(source.id, connector, indexConfig)
       await inst.query('test')
       expect(onQueryResults).toHaveBeenCalledOnce()
     })

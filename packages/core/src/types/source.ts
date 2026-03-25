@@ -1,8 +1,26 @@
-import type { Connector, ChunkOpts } from './connector.js'
+import type { ChunkOpts } from './connector.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import type { AISDKEmbeddingInput } from '../embedding/ai-sdk-adapter.js'
 
-export type SyncMode = 'live' | 'indexed' | 'cached'
+/**
+ * A source is a named container for documents.
+ * Sources have no type — they are user-defined buckets for organizing documents.
+ * A source named "Marketing Docs" could receive documents from a URL scrape,
+ * a domain crawl, file uploads, and a Slack sync — all at the same time.
+ */
+export interface Source {
+  id: string
+  name: string
+  description?: string | undefined
+  status: 'active' | 'inactive'
+  tenantId?: string | undefined
+}
+
+export interface CreateSourceInput {
+  name: string
+  description?: string | undefined
+  tenantId?: string | undefined
+}
 
 /** @deprecated Use AI SDK providers instead. */
 export interface EmbeddingProviderConfig {
@@ -14,6 +32,10 @@ export interface EmbeddingProviderConfig {
 
 export type EmbeddingInput = EmbeddingProvider | EmbeddingProviderConfig | AISDKEmbeddingInput
 
+/**
+ * Index configuration for chunking & embedding documents.
+ * Used inside job configs for ingestion jobs.
+ */
 export interface IndexConfig extends ChunkOpts {
   deduplicateBy: string[] | ((doc: import('./connector.js').RawDocument) => string)
   propagateMetadata?: string[] | undefined
@@ -27,18 +49,4 @@ export interface IndexConfig extends ChunkOpts {
   sourceType?: string | undefined
   /** Access scope for all documents from this source. */
   scope?: import('./d8um-document.js').DocumentScope | undefined
-}
-
-export interface CacheConfig {
-  ttl: string | number
-}
-
-export interface d8umSource {
-  id: string
-  connector: Connector
-  mode: SyncMode
-  index?: IndexConfig | undefined
-  cache?: CacheConfig | undefined
-  /** Optional per-source embedding model. Overrides the global default from d8umConfig. */
-  embedding?: EmbeddingInput | undefined
 }

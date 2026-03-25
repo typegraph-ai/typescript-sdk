@@ -1,9 +1,11 @@
-import type { d8umInstance, d8umConfig } from '@d8um/core'
-import type { d8umSource } from '@d8um/core'
+import type { d8umInstance, d8umConfig, SourcesApi, JobsApi, DocumentJobsApi } from '@d8um/core'
+import type { Source, CreateSourceInput, IndexConfig } from '@d8um/core'
+import type { Job, CreateJobInput, JobRunResult } from '@d8um/core'
+import type { DocumentJobRelation, DocumentJobRelationType } from '@d8um/core'
 import type { QueryOpts, QueryResponse, AssembleOpts, d8umResult } from '@d8um/core'
 import type { IndexOpts, IndexResult } from '@d8um/core'
 import type { EmbeddingProvider } from '@d8um/core'
-import type { RawDocument, Chunk } from '@d8um/core'
+import type { RawDocument, Chunk, Connector } from '@d8um/core'
 import type { d8umDocument, DocumentFilter } from '@d8um/core'
 import type { ContextSearchOpts, ContextSearchResponse } from '@d8um/core'
 import { assemble as assembleResults } from '@d8um/core'
@@ -12,16 +14,9 @@ import { HttpClient } from './http-client.js'
 
 /**
  * Extended d8um instance for hosted mode.
- * Includes full CRUD for sources and documents in addition to
- * the standard d8umInstance methods.
+ * Includes full CRUD for sources, jobs, and documents.
  */
 export interface d8umHostedInstance extends d8umInstance {
-  // Source CRUD
-  listSources(): Promise<d8umSource[]>
-  getSource(sourceId: string): Promise<d8umSource>
-  updateSource(sourceId: string, update: Partial<d8umSource>): Promise<d8umSource>
-  deleteSource(sourceId: string): Promise<void>
-
   // Document CRUD
   listDocuments(filter?: DocumentFilter): Promise<d8umDocument[]>
   getDocument(documentId: string): Promise<d8umDocument>
@@ -37,26 +32,99 @@ export interface d8umHostedInstance extends d8umInstance {
 export function d8umHosted(config: HostedConfig): d8umHostedInstance {
   const client = new HttpClient(config)
 
+  const sources: SourcesApi = {
+    create(input: CreateSourceInput): Source {
+      // Fire-and-forget async registration
+      void client.post('/v1/sources', input)
+      return {
+        id: 'pending',
+        name: input.name,
+        description: input.description,
+        status: 'active',
+        tenantId: input.tenantId,
+      }
+    },
+    get(_sourceId: string): Source | undefined {
+      throw new Error('Use async listSources() in hosted mode')
+    },
+    list(): Source[] {
+      throw new Error('Use async listSources() in hosted mode')
+    },
+    update(sourceId: string, input): Source {
+      void client.patch(`/v1/sources/${encodeURIComponent(sourceId)}`, input)
+      return { id: sourceId, name: '', status: 'active', ...input }
+    },
+    delete(sourceId: string): void {
+      void client.delete(`/v1/sources/${encodeURIComponent(sourceId)}`)
+    },
+  }
+
+  const jobs: JobsApi = {
+    create(input: CreateJobInput): Job {
+      void client.post('/v1/jobs', input)
+      const now = new Date()
+      return {
+        id: 'pending',
+        type: input.type,
+        name: input.name,
+        description: input.description,
+        sourceId: input.sourceId,
+        tenantId: input.tenantId,
+        config: input.config ?? {},
+        schedule: input.schedule,
+        status: 'idle',
+        runCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      }
+    },
+    get(_jobId: string): Job | undefined {
+      throw new Error('Use async API in hosted mode')
+    },
+    list(): Job[] {
+      throw new Error('Use async API in hosted mode')
+    },
+    update(jobId: string, input): Job {
+      void client.patch(`/v1/jobs/${encodeURIComponent(jobId)}`, input)
+      const now = new Date()
+      return { id: jobId, type: '', name: '', config: {}, status: 'idle', runCount: 0, createdAt: now, updatedAt: now, ...input }
+    },
+    delete(jobId: string, opts?): void {
+      void client.delete(`/v1/jobs/${encodeURIComponent(jobId)}`, opts)
+    },
+    async run(jobId: string): Promise<JobRunResult> {
+      return client.post<JobRunResult>(`/v1/jobs/${encodeURIComponent(jobId)}/run`)
+    },
+    pause(jobId: string): void {
+      void client.post(`/v1/jobs/${encodeURIComponent(jobId)}/pause`)
+    },
+    resume(jobId: string): void {
+      void client.post(`/v1/jobs/${encodeURIComponent(jobId)}/resume`)
+    },
+  }
+
+  const documentJobs: DocumentJobsApi = {
+    getJobsForDocument(_documentId: string): DocumentJobRelation[] {
+      throw new Error('Use async API in hosted mode')
+    },
+    getDocumentsForJob(_jobId: string): DocumentJobRelation[] {
+      throw new Error('Use async API in hosted mode')
+    },
+    addRelation(_documentId: string, _jobId: string, _relation: DocumentJobRelationType): void {
+      throw new Error('Use async API in hosted mode')
+    },
+  }
+
   return {
     // --- d8umInstance methods ---
 
     initialize(_config: d8umConfig): d8umHostedInstance {
-      // No-op in hosted mode — config is managed server-side
       return this as d8umHostedInstance
     },
 
-    addSource(source: d8umSource): d8umHostedInstance {
-      // Fire-and-forget async registration — the source is created server-side.
-      // Connector instances are not serialized; the server configures connectors
-      // based on the source id, mode, and index config.
-      void client.post('/v1/sources', {
-        id: source.id,
-        mode: source.mode,
-        index: source.index,
-        cache: source.cache,
-      })
-      return this as d8umHostedInstance
-    },
+    sources,
+    jobs,
+    documentJobs,
 
     getEmbeddingForSource(_sourceId: string): EmbeddingProvider {
       throw new Error('getEmbeddingForSource() is not available in hosted mode — embedding is managed server-side')
@@ -70,11 +138,13 @@ export function d8umHosted(config: HostedConfig): d8umHostedInstance {
       throw new Error('groupSourcesByModel() is not available in hosted mode — embedding is managed server-side')
     },
 
-    async index(sourceId?: string, opts?: IndexOpts): Promise<IndexResult | IndexResult[]> {
-      if (sourceId) {
-        return client.post<IndexResult>(`/v1/sources/${encodeURIComponent(sourceId)}/index`, opts)
-      }
-      return client.post<IndexResult[]>('/v1/index', opts)
+    async indexWithConnector(
+      sourceId: string,
+      _connector: Connector,
+      _indexConfig: IndexConfig,
+      opts?: IndexOpts,
+    ): Promise<IndexResult> {
+      return client.post<IndexResult>(`/v1/sources/${encodeURIComponent(sourceId)}/index`, opts)
     },
 
     async query(text: string, opts?: QueryOpts): Promise<QueryResponse> {
@@ -88,6 +158,7 @@ export function d8umHosted(config: HostedConfig): d8umHostedInstance {
     async ingest(
       sourceId: string,
       doc: RawDocument,
+      _indexConfig: IndexConfig,
       opts?: IndexOpts
     ): Promise<IndexResult> {
       return client.post<IndexResult>(
@@ -109,30 +180,11 @@ export function d8umHosted(config: HostedConfig): d8umHostedInstance {
     },
 
     assemble(results: d8umResult[], opts?: AssembleOpts): string {
-      // Runs locally — pure string formatting, no network call needed
       return assembleResults(results, opts)
     },
 
     async destroy(): Promise<void> {
       // No-op in hosted mode
-    },
-
-    // --- Source CRUD ---
-
-    async listSources(): Promise<d8umSource[]> {
-      return client.get<d8umSource[]>('/v1/sources')
-    },
-
-    async getSource(sourceId: string): Promise<d8umSource> {
-      return client.get<d8umSource>(`/v1/sources/${encodeURIComponent(sourceId)}`)
-    },
-
-    async updateSource(sourceId: string, update: Partial<d8umSource>): Promise<d8umSource> {
-      return client.patch<d8umSource>(`/v1/sources/${encodeURIComponent(sourceId)}`, update)
-    },
-
-    async deleteSource(sourceId: string): Promise<void> {
-      await client.delete(`/v1/sources/${encodeURIComponent(sourceId)}`)
     },
 
     // --- Document CRUD ---

@@ -1,5 +1,6 @@
 import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from './document.js'
 import type { d8umDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from './d8um-document.js'
+import type { DocumentJobRelation, DocumentJobRelationFilter } from './document-job-relation.js'
 
 export interface SearchOpts {
   count: number
@@ -78,4 +79,15 @@ export interface VectorStoreAdapter {
     fromIndex: number,
     toIndex: number
   ): Promise<ScoredChunk[]>
+
+  // --- Document-Job relation storage (optional) ---
+
+  /** Create or update a document-job relation. */
+  upsertDocumentJobRelation?(relation: DocumentJobRelation): Promise<void>
+  /** Get document-job relations matching a filter. */
+  getDocumentJobRelations?(filter: DocumentJobRelationFilter): Promise<DocumentJobRelation[]>
+  /** Delete all relations for a given job. */
+  deleteDocumentJobRelations?(filter: { jobId: string }): Promise<void>
+  /** Get document IDs where the given job is the ONLY related job (orphaned on job delete). */
+  getOrphanedDocumentIds?(jobId: string): Promise<string[]>
 }

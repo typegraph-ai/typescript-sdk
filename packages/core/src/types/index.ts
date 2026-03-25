@@ -6,10 +6,9 @@ export type {
 } from './connector.js'
 
 export type {
-  SyncMode,
+  Source,
+  CreateSourceInput,
   IndexConfig,
-  CacheConfig,
-  d8umSource,
   EmbeddingInput,
   EmbeddingProviderConfig,
 } from './source.js'
@@ -51,5 +50,24 @@ export type {
   DocumentFilter,
   UpsertDocumentInput,
 } from './d8um-document.js'
+
+export type {
+  JobCategory,
+  JobStatus,
+  JobTypeDefinition,
+  ConfigField,
+  Job,
+  CreateJobInput,
+  JobRunContext,
+  JobRunResult,
+  ApiClient,
+  ApiResponse,
+} from './job.js'
+
+export type {
+  DocumentJobRelationType,
+  DocumentJobRelation,
+  DocumentJobRelationFilter,
+} from './document-job-relation.js'
 
 export type { d8umHooks } from './hooks.js'

@@ -1,10 +1,10 @@
-import type { d8umSource, IndexConfig } from '../../types/source.js'
-import type { RawDocument } from '../../types/connector.js'
+import type { Source, IndexConfig } from '../../types/source.js'
+import type { RawDocument, Connector } from '../../types/connector.js'
 import { createMockConnector } from './mock-connector.js'
 
 export interface MockSourceOpts {
   id?: string
-  mode?: 'indexed' | 'live' | 'cached'
+  name?: string
   documents?: RawDocument[]
   chunkSize?: number
   chunkOverlap?: number
@@ -16,32 +16,34 @@ export interface MockSourceOpts {
   sourceType?: string
 }
 
-export function createMockSource(opts: MockSourceOpts = {}): d8umSource {
+export interface MockSourceResult {
+  source: Source
+  connector: Connector
+  indexConfig: IndexConfig
+}
+
+export function createMockSource(opts: MockSourceOpts = {}): MockSourceResult {
   const id = opts.id ?? 'test-source'
-  const mode = opts.mode ?? 'indexed'
   const documents = opts.documents ?? []
 
   const connector = createMockConnector({ documents })
 
-  const source: d8umSource = {
+  const source: Source = {
     id,
-    connector,
-    mode,
+    name: opts.name ?? 'Test Source',
+    status: 'active',
   }
 
-  if (mode === 'indexed') {
-    const index: IndexConfig = {
-      chunkSize: opts.chunkSize ?? 100,
-      chunkOverlap: opts.chunkOverlap ?? 20,
-      deduplicateBy: opts.deduplicateBy ?? ['id'],
-      stripMarkdownForEmbedding: opts.stripMarkdownForEmbedding,
-      preprocessForEmbedding: opts.preprocessForEmbedding,
-      propagateMetadata: opts.propagateMetadata,
-      documentType: opts.documentType,
-      sourceType: opts.sourceType,
-    }
-    source.index = index
+  const indexConfig: IndexConfig = {
+    chunkSize: opts.chunkSize ?? 100,
+    chunkOverlap: opts.chunkOverlap ?? 20,
+    deduplicateBy: opts.deduplicateBy ?? ['id'],
+    stripMarkdownForEmbedding: opts.stripMarkdownForEmbedding,
+    preprocessForEmbedding: opts.preprocessForEmbedding,
+    propagateMetadata: opts.propagateMetadata,
+    documentType: opts.documentType,
+    sourceType: opts.sourceType,
   }
 
-  return source
+  return { source, connector, indexConfig }
 }

@@ -2,8 +2,6 @@ import type { VectorStoreAdapter } from '../types/adapter.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import type { d8umResult, QueryOpts, QueryResponse } from '../types/query.js'
 import type { DocumentFilter } from '../types/d8um-document.js'
-import type { d8umSource } from '../types/source.js'
-import { QueryPlanner } from './planner.js'
 
 export interface ContextSearchOpts extends QueryOpts {
   /** Number of neighbor chunks to expand around each hit. Default: 1 */
@@ -43,7 +41,7 @@ export interface ContextSearchResponse {
  */
 export async function searchWithContext(
   adapter: VectorStoreAdapter,
-  sources: Map<string, d8umSource>,
+  sourceIds: string[],
   sourceEmbeddings: Map<string, EmbeddingProvider>,
   text: string,
   opts: ContextSearchOpts = {}
@@ -51,27 +49,67 @@ export async function searchWithContext(
   const startMs = Date.now()
   const radius = opts.surroundingChunks ?? 1
 
-  // Run the standard query to get top hits
-  const planner = new QueryPlanner(adapter, sources, sourceEmbeddings)
-  const response = await planner.execute(text, opts)
-  const rawResults = response.results
+  // Run indexed search
+  const { IndexedRunner } = await import('./runners/indexed.js')
+  const { mergeAndRank } = await import('./merger.js')
+
+  const count = opts.count ?? 10
+  const tenantId = opts.tenantId
+
+  // Build model groups from sourceEmbeddings
+  const modelGroups = new Map<string, { embedding: EmbeddingProvider; sourceIds: string[] }>()
+  for (const sid of sourceIds) {
+    const emb = sourceEmbeddings.get(sid)
+    if (!emb) continue
+    const group = modelGroups.get(emb.model) ?? { embedding: emb, sourceIds: [] }
+    group.sourceIds.push(sid)
+    modelGroups.set(emb.model, group)
+  }
+
+  const runner = new IndexedRunner(adapter)
+  const indexedResults = await runner.run(text, modelGroups, count, tenantId, opts.documentFilter)
+
+  // Convert NormalizedResult[] to d8umResult[]
+  const rawResults = indexedResults.map(r => ({
+    content: r.content,
+    score: r.normalizedScore,
+    scores: {
+      vector: r.rawScores.vector,
+      keyword: r.rawScores.keyword,
+      rrf: r.normalizedScore,
+    },
+    source: {
+      id: r.sourceId,
+      documentId: r.documentId,
+      title: r.title ?? '',
+      url: r.url,
+      updatedAt: r.updatedAt ?? new Date(),
+      status: r.documentStatus,
+      scope: r.documentScope,
+      documentType: r.documentType,
+      sourceType: r.sourceType,
+      userId: r.userId,
+      groupId: r.groupId,
+    },
+    chunk: r.chunk ?? { index: 0, total: 1, isNeighbor: false },
+    metadata: r.metadata,
+    tenantId: r.tenantId,
+  }))
 
   if (rawResults.length === 0 || !adapter.getChunksByRange) {
     return {
       passages: [],
       rawResults,
-      query: { text, tenantId: opts.tenantId, durationMs: Date.now() - startMs },
+      query: { text, tenantId, durationMs: Date.now() - startMs },
     }
   }
 
-  // Determine which model to use for fetching neighbors
-  // Use the first distinct embedding model found
   const firstModel = [...sourceEmbeddings.values()][0]
   if (!firstModel) {
     return {
       passages: [],
       rawResults,
-      query: { text, tenantId: opts.tenantId, durationMs: Date.now() - startMs },
+      query: { text, tenantId, durationMs: Date.now() - startMs },
     }
   }
 
@@ -88,7 +126,6 @@ export async function searchWithContext(
   const passages: ContextPassage[] = []
 
   for (const [docId, hits] of hitsByDoc) {
-    // Compute the range of chunks to fetch (all hits ± radius)
     const hitIndices = hits.map(h => h.chunkIndex)
     const minIndex = Math.max(0, Math.min(...hitIndices) - radius)
     const totalChunks = hits[0]!.result.chunk.total
@@ -101,7 +138,6 @@ export async function searchWithContext(
       maxIndex
     )
 
-    // Build the chunk list with isHit flags
     const hitIndexSet = new Set(hitIndices)
     const chunkList = neighborChunks.map(c => ({
       chunkIndex: c.chunkIndex,
@@ -109,7 +145,6 @@ export async function searchWithContext(
       isHit: hitIndexSet.has(c.chunkIndex),
     })).sort((a, b) => a.chunkIndex - b.chunkIndex)
 
-    // Stitch content with truncation markers
     const bestHit = hits.reduce((best, h) =>
       h.result.score > best.result.score ? h : best, hits[0]!)
 
@@ -128,17 +163,15 @@ export async function searchWithContext(
     })
   }
 
-  // Sort passages by best RRF score
   passages.sort((a, b) => b.rrfScore - a.rrfScore)
 
   return {
     passages,
     rawResults,
-    query: { text, tenantId: opts.tenantId, durationMs: Date.now() - startMs },
+    query: { text, tenantId, durationMs: Date.now() - startMs },
   }
 }
 
-/** Stitch chunks together with truncation markers for gaps. */
 function stitchChunks(
   chunks: Array<{ chunkIndex: number; content: string }>,
   totalChunks: number
@@ -147,7 +180,6 @@ function stitchChunks(
 
   let text = ''
 
-  // Leading truncation
   if (chunks[0]!.chunkIndex > 0) {
     text += '[truncated ' + chunks[0]!.chunkIndex + ' chunks]\n\n...'
   }
@@ -165,7 +197,6 @@ function stitchChunks(
     }
   }
 
-  // Trailing truncation
   const lastChunk = chunks[chunks.length - 1]!
   if (lastChunk.chunkIndex < totalChunks - 1) {
     text += '...\n\n[truncated ' + (totalChunks - 1 - lastChunk.chunkIndex) + ' chunks]'
