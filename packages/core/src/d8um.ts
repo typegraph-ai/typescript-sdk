@@ -262,22 +262,61 @@ class d8umImpl implements d8umInstance {
       job.status = 'running'
       job.updatedAt = new Date()
 
-      // Job execution is delegated to the job type's run() function
-      // All jobs (built-in and integration) use JobTypeDefinition.run()
+      const jobType = getJobType(job.type)
+      const ctx: JobRunContext = {
+        job,
+        lastRunAt: job.lastRunAt,
+        metadata: job.config,
+      }
 
-      job.status = 'completed'
-      job.lastRunAt = new Date()
-      job.runCount++
-      job.updatedAt = new Date()
+      let documentsCreated = 0
+      let documentsUpdated = 0
+      let documentsDeleted = 0
+      let executeResult: import('./types/job.js').JobExecuteResult | undefined
 
-      return {
-        jobId: job.id,
-        sourceId: job.sourceId,
-        status: 'completed',
-        documentsCreated: 0,
-        documentsUpdated: 0,
-        documentsDeleted: 0,
-        durationMs: Date.now() - startMs,
+      try {
+        if (jobType?.run) {
+          // Ingestion jobs: yield RawDocuments via async generator
+          for await (const _doc of jobType.run(ctx)) {
+            documentsCreated++
+          }
+        } else if (jobType?.execute) {
+          // Non-ingestion jobs (memory, processing, maintenance): execute and return result
+          executeResult = await jobType.execute(ctx)
+          if (executeResult.status === 'failed') {
+            throw new Error(executeResult.error ?? executeResult.summary)
+          }
+        }
+
+        job.status = 'completed'
+        job.lastRunAt = new Date()
+        job.runCount++
+        job.updatedAt = new Date()
+
+        return {
+          jobId: job.id,
+          sourceId: job.sourceId,
+          status: 'completed',
+          documentsCreated,
+          documentsUpdated,
+          documentsDeleted,
+          durationMs: Date.now() - startMs,
+        }
+      } catch (err) {
+        job.status = 'failed'
+        job.lastError = err instanceof Error ? err.message : String(err)
+        job.updatedAt = new Date()
+
+        return {
+          jobId: job.id,
+          sourceId: job.sourceId,
+          status: 'failed',
+          documentsCreated,
+          documentsUpdated,
+          documentsDeleted,
+          durationMs: Date.now() - startMs,
+          error: job.lastError,
+        }
       }
     },
 

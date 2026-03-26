@@ -12,7 +12,7 @@
  * - Custom: user-defined jobs with arbitrary config
  */
 
-export type JobCategory = 'ingestion' | 'processing' | 'export' | 'maintenance' | 'custom'
+export type JobCategory = 'ingestion' | 'processing' | 'export' | 'maintenance' | 'memory' | 'custom'
 export type JobStatus = 'idle' | 'running' | 'completed' | 'failed' | 'scheduled'
 
 /**
@@ -48,6 +48,17 @@ export interface JobTypeDefinition {
 
   /** Auth scopes required by this job (integration jobs only) */
   scopes?: string[] | undefined
+
+  /**
+   * General-purpose execution — for jobs that don't yield documents
+   * (memory, processing, maintenance). A job defines EITHER run()
+   * (streaming doc yields) OR execute() (returns result).
+   * If both are defined, run() takes precedence for backward compatibility.
+   */
+  execute?: ((ctx: JobRunContext) => Promise<JobExecuteResult>) | undefined
+
+  /** Describes the shape of results this job produces. Mirrors configSchema for outputs. */
+  resultSchema?: ResultField[] | undefined
 }
 
 export interface ConfigField {
@@ -142,4 +153,28 @@ export interface ApiResponse<T> {
   data: T
   status: number
   headers: Record<string, string>
+}
+
+/**
+ * Result from a job's execute() function.
+ * Used by non-ingestion jobs (memory, processing, maintenance) that
+ * don't yield documents but still need to report what happened.
+ */
+export interface JobExecuteResult {
+  status: 'completed' | 'failed'
+  /** Human-readable summary of what happened */
+  summary: string
+  /** Typed metrics (e.g., { memoriesConsolidated: 12, factsExtracted: 5 }) */
+  metrics?: Record<string, number> | undefined
+  /** Arbitrary structured data the job wants to return */
+  data?: Record<string, unknown> | undefined
+  error?: string | undefined
+}
+
+export interface ResultField {
+  /** Result JSONB key */
+  key: string
+  /** Human-readable label */
+  label: string
+  type: 'text' | 'number' | 'boolean' | 'json'
 }

@@ -41,6 +41,8 @@ export type {
   CreateJobInput,
   JobRunContext,
   JobRunResult,
+  JobExecuteResult,
+  ResultField,
   ApiClient,
   ApiResponse,
   DocumentJobRelationType,

@@ -59,6 +59,8 @@ export type {
   CreateJobInput,
   JobRunContext,
   JobRunResult,
+  JobExecuteResult,
+  ResultField,
   ApiClient,
   ApiResponse,
 } from './job.js'
