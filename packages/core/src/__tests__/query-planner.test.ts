@@ -26,7 +26,8 @@ describe('QueryPlanner', () => {
     sourceEmbeddings.set(source.id, embedding)
 
     // Index the documents
-    await adapter.initialize()
+    await adapter.deploy()
+    await adapter.connect()
     const engine = new IndexEngine(adapter, embedding)
     await engine.indexWithConnector(source.id, connector, indexConfig)
   })

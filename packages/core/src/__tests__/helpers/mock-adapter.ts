@@ -1,4 +1,4 @@
-import type { VectorStoreAdapter, HashStoreAdapter, SearchOpts, HashRecord } from '../../types/adapter.js'
+import type { VectorStoreAdapter, HashStoreAdapter, SearchOpts, HashRecord, UndeployResult } from '../../types/adapter.js'
 import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from '../../types/document.js'
 import type { d8umDocument, DocumentStatus, DocumentFilter, UpsertDocumentInput } from '../../types/d8um-document.js'
 import { createHash } from 'crypto'
@@ -105,8 +105,17 @@ export function createMockAdapter(): VectorStoreAdapter & {
     _documents: documents,
     hashStore,
 
-    async initialize() {
-      calls.push({ method: 'initialize', args: [] })
+    async deploy() {
+      calls.push({ method: 'deploy', args: [] })
+    },
+
+    async connect() {
+      calls.push({ method: 'connect', args: [] })
+    },
+
+    async undeploy(): Promise<UndeployResult> {
+      calls.push({ method: 'undeploy', args: [] })
+      return { success: true, message: 'All d8um tables dropped.' }
     },
 
     async destroy() {

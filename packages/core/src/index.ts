@@ -1,5 +1,5 @@
 // Main public API
-export { d8um, d8umCreate, resolveEmbeddingProvider } from './d8um.js'
+export { d8um, d8umCreate, d8umDeploy, resolveEmbeddingProvider } from './d8um.js'
 export type { d8umConfig, d8umInstance, SourcesApi, JobsApi, DocumentJobsApi } from './d8um.js'
 
 // Types
@@ -19,6 +19,7 @@ export type {
   HashRecord,
   HashStoreAdapter,
   VectorStoreAdapter,
+  UndeployResult,
   ScoredChunkWithDocument,
   d8umQuery,
   d8umResult,

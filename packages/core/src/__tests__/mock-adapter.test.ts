@@ -26,10 +26,12 @@ describe('MockAdapter', () => {
     adapter = createMockAdapter()
   })
 
-  it('tracks initialize and destroy calls', async () => {
-    await adapter.initialize()
+  it('tracks deploy, connect, and destroy calls', async () => {
+    await adapter.deploy()
+    await adapter.connect()
     await adapter.destroy!()
-    expect(adapter.calls.filter(c => c.method === 'initialize')).toHaveLength(1)
+    expect(adapter.calls.filter(c => c.method === 'deploy')).toHaveLength(1)
+    expect(adapter.calls.filter(c => c.method === 'connect')).toHaveLength(1)
     expect(adapter.calls.filter(c => c.method === 'destroy')).toHaveLength(1)
   })
 

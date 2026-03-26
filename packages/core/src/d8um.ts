@@ -1,4 +1,4 @@
-import type { VectorStoreAdapter } from './types/adapter.js'
+import type { VectorStoreAdapter, UndeployResult } from './types/adapter.js'
 import type { Source, CreateSourceInput, EmbeddingInput, IndexConfig } from './types/source.js'
 import type {
   Job,
@@ -84,9 +84,16 @@ export interface DocumentJobsApi {
   addRelation(documentId: string, jobId: string, relation: DocumentJobRelationType): Promise<void>
 }
 
-/** The d8um instance interface - all public methods. */
+/** The d8um instance interface — all public methods. */
 export interface d8umInstance {
+  /** One-off infrastructure provisioning. Creates all tables/extensions. Idempotent. */
+  deploy(config: d8umConfig): Promise<this>
+
+  /** Lightweight runtime init. Registers jobs, loads state. No DDL. */
   initialize(config: d8umConfig): Promise<this>
+
+  /** Remove all d8um infrastructure. Refuses if any table contains data. */
+  undeploy(): Promise<UndeployResult>
 
   sources: SourcesApi
   jobs: JobsApi
@@ -478,7 +485,7 @@ class d8umImpl implements d8umInstance {
 
   // ── Core Methods ──
 
-  async initialize(config: d8umConfig): Promise<this> {
+  private applyConfig(config: d8umConfig): void {
     this.config = config
     this.adapter = config.vectorStore
     this.defaultEmbedding = resolveEmbeddingProvider(config.embedding)
@@ -496,9 +503,20 @@ class d8umImpl implements d8umInstance {
         registerJobType(jobType)
       }
     }
+  }
 
-    // Initialize adapter (creates tables if needed via IF NOT EXISTS)
-    await this.adapter.initialize()
+  async deploy(config: d8umConfig): Promise<this> {
+    this.applyConfig(config)
+    await this.adapter.deploy()
+    this.configured = true
+    return this
+  }
+
+  async initialize(config: d8umConfig): Promise<this> {
+    this.applyConfig(config)
+
+    // Lightweight connect — load model registrations, no DDL
+    await this.adapter.connect()
 
     // Hydrate in-memory state from persistent storage (for adapters that support it)
     if (this.adapter.listSources) {
@@ -533,6 +551,23 @@ class d8umImpl implements d8umInstance {
     this.configured = true
     this.initialized = true
     return this
+  }
+
+  async undeploy(): Promise<UndeployResult> {
+    this.assertConfigured()
+    if (!this.adapter.undeploy) {
+      return { success: false, message: 'Adapter does not support undeploy().' }
+    }
+    const result = await this.adapter.undeploy()
+    if (result.success) {
+      this._sources.clear()
+      this._jobs.clear()
+      this._documentJobRelations = []
+      this.sourceEmbeddings.clear()
+      this.configured = false
+      this.initialized = false
+    }
+    return result
   }
 
   getEmbeddingForSource(sourceId: string): EmbeddingProvider {
@@ -665,10 +700,17 @@ class d8umImpl implements d8umInstance {
   }
 }
 
-/** Create a new independent d8um instance. */
+/** Deploy infrastructure then initialize a new d8um instance. Convenience for local/dev use. */
 export async function d8umCreate(config: d8umConfig): Promise<d8umInstance> {
-  return new d8umImpl().initialize(config)
+  const instance = new d8umImpl()
+  await instance.deploy(config)
+  return instance.initialize(config)
 }
 
-/** Global singleton d8um instance. Call await d8um.initialize() before use. */
+/** Deploy infrastructure only. Returns an instance that is NOT initialized for runtime use. */
+export async function d8umDeploy(config: d8umConfig): Promise<d8umInstance> {
+  return new d8umImpl().deploy(config)
+}
+
+/** Global singleton d8um instance. Call await d8um.deploy() then d8um.initialize() before use. */
 export const d8um: d8umInstance = new d8umImpl()

@@ -1,4 +1,4 @@
-import type { d8umInstance, d8umConfig, SourcesApi, JobsApi, DocumentJobsApi } from '@d8um/core'
+import type { d8umInstance, d8umConfig, SourcesApi, JobsApi, DocumentJobsApi, UndeployResult } from '@d8um/core'
 import type { Source, CreateSourceInput, IndexConfig } from '@d8um/core'
 import type { Job, CreateJobInput, JobRunResult } from '@d8um/core'
 import type { DocumentJobRelation, DocumentJobRelationType } from '@d8um/core'
@@ -98,8 +98,17 @@ export function d8umHosted(config: HostedConfig): d8umHostedInstance {
   return {
     // --- d8umInstance methods ---
 
+    async deploy(_config: d8umConfig): Promise<d8umHostedInstance> {
+      // Infrastructure is managed server-side in hosted mode
+      return this as d8umHostedInstance
+    },
+
     async initialize(_config: d8umConfig): Promise<d8umHostedInstance> {
       return this as d8umHostedInstance
+    },
+
+    async undeploy(): Promise<UndeployResult> {
+      return { success: false, message: 'undeploy() is not available in hosted mode — infrastructure is managed server-side.' }
     },
 
     sources,

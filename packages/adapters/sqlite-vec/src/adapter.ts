@@ -1,4 +1,4 @@
-import type { VectorStoreAdapter, SearchOpts } from '@d8um/core'
+import type { VectorStoreAdapter, SearchOpts, UndeployResult } from '@d8um/core'
 import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from '@d8um/core'
 import type { Source } from '@d8um/core'
 import type { Job, JobRun } from '@d8um/core'
@@ -61,7 +61,7 @@ export class SqliteVecAdapter implements VectorStoreAdapter {
     this.hashStore = new SqliteHashStore(this.db, this.hashesTable)
   }
 
-  async initialize(): Promise<void> {
+  async deploy(): Promise<void> {
     this.db.exec(REGISTRY_SQL(this.registryTable))
     this.db.exec(HASH_TABLE_SQL(this.hashesTable))
     this.db.exec(SOURCES_TABLE_SQL(this.sourcesTable))
@@ -69,8 +69,9 @@ export class SqliteVecAdapter implements VectorStoreAdapter {
     this.db.exec(JOB_RUNS_TABLE_SQL(this.jobRunsTable))
     this.db.exec(DOCUMENT_JOB_RELATIONS_TABLE_SQL(this.relationsTable))
     await this.hashStore.initialize()
+  }
 
-    // Load existing model registrations
+  async connect(): Promise<void> {
     const rows = this.db.prepare(
       `SELECT model_key, table_name FROM ${this.registryTable}`
     ).all() as Array<{ model_key: string; table_name: string }>
@@ -81,6 +82,77 @@ export class SqliteVecAdapter implements VectorStoreAdapter {
         vecTable: `${row.table_name}_vec`,
       })
     }
+  }
+
+  async undeploy(): Promise<UndeployResult> {
+    // Discover dynamic model tables from registry before dropping it
+    let dynamicTables: Array<{ chunksTable: string; vecTable: string }> = []
+    try {
+      const rows = this.db.prepare(
+        `SELECT table_name FROM ${this.registryTable}`
+      ).all() as Array<{ table_name: string }>
+      dynamicTables = rows.map(r => ({
+        chunksTable: r.table_name,
+        vecTable: `${r.table_name}_vec`,
+      }))
+    } catch {
+      // Registry table doesn't exist — nothing to undeploy
+      return { success: true, message: 'No d8um tables found.' }
+    }
+
+    // Check all tables for data
+    const staticTables = [
+      this.registryTable,
+      this.hashesTable,
+      `${this.hashesTable}_run_times`,
+      this.sourcesTable,
+      this.jobsTable,
+      this.jobRunsTable,
+      this.relationsTable,
+    ]
+    const allCheckTables = [
+      ...dynamicTables.map(t => t.chunksTable),
+      ...staticTables,
+    ]
+
+    const tablesWithData: string[] = []
+    for (const table of allCheckTables) {
+      try {
+        const row = this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as { count: number }
+        if (row.count > 0) {
+          tablesWithData.push(table)
+        }
+      } catch {
+        // Table doesn't exist — skip
+      }
+    }
+
+    if (tablesWithData.length > 0) {
+      return {
+        success: false,
+        message:
+          `Cannot undeploy: tables contain data. Tables with records: ${tablesWithData.join(', ')}. ` +
+          `Delete all data before calling undeploy().`,
+      }
+    }
+
+    // Drop dynamic model tables first (vec virtual tables, then chunks)
+    for (const { vecTable, chunksTable } of dynamicTables) {
+      this.db.exec(`DROP TABLE IF EXISTS ${vecTable}`)
+      this.db.exec(`DROP TABLE IF EXISTS ${chunksTable}`)
+    }
+    // Drop static tables
+    this.db.exec(`DROP TABLE IF EXISTS ${this.relationsTable}`)
+    this.db.exec(`DROP TABLE IF EXISTS ${this.jobRunsTable}`)
+    this.db.exec(`DROP TABLE IF EXISTS ${this.jobsTable}`)
+    this.db.exec(`DROP TABLE IF EXISTS ${this.sourcesTable}`)
+    this.db.exec(`DROP TABLE IF EXISTS ${this.hashesTable}_run_times`)
+    this.db.exec(`DROP TABLE IF EXISTS ${this.hashesTable}`)
+    this.db.exec(`DROP TABLE IF EXISTS ${this.registryTable}`)
+
+    this.modelTables.clear()
+
+    return { success: true, message: 'All d8um tables dropped.' }
   }
 
   async ensureModel(model: string, dimensions: number): Promise<void> {

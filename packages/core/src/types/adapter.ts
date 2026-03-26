@@ -36,8 +36,21 @@ export interface ScoredChunkWithDocument extends ScoredChunk {
   document?: d8umDocument | undefined
 }
 
+export interface UndeployResult {
+  success: boolean
+  message: string
+}
+
 export interface VectorStoreAdapter {
-  initialize(): Promise<void>
+  /** Run DDL to create all tables and extensions. Idempotent. Called once during setup/CI. */
+  deploy(): Promise<void>
+
+  /** Lightweight runtime init — load model registrations, etc. Assumes tables already exist. */
+  connect(): Promise<void>
+
+  /** Drop all d8um tables. Refuses if any table contains data. */
+  undeploy?(): Promise<UndeployResult>
+
   destroy?(): Promise<void>
 
   /** Ensure a model's storage (e.g., table) exists. Called lazily before first write. */

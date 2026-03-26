@@ -1,4 +1,4 @@
-import type { VectorStoreAdapter, SearchOpts, ScoredChunkWithDocument } from '@d8um/core'
+import type { VectorStoreAdapter, SearchOpts, ScoredChunkWithDocument, UndeployResult } from '@d8um/core'
 import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from '@d8um/core'
 import type { d8umDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from '@d8um/core'
 import type { Source } from '@d8um/core'
@@ -83,7 +83,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     this.documentStore = new PgDocumentStore(this.sql, this.documentsTable)
   }
 
-  async initialize(): Promise<void> {
+  async deploy(): Promise<void> {
     await this.sql(`CREATE EXTENSION IF NOT EXISTS vector;`)
     await this.sql(REGISTRY_SQL(this.registryTable))
     await this.sql(HASH_TABLE_SQL(this.hashesTable))
@@ -93,12 +93,76 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     await this.sql(JOB_RUNS_TABLE_SQL(this.jobRunsTable))
     await this.sql(DOCUMENT_JOB_RELATIONS_TABLE_SQL(this.relationsTable))
     await this.hashStore.initialize()
+  }
 
-    // Load existing model registrations
+  async connect(): Promise<void> {
     const rows = await this.sql(`SELECT model_key, table_name FROM ${this.registryTable}`)
     for (const row of rows) {
       this.modelTables.set(row.model_key as string, row.table_name as string)
     }
+  }
+
+  async undeploy(): Promise<UndeployResult> {
+    // Discover dynamic model tables from registry before dropping it
+    let dynamicTables: string[] = []
+    try {
+      const rows = await this.sql(`SELECT table_name FROM ${this.registryTable}`)
+      dynamicTables = rows.map(r => r.table_name as string)
+    } catch {
+      // Registry table may not exist — nothing to undeploy
+      return { success: true, message: 'No d8um tables found.' }
+    }
+
+    // Check all tables for data
+    const allTables = [
+      ...dynamicTables,
+      this.registryTable,
+      this.hashesTable,
+      `${this.hashesTable}_run_times`,
+      this.documentsTable,
+      this.sourcesTable,
+      this.jobsTable,
+      this.jobRunsTable,
+      this.relationsTable,
+    ]
+
+    const tablesWithData: string[] = []
+    for (const table of allTables) {
+      try {
+        const rows = await this.sql(`SELECT COUNT(*)::int AS count FROM ${table}`)
+        if ((rows[0]?.count as number) > 0) {
+          tablesWithData.push(table)
+        }
+      } catch {
+        // Table doesn't exist — skip
+      }
+    }
+
+    if (tablesWithData.length > 0) {
+      return {
+        success: false,
+        message:
+          `Cannot undeploy: tables contain data. Tables with records: ${tablesWithData.join(', ')}. ` +
+          `Delete all data before calling undeploy().`,
+      }
+    }
+
+    // Drop dynamic model tables first, then static tables
+    for (const table of dynamicTables) {
+      await this.sql(`DROP TABLE IF EXISTS ${table}`)
+    }
+    await this.sql(`DROP TABLE IF EXISTS ${this.relationsTable}`)
+    await this.sql(`DROP TABLE IF EXISTS ${this.jobRunsTable}`)
+    await this.sql(`DROP TABLE IF EXISTS ${this.jobsTable}`)
+    await this.sql(`DROP TABLE IF EXISTS ${this.sourcesTable}`)
+    await this.sql(`DROP TABLE IF EXISTS ${this.documentsTable}`)
+    await this.sql(`DROP TABLE IF EXISTS ${this.hashesTable}_run_times`)
+    await this.sql(`DROP TABLE IF EXISTS ${this.hashesTable}`)
+    await this.sql(`DROP TABLE IF EXISTS ${this.registryTable}`)
+
+    this.modelTables.clear()
+
+    return { success: true, message: 'All d8um tables dropped.' }
   }
 
   async ensureModel(model: string, dimensions: number): Promise<void> {

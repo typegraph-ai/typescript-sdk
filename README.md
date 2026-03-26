@@ -47,10 +47,16 @@ import { d8um } from '@d8um/core'
 import { LocalEmbeddingProvider } from '@d8um/embedding-local'
 import { SqliteVecAdapter } from '@d8um/adapter-sqlite-vec'
 
-await d8um.initialize({
+const config = {
   embedding: new LocalEmbeddingProvider(),
   vectorStore: new SqliteVecAdapter({ dbPath: './my-app.db' }),
-})
+}
+
+// One-time setup — creates tables (run once, e.g. in a setup script or CI)
+await d8um.deploy(config)
+
+// Runtime init — lightweight, no DDL (safe for serverless cold starts)
+await d8um.initialize(config)
 
 // Create a source
 const faq = await d8um.sources.create({ name: 'faq' })
@@ -68,6 +74,19 @@ const { results } = await d8um.query('how do I configure SSO?')
 // Assemble into LLM-ready context
 const context = d8um.assemble(results, { format: 'xml' })
 ```
+
+### Lifecycle
+
+d8um separates infrastructure provisioning from runtime initialization:
+
+| Method | When to call | What it does |
+|--------|-------------|-------------|
+| `deploy(config)` | Once (setup script, CI/CD) | Creates tables and extensions. Idempotent. |
+| `initialize(config)` | Every app boot / cold start | Registers jobs, loads state. Lightweight, no DDL. |
+| `undeploy()` | Intentional teardown | Drops all d8um tables. Refuses if any table has data. |
+| `destroy()` | App shutdown | Closes adapter connections. |
+
+For local development or scripts, `d8umCreate(config)` is a convenience that calls both `deploy()` and `initialize()`.
 
 > **More setup options:** [Local Dev](guides/Local%20Dev/getting-started.md) | [Self-Hosted (pgvector)](guides/Self%20Hosted/setup.md) | [d8um Cloud](guides/d8um%20Cloud/quickstart.md)
 

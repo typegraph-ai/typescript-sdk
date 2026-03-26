@@ -23,6 +23,7 @@ export type {
   HashRecord,
   HashStoreAdapter,
   VectorStoreAdapter,
+  UndeployResult,
   ScoredChunkWithDocument,
 } from './adapter.js'
 

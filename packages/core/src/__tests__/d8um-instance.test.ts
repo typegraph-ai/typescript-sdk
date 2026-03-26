@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { d8umCreate } from '../d8um.js'
+import { d8umCreate, d8umDeploy } from '../d8um.js'
 import { createMockAdapter } from './helpers/mock-adapter.js'
 import { createMockEmbedding } from './helpers/mock-embedding.js'
 import { createMockSource } from './helpers/mock-source.js'
@@ -109,9 +109,10 @@ describe('d8umCreate', () => {
       await expect(instance.indexWithConnector('unknown', connector, indexConfig)).rejects.toThrow('not found')
     })
 
-    it('calls adapter.initialize eagerly during d8umCreate', async () => {
-      // initialize() is now called eagerly during d8umCreate, not lazily on first use
-      expect(adapter.calls.filter(c => c.method === 'initialize')).toHaveLength(1)
+    it('calls adapter.deploy and adapter.connect during d8umCreate', async () => {
+      // d8umCreate calls deploy() then initialize() which calls connect()
+      expect(adapter.calls.filter(c => c.method === 'deploy')).toHaveLength(1)
+      expect(adapter.calls.filter(c => c.method === 'connect')).toHaveLength(1)
     })
   })
 
@@ -208,6 +209,39 @@ describe('d8umCreate', () => {
     it('calls adapter destroy', async () => {
       await instance.destroy()
       expect(adapter.calls.some(c => c.method === 'destroy')).toBe(true)
+    })
+  })
+
+  describe('lifecycle', () => {
+    it('deploy() calls adapter.deploy() but does not set initialized', async () => {
+      const a = createMockAdapter()
+      const inst = await d8umDeploy({ vectorStore: a, embedding })
+      expect(a.calls.filter(c => c.method === 'deploy')).toHaveLength(1)
+      expect(a.calls.filter(c => c.method === 'connect')).toHaveLength(0)
+      // deploy-only instance should not be usable for runtime operations
+      await expect(inst.query('test')).rejects.toThrow()
+    })
+
+    it('d8umCreate calls both deploy() and connect()', async () => {
+      const a = createMockAdapter()
+      await d8umCreate({ vectorStore: a, embedding })
+      expect(a.calls.filter((c: { method: string }) => c.method === 'deploy')).toHaveLength(1)
+      expect(a.calls.filter((c: { method: string }) => c.method === 'connect')).toHaveLength(1)
+    })
+
+    it('undeploy() delegates to adapter and clears state', async () => {
+      const result = await instance.undeploy()
+      expect(result.success).toBe(true)
+      expect(adapter.calls.some(c => c.method === 'undeploy')).toBe(true)
+    })
+
+    it('undeploy() returns failure when adapter lacks undeploy', async () => {
+      const a = createMockAdapter()
+      delete (a as any).undeploy
+      const inst = await d8umCreate({ vectorStore: a, embedding })
+      const result = await inst.undeploy()
+      expect(result.success).toBe(false)
+      expect(result.message).toContain('does not support')
     })
   })
 })
