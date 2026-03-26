@@ -5,6 +5,8 @@ import type {
   CreateJobInput,
   JobRunContext,
   JobRunResult,
+  JobRun,
+  JobTypeDefinition,
   ApiClient,
 } from './types/job.js'
 import type {
@@ -22,7 +24,7 @@ import { aiSdkEmbeddingProvider, isAISDKEmbeddingInput } from './embedding/ai-sd
 import { IndexEngine } from './index-engine/engine.js'
 import { searchWithContext as searchWithContextFn } from './query/context-search.js'
 import { assemble as assembleResults } from './query/assemble.js'
-import { getJobType } from './jobs/registry.js'
+import { getJobType, registerJobType } from './jobs/registry.js'
 import { randomUUID } from 'crypto'
 
 export interface d8umConfig {
@@ -31,6 +33,10 @@ export interface d8umConfig {
   tenantId?: string | undefined
   tokenizer?: ((text: string) => number) | undefined
   hooks?: d8umHooks | undefined
+  /** Integration definitions whose jobs[] will be auto-registered on initialize(). */
+  integrations?: { jobs: JobTypeDefinition[] }[] | undefined
+  /** Additional job type definitions to register on initialize(). */
+  jobTypes?: JobTypeDefinition[] | undefined
 }
 
 function isEmbeddingProvider(
@@ -49,38 +55,38 @@ export function resolveEmbeddingProvider(config: EmbeddingInput): EmbeddingProvi
 // ── Sources Sub-API ──
 
 export interface SourcesApi {
-  create(input: CreateSourceInput): Source
-  get(sourceId: string): Source | undefined
-  list(tenantId?: string): Source[]
-  update(sourceId: string, input: Partial<Pick<Source, 'name' | 'description' | 'status'>>): Source
-  delete(sourceId: string): void
+  create(input: CreateSourceInput): Promise<Source>
+  get(sourceId: string): Promise<Source | undefined>
+  list(tenantId?: string): Promise<Source[]>
+  update(sourceId: string, input: Partial<Pick<Source, 'name' | 'description' | 'status'>>): Promise<Source>
+  delete(sourceId: string): Promise<void>
 }
 
 // ── Jobs Sub-API ──
 
 export interface JobsApi {
-  create(input: CreateJobInput): Job
-  get(jobId: string): Job | undefined
-  list(filter?: { sourceId?: string; type?: string; tenantId?: string }): Job[]
-  update(jobId: string, input: Partial<Pick<Job, 'name' | 'description' | 'config' | 'schedule' | 'status'>>): Job
+  create(input: CreateJobInput): Promise<Job>
+  get(jobId: string): Promise<Job | undefined>
+  list(filter?: { sourceId?: string; type?: string; tenantId?: string }): Promise<Job[]>
+  update(jobId: string, input: Partial<Pick<Job, 'name' | 'description' | 'config' | 'schedule' | 'status'>>): Promise<Job>
   /** Delete a job. cascade=true deletes orphaned documents (those with no other job relations). */
-  delete(jobId: string, opts?: { cascade?: boolean }): void
+  delete(jobId: string, opts?: { cascade?: boolean }): Promise<void>
   run(jobId: string): Promise<JobRunResult>
-  pause(jobId: string): void
-  resume(jobId: string): void
+  pause(jobId: string): Promise<void>
+  resume(jobId: string): Promise<void>
 }
 
 // ── Document-Job Relations Sub-API ──
 
 export interface DocumentJobsApi {
-  getJobsForDocument(documentId: string): DocumentJobRelation[]
-  getDocumentsForJob(jobId: string): DocumentJobRelation[]
-  addRelation(documentId: string, jobId: string, relation: DocumentJobRelationType): void
+  getJobsForDocument(documentId: string): Promise<DocumentJobRelation[]>
+  getDocumentsForJob(jobId: string): Promise<DocumentJobRelation[]>
+  addRelation(documentId: string, jobId: string, relation: DocumentJobRelationType): Promise<void>
 }
 
 /** The d8um instance interface - all public methods. */
 export interface d8umInstance {
-  initialize(config: d8umConfig): this
+  initialize(config: d8umConfig): Promise<this>
 
   sources: SourcesApi
   jobs: JobsApi
@@ -126,7 +132,7 @@ class d8umImpl implements d8umInstance {
   // ── Sources ──
 
   sources: SourcesApi = {
-    create: (input: CreateSourceInput): Source => {
+    create: async (input: CreateSourceInput): Promise<Source> => {
       this.assertConfigured()
       const source: Source = {
         id: randomUUID(),
@@ -135,37 +141,56 @@ class d8umImpl implements d8umInstance {
         status: 'active',
         tenantId: input.tenantId ?? this.config.tenantId,
       }
+      if (this.adapter.upsertSource) {
+        const persisted = await this.adapter.upsertSource(source)
+        this.sourceEmbeddings.set(persisted.id, this.defaultEmbedding)
+        return persisted
+      }
       this._sources.set(source.id, source)
       this.sourceEmbeddings.set(source.id, this.defaultEmbedding)
       return source
     },
 
-    get: (sourceId: string): Source | undefined => {
+    get: async (sourceId: string): Promise<Source | undefined> => {
+      if (this.adapter.getSource) {
+        return (await this.adapter.getSource(sourceId)) ?? undefined
+      }
       return this._sources.get(sourceId)
     },
 
-    list: (tenantId?: string): Source[] => {
+    list: async (tenantId?: string): Promise<Source[]> => {
+      if (this.adapter.listSources) {
+        return this.adapter.listSources(tenantId)
+      }
       const all = [...this._sources.values()]
       if (tenantId) return all.filter(s => s.tenantId === tenantId)
       return all
     },
 
-    update: (sourceId: string, input: Partial<Pick<Source, 'name' | 'description' | 'status'>>): Source => {
-      const source = this._sources.get(sourceId)
+    update: async (sourceId: string, input: Partial<Pick<Source, 'name' | 'description' | 'status'>>): Promise<Source> => {
+      const source = await this.sources.get(sourceId)
       if (!source) throw new Error(`Source "${sourceId}" not found`)
       if (input.name !== undefined) source.name = input.name
       if (input.description !== undefined) source.description = input.description
       if (input.status !== undefined) source.status = input.status
+      if (this.adapter.upsertSource) {
+        return this.adapter.upsertSource(source)
+      }
+      this._sources.set(source.id, source)
       return source
     },
 
-    delete: (sourceId: string): void => {
+    delete: async (sourceId: string): Promise<void> => {
       // Delete source, cascade to jobs targeting it, and clean up relations
-      const jobsToDelete = [...this._jobs.values()].filter(j => j.sourceId === sourceId)
-      for (const job of jobsToDelete) {
-        this.jobs.delete(job.id, { cascade: true })
+      const jobs = await this.jobs.list({ sourceId })
+      for (const job of jobs) {
+        await this.jobs.delete(job.id, { cascade: true })
       }
-      this._sources.delete(sourceId)
+      if (this.adapter.deleteSource) {
+        await this.adapter.deleteSource(sourceId)
+      } else {
+        this._sources.delete(sourceId)
+      }
       this.sourceEmbeddings.delete(sourceId)
     },
   }
@@ -173,11 +198,12 @@ class d8umImpl implements d8umInstance {
   // ── Jobs ──
 
   jobs: JobsApi = {
-    create: (input: CreateJobInput): Job => {
+    create: async (input: CreateJobInput): Promise<Job> => {
       this.assertConfigured()
 
       // Validate source exists if required
-      if (input.sourceId && !this._sources.has(input.sourceId)) {
+      const source = input.sourceId ? await this.sources.get(input.sourceId) : undefined
+      if (input.sourceId && !source) {
         throw new Error(`Source "${input.sourceId}" not found`)
       }
 
@@ -202,15 +228,24 @@ class d8umImpl implements d8umInstance {
         createdAt: now,
         updatedAt: now,
       }
+      if (this.adapter.upsertJob) {
+        return this.adapter.upsertJob(job)
+      }
       this._jobs.set(job.id, job)
       return job
     },
 
-    get: (jobId: string): Job | undefined => {
+    get: async (jobId: string): Promise<Job | undefined> => {
+      if (this.adapter.getJob) {
+        return (await this.adapter.getJob(jobId)) ?? undefined
+      }
       return this._jobs.get(jobId)
     },
 
-    list: (filter?: { sourceId?: string; type?: string; tenantId?: string }): Job[] => {
+    list: async (filter?: { sourceId?: string; type?: string; tenantId?: string }): Promise<Job[]> => {
+      if (this.adapter.listJobs) {
+        return this.adapter.listJobs(filter)
+      }
       let jobs = [...this._jobs.values()]
       if (filter?.sourceId) jobs = jobs.filter(j => j.sourceId === filter.sourceId)
       if (filter?.type) jobs = jobs.filter(j => j.type === filter.type)
@@ -218,8 +253,8 @@ class d8umImpl implements d8umInstance {
       return jobs
     },
 
-    update: (jobId: string, input: Partial<Pick<Job, 'name' | 'description' | 'config' | 'schedule' | 'status'>>): Job => {
-      const job = this._jobs.get(jobId)
+    update: async (jobId: string, input: Partial<Pick<Job, 'name' | 'description' | 'config' | 'schedule' | 'status'>>): Promise<Job> => {
+      const job = await this.jobs.get(jobId)
       if (!job) throw new Error(`Job "${jobId}" not found`)
       if (input.name !== undefined) job.name = input.name
       if (input.description !== undefined) job.description = input.description
@@ -227,42 +262,78 @@ class d8umImpl implements d8umInstance {
       if (input.schedule !== undefined) job.schedule = input.schedule
       if (input.status !== undefined) job.status = input.status
       job.updatedAt = new Date()
+      if (this.adapter.upsertJob) {
+        return this.adapter.upsertJob(job)
+      }
+      this._jobs.set(job.id, job)
       return job
     },
 
-    delete: (jobId: string, opts?: { cascade?: boolean }): void => {
-      const job = this._jobs.get(jobId)
+    delete: async (jobId: string, opts?: { cascade?: boolean }): Promise<void> => {
+      const job = await this.jobs.get(jobId)
       if (!job) return
 
       if (opts?.cascade) {
-        // Find documents where this job is the ONLY related job
-        const jobRelations = this._documentJobRelations.filter(r => r.jobId === jobId)
-        for (const rel of jobRelations) {
-          const otherRelations = this._documentJobRelations.filter(
-            r => r.documentId === rel.documentId && r.jobId !== jobId
-          )
-          if (otherRelations.length === 0) {
-            // This is the sole job - document is orphaned, would be deleted
-            // (actual document deletion depends on adapter - flag for deletion)
-            // In a real implementation, adapter.deleteDocuments() would be called
+        if (this.adapter.getOrphanedDocumentIds) {
+          const orphanedIds = await this.adapter.getOrphanedDocumentIds(jobId)
+          if (orphanedIds.length > 0 && this.adapter.deleteDocuments) {
+            await this.adapter.deleteDocuments({ documentIds: orphanedIds })
+          }
+        } else {
+          // Fallback: in-memory cascade check
+          const jobRelations = this._documentJobRelations.filter(r => r.jobId === jobId)
+          const orphanedIds: string[] = []
+          for (const rel of jobRelations) {
+            const otherRelations = this._documentJobRelations.filter(
+              r => r.documentId === rel.documentId && r.jobId !== jobId
+            )
+            if (otherRelations.length === 0) {
+              orphanedIds.push(rel.documentId)
+            }
+          }
+          if (orphanedIds.length > 0 && this.adapter.deleteDocuments) {
+            await this.adapter.deleteDocuments({ documentIds: orphanedIds })
           }
         }
       }
 
-      // Remove all relations for this job
-      this._documentJobRelations = this._documentJobRelations.filter(r => r.jobId !== jobId)
-      this._jobs.delete(jobId)
+      // Remove relations
+      if (this.adapter.deleteDocumentJobRelations) {
+        await this.adapter.deleteDocumentJobRelations({ jobId })
+      } else {
+        this._documentJobRelations = this._documentJobRelations.filter(r => r.jobId !== jobId)
+      }
+
+      if (this.adapter.deleteJob) {
+        await this.adapter.deleteJob(jobId)
+      } else {
+        this._jobs.delete(jobId)
+      }
     },
 
     run: async (jobId: string): Promise<JobRunResult> => {
-      const job = this._jobs.get(jobId)
+      const job = await this.jobs.get(jobId)
       if (!job) throw new Error(`Job "${jobId}" not found`)
 
       const startMs = Date.now()
       job.status = 'running'
       job.updatedAt = new Date()
+      if (this.adapter.upsertJob) await this.adapter.upsertJob(job)
 
       const jobType = getJobType(job.type)
+
+      // Create a persistent job run record
+      const jobRun: JobRun = {
+        id: randomUUID(),
+        jobId: job.id,
+        sourceId: job.sourceId,
+        status: 'running',
+        documentsCreated: 0,
+        documentsUpdated: 0,
+        documentsDeleted: 0,
+        startedAt: new Date(),
+      }
+      if (this.adapter.createJobRun) await this.adapter.createJobRun(jobRun)
 
       // Build context with emit callback for ingestion jobs
       let documentsEmitted = 0
@@ -299,12 +370,41 @@ class d8umImpl implements d8umInstance {
         job.lastRunAt = new Date()
         job.runCount++
         job.updatedAt = new Date()
+        if (this.adapter.upsertJob) await this.adapter.upsertJob(job)
 
-        return { ...result, durationMs: Date.now() - startMs }
+        const finalResult = { ...result, durationMs: Date.now() - startMs }
+
+        // Persist completed run
+        if (this.adapter.updateJobRun) {
+          await this.adapter.updateJobRun(jobRun.id, {
+            status: 'completed',
+            summary: finalResult.summary,
+            documentsCreated: finalResult.documentsCreated,
+            documentsUpdated: finalResult.documentsUpdated,
+            documentsDeleted: finalResult.documentsDeleted,
+            metrics: finalResult.metrics,
+            durationMs: finalResult.durationMs,
+            completedAt: new Date(),
+          })
+        }
+
+        return finalResult
       } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err)
         job.status = 'failed'
-        job.lastError = err instanceof Error ? err.message : String(err)
+        job.lastError = errorMsg
         job.updatedAt = new Date()
+        if (this.adapter.upsertJob) await this.adapter.upsertJob(job)
+
+        // Persist failed run
+        if (this.adapter.updateJobRun) {
+          await this.adapter.updateJobRun(jobRun.id, {
+            status: 'failed',
+            error: errorMsg,
+            durationMs: Date.now() - startMs,
+            completedAt: new Date(),
+          })
+        }
 
         return {
           jobId: job.id,
@@ -314,67 +414,124 @@ class d8umImpl implements d8umInstance {
           documentsUpdated: 0,
           documentsDeleted: 0,
           durationMs: Date.now() - startMs,
-          error: job.lastError,
+          error: errorMsg,
         }
       }
     },
 
-    pause: (jobId: string): void => {
-      const job = this._jobs.get(jobId)
+    pause: async (jobId: string): Promise<void> => {
+      const job = await this.jobs.get(jobId)
       if (!job) throw new Error(`Job "${jobId}" not found`)
       job.status = 'idle'
       job.nextRunAt = undefined
       job.updatedAt = new Date()
+      if (this.adapter.upsertJob) await this.adapter.upsertJob(job)
+      else this._jobs.set(job.id, job)
     },
 
-    resume: (jobId: string): void => {
-      const job = this._jobs.get(jobId)
+    resume: async (jobId: string): Promise<void> => {
+      const job = await this.jobs.get(jobId)
       if (!job) throw new Error(`Job "${jobId}" not found`)
       if (job.schedule) {
         job.status = 'scheduled'
-        // nextRunAt would be calculated from the cron schedule
       } else {
         job.status = 'idle'
       }
       job.updatedAt = new Date()
+      if (this.adapter.upsertJob) await this.adapter.upsertJob(job)
+      else this._jobs.set(job.id, job)
     },
   }
 
   // ── Document-Job Relations ──
 
   documentJobs: DocumentJobsApi = {
-    getJobsForDocument: (documentId: string): DocumentJobRelation[] => {
+    getJobsForDocument: async (documentId: string): Promise<DocumentJobRelation[]> => {
+      if (this.adapter.getDocumentJobRelations) {
+        return this.adapter.getDocumentJobRelations({ documentId })
+      }
       return this._documentJobRelations.filter(r => r.documentId === documentId)
     },
 
-    getDocumentsForJob: (jobId: string): DocumentJobRelation[] => {
+    getDocumentsForJob: async (jobId: string): Promise<DocumentJobRelation[]> => {
+      if (this.adapter.getDocumentJobRelations) {
+        return this.adapter.getDocumentJobRelations({ jobId })
+      }
       return this._documentJobRelations.filter(r => r.jobId === jobId)
     },
 
-    addRelation: (documentId: string, jobId: string, relation: DocumentJobRelationType): void => {
-      // Check for existing relation to avoid duplicates
+    addRelation: async (documentId: string, jobId: string, relation: DocumentJobRelationType): Promise<void> => {
+      const newRelation: DocumentJobRelation = { documentId, jobId, relation, timestamp: new Date() }
+      if (this.adapter.upsertDocumentJobRelation) {
+        await this.adapter.upsertDocumentJobRelation(newRelation)
+        return
+      }
+      // Fallback: in-memory with dedup
       const exists = this._documentJobRelations.some(
         r => r.documentId === documentId && r.jobId === jobId && r.relation === relation
       )
       if (!exists) {
-        this._documentJobRelations.push({
-          documentId,
-          jobId,
-          relation,
-          timestamp: new Date(),
-        })
+        this._documentJobRelations.push(newRelation)
       }
     },
   }
 
   // ── Core Methods ──
 
-  initialize(config: d8umConfig): this {
+  async initialize(config: d8umConfig): Promise<this> {
     this.config = config
     this.adapter = config.vectorStore
     this.defaultEmbedding = resolveEmbeddingProvider(config.embedding)
+
+    // Register job types from integrations and config
+    if (config.integrations) {
+      for (const integration of config.integrations) {
+        for (const job of integration.jobs) {
+          registerJobType(job)
+        }
+      }
+    }
+    if (config.jobTypes) {
+      for (const jobType of config.jobTypes) {
+        registerJobType(jobType)
+      }
+    }
+
+    // Initialize adapter (creates tables if needed via IF NOT EXISTS)
+    await this.adapter.initialize()
+
+    // Hydrate in-memory state from persistent storage (for adapters that support it)
+    if (this.adapter.listSources) {
+      const sources = await this.adapter.listSources()
+      for (const s of sources) {
+        this._sources.set(s.id, s)
+        this.sourceEmbeddings.set(s.id, this.defaultEmbedding)
+      }
+    }
+    if (this.adapter.listJobs) {
+      const jobs = await this.adapter.listJobs()
+      for (const j of jobs) {
+        this._jobs.set(j.id, j)
+      }
+
+      // Warn about orphaned job types (persisted jobs whose types aren't registered)
+      for (const job of jobs) {
+        const jobType = getJobType(job.type)
+        if (!jobType) {
+          console.warn(
+            `⚠️ Job "${job.name}" (id: ${job.id}) references unregistered type "${job.type}". ` +
+            `Running this job will fail. Either add the integration that provides this type ` +
+            `to your initialize() config, or delete the orphaned job.`
+          )
+        }
+      }
+    }
+    if (this.adapter.getDocumentJobRelations) {
+      this._documentJobRelations = await this.adapter.getDocumentJobRelations({})
+    }
+
     this.configured = true
-    this.initialized = false
+    this.initialized = true
     return this
   }
 
@@ -414,7 +571,7 @@ class d8umImpl implements d8umInstance {
     opts?: IndexOpts,
   ): Promise<IndexResult> {
     await this.ensureInitialized()
-    const source = this._sources.get(sourceId)
+    const source = await this.sources.get(sourceId)
     if (!source) throw new Error(`Source "${sourceId}" not found`)
 
     const embedding = this.getEmbeddingForSource(sourceId)
@@ -433,7 +590,7 @@ class d8umImpl implements d8umInstance {
     opts?: IndexOpts
   ): Promise<IndexResult> {
     await this.ensureInitialized()
-    const source = this._sources.get(sourceId)
+    const source = await this.sources.get(sourceId)
     if (!source) throw new Error(`Source "${sourceId}" not found`)
     const { defaultChunker: chunker } = await import('./index-engine/chunker.js')
     const chunks = chunker(doc, indexConfig)
@@ -447,7 +604,7 @@ class d8umImpl implements d8umInstance {
     opts?: IndexOpts
   ): Promise<IndexResult> {
     await this.ensureInitialized()
-    const source = this._sources.get(sourceId)
+    const source = await this.sources.get(sourceId)
     if (!source) throw new Error(`Source "${sourceId}" not found`)
     const embedding = this.getEmbeddingForSource(sourceId)
     const engine = new IndexEngine(this.adapter, embedding)
@@ -502,18 +659,16 @@ class d8umImpl implements d8umInstance {
   }
 
   private async ensureInitialized(): Promise<void> {
-    this.assertConfigured()
-    if (!this.initialized) {
-      await this.adapter.initialize()
-      this.initialized = true
+    if (!this.configured || !this.initialized) {
+      throw new Error('d8um not initialized. Call await d8um.initialize({ vectorStore, embedding }) first.')
     }
   }
 }
 
 /** Create a new independent d8um instance. */
-export function d8umCreate(config: d8umConfig): d8umInstance {
+export async function d8umCreate(config: d8umConfig): Promise<d8umInstance> {
   return new d8umImpl().initialize(config)
 }
 
-/** Global singleton d8um instance. Call d8um.initialize() before use. */
+/** Global singleton d8um instance. Call await d8um.initialize() before use. */
 export const d8um: d8umInstance = new d8umImpl()

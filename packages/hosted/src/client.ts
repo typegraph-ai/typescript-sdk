@@ -33,92 +33,72 @@ export function d8umHosted(config: HostedConfig): d8umHostedInstance {
   const client = new HttpClient(config)
 
   const sources: SourcesApi = {
-    create(input: CreateSourceInput): Source {
-      // Fire-and-forget async registration
-      void client.post('/v1/sources', input)
-      return {
-        id: 'pending',
-        name: input.name,
-        description: input.description,
-        status: 'active',
-        tenantId: input.tenantId,
-      }
+    async create(input: CreateSourceInput): Promise<Source> {
+      return client.post<Source>('/v1/sources', input)
     },
-    get(_sourceId: string): Source | undefined {
-      throw new Error('Use async listSources() in hosted mode')
+    async get(sourceId: string): Promise<Source | undefined> {
+      return client.get<Source>(`/v1/sources/${encodeURIComponent(sourceId)}`)
     },
-    list(): Source[] {
-      throw new Error('Use async listSources() in hosted mode')
+    async list(tenantId?: string): Promise<Source[]> {
+      const params = tenantId ? `?tenantId=${encodeURIComponent(tenantId)}` : ''
+      return client.get<Source[]>(`/v1/sources${params}`)
     },
-    update(sourceId: string, input): Source {
-      void client.patch(`/v1/sources/${encodeURIComponent(sourceId)}`, input)
-      return { id: sourceId, name: '', status: 'active', ...input }
+    async update(sourceId: string, input): Promise<Source> {
+      return client.patch<Source>(`/v1/sources/${encodeURIComponent(sourceId)}`, input)
     },
-    delete(sourceId: string): void {
-      void client.delete(`/v1/sources/${encodeURIComponent(sourceId)}`)
+    async delete(sourceId: string): Promise<void> {
+      await client.delete(`/v1/sources/${encodeURIComponent(sourceId)}`)
     },
   }
 
   const jobs: JobsApi = {
-    create(input: CreateJobInput): Job {
-      void client.post('/v1/jobs', input)
-      const now = new Date()
-      return {
-        id: 'pending',
-        type: input.type,
-        name: input.name,
-        description: input.description,
-        sourceId: input.sourceId,
-        tenantId: input.tenantId,
-        config: input.config ?? {},
-        schedule: input.schedule,
-        status: 'idle',
-        runCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      }
+    async create(input: CreateJobInput): Promise<Job> {
+      return client.post<Job>('/v1/jobs', input)
     },
-    get(_jobId: string): Job | undefined {
-      throw new Error('Use async API in hosted mode')
+    async get(jobId: string): Promise<Job | undefined> {
+      return client.get<Job>(`/v1/jobs/${encodeURIComponent(jobId)}`)
     },
-    list(): Job[] {
-      throw new Error('Use async API in hosted mode')
+    async list(filter?): Promise<Job[]> {
+      const params = new URLSearchParams()
+      if (filter?.sourceId) params.set('sourceId', filter.sourceId)
+      if (filter?.type) params.set('type', filter.type)
+      if (filter?.tenantId) params.set('tenantId', filter.tenantId)
+      const qs = params.toString()
+      return client.get<Job[]>(`/v1/jobs${qs ? `?${qs}` : ''}`)
     },
-    update(jobId: string, input): Job {
-      void client.patch(`/v1/jobs/${encodeURIComponent(jobId)}`, input)
-      const now = new Date()
-      return { id: jobId, type: '', name: '', config: {}, status: 'idle', runCount: 0, createdAt: now, updatedAt: now, ...input }
+    async update(jobId: string, input): Promise<Job> {
+      return client.patch<Job>(`/v1/jobs/${encodeURIComponent(jobId)}`, input)
     },
-    delete(jobId: string, opts?): void {
-      void client.delete(`/v1/jobs/${encodeURIComponent(jobId)}`, opts)
+    async delete(jobId: string, opts?): Promise<void> {
+      await client.delete(`/v1/jobs/${encodeURIComponent(jobId)}`, opts)
     },
     async run(jobId: string): Promise<JobRunResult> {
       return client.post<JobRunResult>(`/v1/jobs/${encodeURIComponent(jobId)}/run`)
     },
-    pause(jobId: string): void {
-      void client.post(`/v1/jobs/${encodeURIComponent(jobId)}/pause`)
+    async pause(jobId: string): Promise<void> {
+      await client.post(`/v1/jobs/${encodeURIComponent(jobId)}/pause`)
     },
-    resume(jobId: string): void {
-      void client.post(`/v1/jobs/${encodeURIComponent(jobId)}/resume`)
+    async resume(jobId: string): Promise<void> {
+      await client.post(`/v1/jobs/${encodeURIComponent(jobId)}/resume`)
     },
   }
 
   const documentJobs: DocumentJobsApi = {
-    getJobsForDocument(_documentId: string): DocumentJobRelation[] {
-      throw new Error('Use async API in hosted mode')
+    async getJobsForDocument(documentId: string): Promise<DocumentJobRelation[]> {
+      return client.get<DocumentJobRelation[]>(`/v1/document-jobs?documentId=${encodeURIComponent(documentId)}`)
     },
-    getDocumentsForJob(_jobId: string): DocumentJobRelation[] {
-      throw new Error('Use async API in hosted mode')
+    async getDocumentsForJob(jobId: string): Promise<DocumentJobRelation[]> {
+      return client.get<DocumentJobRelation[]>(`/v1/document-jobs?jobId=${encodeURIComponent(jobId)}`)
     },
-    addRelation(_documentId: string, _jobId: string, _relation: DocumentJobRelationType): void {
-      throw new Error('Use async API in hosted mode')
+    async addRelation(documentId: string, jobId: string, relation: DocumentJobRelationType): Promise<void> {
+      await client.post('/v1/document-jobs', { documentId, jobId, relation })
     },
   }
 
   return {
     // --- d8umInstance methods ---
 
-    initialize(_config: d8umConfig): d8umHostedInstance {
+    async initialize(_config: d8umConfig): Promise<d8umHostedInstance> {
       return this as d8umHostedInstance
     },
 

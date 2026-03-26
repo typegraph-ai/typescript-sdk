@@ -19,7 +19,7 @@ describe('integration', () => {
   it('add source → index → query → assemble xml', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umCreate({ vectorStore: adapter, embedding })
 
     const { source, connector, indexConfig } = createMockSource({ documents: createTestDocuments(3) })
     registerTestSource(instance, source, embedding)
@@ -37,7 +37,7 @@ describe('integration', () => {
   it('index → re-index with changes → query shows updated content', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umCreate({ vectorStore: adapter, embedding })
 
     const docs = [createTestDocument({ id: 'doc-1', content: 'Original content for testing' })]
     const { source, connector, indexConfig } = createMockSource({ documents: docs })
@@ -57,7 +57,7 @@ describe('integration', () => {
   it('multi-source → merged query results', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umCreate({ vectorStore: adapter, embedding })
 
     const { source: source1, connector: connector1, indexConfig: indexConfig1 } = createMockSource({ id: 'src-1', documents: createTestDocuments(2, 'Alpha') })
     const { source: source2, connector: connector2, indexConfig: indexConfig2 } = createMockSource({ id: 'src-2', documents: createTestDocuments(2, 'Beta') })
@@ -78,7 +78,7 @@ describe('integration', () => {
     const adapter = createMockAdapter()
     const embeddingA = createMockEmbedding({ model: 'model-a', dimensions: 4 })
     const embeddingB = createMockEmbedding({ model: 'model-b', dimensions: 4 })
-    const instance = d8umCreate({ vectorStore: adapter, embedding: embeddingA })
+    const instance = await d8umCreate({ vectorStore: adapter, embedding: embeddingA })
 
     const { source: source1, connector: connector1, indexConfig: indexConfig1 } = createMockSource({ id: 'src-1', documents: createTestDocuments(2, 'Alpha') })
     const { source: source2, connector: connector2, indexConfig: indexConfig2 } = createMockSource({ id: 'src-2', documents: createTestDocuments(2, 'Beta') })
@@ -96,7 +96,7 @@ describe('integration', () => {
   it('idempotency (repeated indexing is no-op)', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umCreate({ vectorStore: adapter, embedding })
 
     const { source, connector, indexConfig } = createMockSource({ documents: createTestDocuments(2) })
     registerTestSource(instance, source, embedding)
@@ -112,7 +112,7 @@ describe('integration', () => {
   it('tenant isolation', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umCreate({ vectorStore: adapter, embedding })
 
     const { source, connector, indexConfig } = createMockSource({ documents: createTestDocuments(2) })
     registerTestSource(instance, source, embedding)
@@ -130,7 +130,7 @@ describe('integration', () => {
   it('ingestWithChunks → query', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umCreate({ vectorStore: adapter, embedding })
 
     const { source } = createMockSource({ documents: [] })
     registerTestSource(instance, source, embedding)
@@ -149,7 +149,7 @@ describe('integration', () => {
   it('prune pipeline', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umCreate({ vectorStore: adapter, embedding })
 
     const docs = createTestDocuments(3)
     const { source, connector, indexConfig } = createMockSource({ documents: docs })
@@ -165,7 +165,7 @@ describe('integration', () => {
   it('assemble format pipeline (same results → xml/md/plain/custom)', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umCreate({ vectorStore: adapter, embedding })
 
     const { source, connector, indexConfig } = createMockSource({ documents: createTestDocuments(2) })
     registerTestSource(instance, source, embedding)
@@ -192,7 +192,7 @@ describe('integration', () => {
 
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = d8umCreate({
+    const instance = await d8umCreate({
       vectorStore: adapter,
       embedding,
       hooks: { onIndexStart, onIndexComplete, onQueryResults },

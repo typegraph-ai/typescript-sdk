@@ -59,6 +59,7 @@ export type {
   CreateJobInput,
   JobRunContext,
   JobRunResult,
+  JobRun,
   ResultField,
   ApiClient,
   ApiResponse,

@@ -56,6 +56,10 @@ export type { InvalidationConfig, Contradiction } from './extraction/index.js'
 // Jobs
 export { conversationIngestJob } from './jobs/conversation-ingest.js'
 
+// Adapters
+export { PgMemoryStoreAdapter } from './adapters/pgvector.js'
+export type { PgMemoryAdapterConfig } from './adapters/pgvector.js'
+
 // Unified API
 export { d8umMemory } from './d8um-memory.js'
 export type { d8umMemoryConfig } from './d8um-memory.js'

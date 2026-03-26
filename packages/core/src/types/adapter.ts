@@ -1,6 +1,8 @@
 import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from './document.js'
 import type { d8umDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from './d8um-document.js'
 import type { DocumentJobRelation, DocumentJobRelationFilter } from './document-job-relation.js'
+import type { Source } from './source.js'
+import type { Job, JobRun } from './job.js'
 
 export interface SearchOpts {
   count: number
@@ -90,4 +92,35 @@ export interface VectorStoreAdapter {
   deleteDocumentJobRelations?(filter: { jobId: string }): Promise<void>
   /** Get document IDs where the given job is the ONLY related job (orphaned on job delete). */
   getOrphanedDocumentIds?(jobId: string): Promise<string[]>
+
+  // --- Source persistence (optional - adapters that support persistence implement these) ---
+
+  /** Create or update a source. */
+  upsertSource?(source: Source): Promise<Source>
+  /** Get a source by ID. */
+  getSource?(id: string): Promise<Source | null>
+  /** List sources, optionally filtered by tenant. */
+  listSources?(tenantId?: string): Promise<Source[]>
+  /** Delete a source by ID. */
+  deleteSource?(id: string): Promise<void>
+
+  // --- Job persistence (optional) ---
+
+  /** Create or update a job instance. */
+  upsertJob?(job: Job): Promise<Job>
+  /** Get a job by ID. */
+  getJob?(id: string): Promise<Job | null>
+  /** List jobs matching an optional filter. */
+  listJobs?(filter?: { sourceId?: string; type?: string; tenantId?: string }): Promise<Job[]>
+  /** Delete a job by ID. */
+  deleteJob?(id: string): Promise<void>
+
+  // --- Job run history (optional) ---
+
+  /** Record a job execution. */
+  createJobRun?(run: JobRun): Promise<JobRun>
+  /** Update a running job's status/result. */
+  updateJobRun?(id: string, update: Partial<JobRun>): Promise<void>
+  /** List run history for a job, most recent first. */
+  listJobRuns?(jobId: string, limit?: number): Promise<JobRun[]>
 }

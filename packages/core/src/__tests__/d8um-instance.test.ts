@@ -20,22 +20,22 @@ describe('d8umCreate', () => {
   let embedding: ReturnType<typeof createMockEmbedding>
   let instance: d8umInstance
 
-  beforeEach(() => {
+  beforeEach(async () => {
     adapter = createMockAdapter()
     embedding = createMockEmbedding()
-    instance = d8umCreate({ vectorStore: adapter, embedding })
+    instance = await d8umCreate({ vectorStore: adapter, embedding })
   })
 
   describe('sources.create', () => {
-    it('creates a source with a generated id', () => {
-      const source = instance.sources.create({ name: 'Test Source' })
+    it('creates a source with a generated id', async () => {
+      const source = await instance.sources.create({ name: 'Test Source' })
       expect(source.id).toBeDefined()
       expect(source.name).toBe('Test Source')
       expect(source.status).toBe('active')
     })
 
-    it('registers embedding for new source', () => {
-      const source = instance.sources.create({ name: 'Test Source' })
+    it('registers embedding for new source', async () => {
+      const source = await instance.sources.create({ name: 'Test Source' })
       expect(instance.getEmbeddingForSource(source.id)).toBeDefined()
     })
   })
@@ -109,11 +109,8 @@ describe('d8umCreate', () => {
       await expect(instance.indexWithConnector('unknown', connector, indexConfig)).rejects.toThrow('not found')
     })
 
-    it('calls adapter.initialize lazily', async () => {
-      const { source, connector, indexConfig } = createMockSource({ documents: [createTestDocument()] })
-      registerTestSource(instance, source, embedding)
-      expect(adapter.calls.filter(c => c.method === 'initialize')).toHaveLength(0)
-      await instance.indexWithConnector(source.id, connector, indexConfig)
+    it('calls adapter.initialize eagerly during d8umCreate', async () => {
+      // initialize() is now called eagerly during d8umCreate, not lazily on first use
       expect(adapter.calls.filter(c => c.method === 'initialize')).toHaveLength(1)
     })
   })
@@ -138,7 +135,7 @@ describe('d8umCreate', () => {
     })
 
     it('passes tenantId from config', async () => {
-      const inst = d8umCreate({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
+      const inst = await d8umCreate({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
       const { source, connector, indexConfig } = createMockSource({ documents: createTestDocuments(1) })
       registerTestSource(inst, source, embedding)
       await inst.indexWithConnector(source.id, connector, indexConfig)
@@ -147,7 +144,7 @@ describe('d8umCreate', () => {
     })
 
     it('per-query tenantId overrides config', async () => {
-      const inst = d8umCreate({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
+      const inst = await d8umCreate({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
       const { source, connector, indexConfig } = createMockSource({ documents: createTestDocuments(1) })
       registerTestSource(inst, source, embedding)
       await inst.indexWithConnector(source.id, connector, indexConfig)
@@ -180,7 +177,7 @@ describe('d8umCreate', () => {
     it('fires onIndexStart and onIndexComplete', async () => {
       const onIndexStart = vi.fn()
       const onIndexComplete = vi.fn()
-      const inst = d8umCreate({
+      const inst = await d8umCreate({
         vectorStore: adapter,
         embedding,
         hooks: { onIndexStart, onIndexComplete },
@@ -194,7 +191,7 @@ describe('d8umCreate', () => {
 
     it('fires onQueryResults', async () => {
       const onQueryResults = vi.fn()
-      const inst = d8umCreate({
+      const inst = await d8umCreate({
         vectorStore: adapter,
         embedding,
         hooks: { onQueryResults },

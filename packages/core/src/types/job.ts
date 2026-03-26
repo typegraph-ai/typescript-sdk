@@ -187,3 +187,23 @@ export interface ResultField {
   label: string
   type: 'text' | 'number' | 'boolean' | 'json'
 }
+
+/**
+ * A persisted record of a single job execution.
+ * Created by the adapter when jobs.run() completes.
+ */
+export interface JobRun {
+  id: string
+  jobId: string
+  sourceId?: string | undefined
+  status: 'running' | 'completed' | 'failed'
+  summary?: string | undefined
+  documentsCreated: number
+  documentsUpdated: number
+  documentsDeleted: number
+  metrics?: Record<string, unknown> | undefined
+  error?: string | undefined
+  durationMs?: number | undefined
+  startedAt: Date
+  completedAt?: Date | undefined
+}

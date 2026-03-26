@@ -23,7 +23,7 @@ describe('searchWithContext', () => {
   beforeEach(async () => {
     adapter = createMockAdapter()
     embedding = createMockEmbedding()
-    instance = d8umCreate({ vectorStore: adapter, embedding })
+    instance = await d8umCreate({ vectorStore: adapter, embedding })
 
     // Create a multi-chunk document
     const longContent = Array.from({ length: 10 }, (_, i) =>
@@ -67,7 +67,7 @@ describe('searchWithContext', () => {
 
   it('returns empty passages when no results', async () => {
     const emptyAdapter = createMockAdapter()
-    const emptyInstance = d8umCreate({ vectorStore: emptyAdapter, embedding })
+    const emptyInstance = await d8umCreate({ vectorStore: emptyAdapter, embedding })
     const { source: emptySource } = createMockSource({ documents: [] })
     registerTestSource(emptyInstance, emptySource, embedding)
     const response = await emptyInstance.searchWithContext('nonexistent')

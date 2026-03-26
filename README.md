@@ -47,13 +47,13 @@ import { d8um } from '@d8um/core'
 import { LocalEmbeddingProvider } from '@d8um/embedding-local'
 import { SqliteVecAdapter } from '@d8um/adapter-sqlite-vec'
 
-d8um.initialize({
+await d8um.initialize({
   embedding: new LocalEmbeddingProvider(),
   vectorStore: new SqliteVecAdapter({ dbPath: './my-app.db' }),
 })
 
 // Create a source
-const faq = d8um.sources.create({ name: 'faq' })
+const faq = await d8um.sources.create({ name: 'faq' })
 
 // Ingest a document
 await d8um.ingest(faq.id, {

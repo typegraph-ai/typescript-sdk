@@ -86,3 +86,75 @@ export const HASH_TABLE_SQL = (hashesTable: string) => `
     PRIMARY KEY (source_id, tenant_id)
   );
 `
+
+/**
+ * DDL for the sources table.
+ */
+export const SOURCES_TABLE_SQL = (table: string) => `
+  CREATE TABLE IF NOT EXISTS ${table} (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT,
+    status      TEXT NOT NULL DEFAULT 'active',
+    tenant_id   TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`
+
+/**
+ * DDL for the jobs table.
+ */
+export const JOBS_TABLE_SQL = (table: string) => `
+  CREATE TABLE IF NOT EXISTS ${table} (
+    id          TEXT PRIMARY KEY,
+    tenant_id   TEXT,
+    source_id   TEXT,
+    type        TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    description TEXT,
+    config      TEXT NOT NULL DEFAULT '{}',
+    schedule    TEXT,
+    status      TEXT NOT NULL DEFAULT 'idle',
+    last_run_at TEXT,
+    next_run_at TEXT,
+    run_count   INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`
+
+/**
+ * DDL for the job runs table.
+ */
+export const JOB_RUNS_TABLE_SQL = (table: string) => `
+  CREATE TABLE IF NOT EXISTS ${table} (
+    id                TEXT PRIMARY KEY,
+    job_id            TEXT NOT NULL,
+    source_id         TEXT,
+    status            TEXT NOT NULL DEFAULT 'running',
+    summary           TEXT,
+    documents_created INTEGER NOT NULL DEFAULT 0,
+    documents_updated INTEGER NOT NULL DEFAULT 0,
+    documents_deleted INTEGER NOT NULL DEFAULT 0,
+    metrics           TEXT NOT NULL DEFAULT '{}',
+    error             TEXT,
+    duration_ms       INTEGER,
+    started_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at      TEXT
+  );
+`
+
+/**
+ * DDL for the document-job relations table.
+ */
+export const DOCUMENT_JOB_RELATIONS_TABLE_SQL = (table: string) => `
+  CREATE TABLE IF NOT EXISTS ${table} (
+    document_id TEXT NOT NULL,
+    job_id      TEXT NOT NULL,
+    relation    TEXT NOT NULL,
+    timestamp   TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (document_id, job_id)
+  );
+`

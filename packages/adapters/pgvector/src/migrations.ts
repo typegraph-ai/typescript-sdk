@@ -123,6 +123,99 @@ export const DOCUMENTS_TABLE_SQL = (documentsTable: string) => `
 `
 
 /**
+ * DDL for the sources table - persists d8um Source records.
+ */
+export const SOURCES_TABLE_SQL = (table: string) => `
+  CREATE TABLE IF NOT EXISTS ${table} (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    description TEXT,
+    status      TEXT NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'inactive')),
+    tenant_id   TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS ${table}_tenant_idx
+    ON ${table} (tenant_id);
+`
+
+/**
+ * DDL for the jobs table - persists d8um Job instances.
+ */
+export const JOBS_TABLE_SQL = (table: string) => `
+  CREATE TABLE IF NOT EXISTS ${table} (
+    id          TEXT PRIMARY KEY,
+    tenant_id   TEXT,
+    source_id   TEXT,
+    type        TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    description TEXT,
+    config      JSONB NOT NULL DEFAULT '{}',
+    schedule    TEXT,
+    status      TEXT NOT NULL DEFAULT 'idle'
+                CHECK (status IN ('idle', 'running', 'completed', 'failed', 'scheduled')),
+    last_run_at TIMESTAMPTZ,
+    next_run_at TIMESTAMPTZ,
+    run_count   INTEGER NOT NULL DEFAULT 0,
+    last_error  TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS ${table}_tenant_idx
+    ON ${table} (tenant_id);
+
+  CREATE INDEX IF NOT EXISTS ${table}_source_idx
+    ON ${table} (source_id);
+
+  CREATE INDEX IF NOT EXISTS ${table}_type_idx
+    ON ${table} (type);
+`
+
+/**
+ * DDL for the job runs table - persists execution history.
+ */
+export const JOB_RUNS_TABLE_SQL = (table: string) => `
+  CREATE TABLE IF NOT EXISTS ${table} (
+    id                TEXT PRIMARY KEY,
+    job_id            TEXT NOT NULL,
+    source_id         TEXT,
+    status            TEXT NOT NULL DEFAULT 'running'
+                      CHECK (status IN ('running', 'completed', 'failed')),
+    summary           TEXT,
+    documents_created INTEGER NOT NULL DEFAULT 0,
+    documents_updated INTEGER NOT NULL DEFAULT 0,
+    documents_deleted INTEGER NOT NULL DEFAULT 0,
+    metrics           JSONB NOT NULL DEFAULT '{}',
+    error             TEXT,
+    duration_ms       INTEGER,
+    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at      TIMESTAMPTZ
+  );
+
+  CREATE INDEX IF NOT EXISTS ${table}_job_idx
+    ON ${table} (job_id);
+`
+
+/**
+ * DDL for the document-job relations table.
+ */
+export const DOCUMENT_JOB_RELATIONS_TABLE_SQL = (table: string) => `
+  CREATE TABLE IF NOT EXISTS ${table} (
+    document_id TEXT NOT NULL,
+    job_id      TEXT NOT NULL,
+    relation    TEXT NOT NULL CHECK (relation IN ('created', 'modified')),
+    timestamp   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (document_id, job_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS ${table}_job_idx
+    ON ${table} (job_id);
+`
+
+/**
  * Sanitize a model identifier into a valid SQL table name suffix.
  * e.g., "openai/text-embedding-3-small" → "openai_text_embedding_3_small"
  */
