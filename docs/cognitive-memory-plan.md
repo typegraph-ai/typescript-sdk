@@ -186,32 +186,39 @@ Scoping logic: a memory is visible if the query scope matches or is a subset of 
 
 | File | Change |
 |------|--------|
-| `packages/core/src/types/job.ts` | Add `'memory'` to `JobCategory` union. Add `execute()` method and `resultSchema` to `JobTypeDefinition`. |
-| `packages/core/src/d8um.ts` | Update `jobs.run()` to check for `execute()` when `run()` is absent. |
+| `packages/core/src/types/job.ts` | Add `'memory'` to `JobCategory` union. Unify `run()` to return `Promise<JobRunResult>`. Add `ctx.emit()` for document production. Add `resultSchema`, `summary`, `metrics`, `data` to `JobRunResult`. |
+| `packages/core/src/d8um.ts` | Update `jobs.run()` to call the single `run()` method. |
 
-**Critical: Generalize JobTypeDefinition for non-ingestion jobs.**
+**Critical: One method — `run()` — for all jobs.**
 
-The current `run()` yields `RawDocument` — designed for ingestion. Memory jobs don't produce documents. We add `execute()` as a general-purpose alternative:
+Every job has a single `run(ctx) => Promise<JobRunResult>`. What the job does and what it returns is defined by the job itself, not by the interface:
 
-```ts
-// Added to JobTypeDefinition:
-
-/** General-purpose execution — for jobs that don't yield documents. */
-execute?: ((ctx: JobRunContext) => Promise<JobExecuteResult>) | undefined
-
-/** Describes the shape of results this job produces. Mirrors configSchema for outputs. */
-resultSchema?: ResultField[] | undefined
-
-// A job defines EITHER run() (streaming doc yields) OR execute() (returns result).
-// If both are defined, run() takes precedence for backward compatibility.
-```
+- Ingestion jobs emit documents via `ctx.emit(doc)` and report `documentsCreated`
+- Memory jobs consolidate/decay/extract and report `metrics`
+- Any job can include `summary`, `data`, or arbitrary `metrics`
 
 ```ts
-interface JobExecuteResult {
+interface JobRunContext {
+  job: Job
+  client?: ApiClient
+  lastRunAt?: Date
+  metadata?: Record<string, unknown>
+  setMetadata?: (key: string, value: unknown) => void
+  /** Emit a document during ingestion. Non-ingestion jobs ignore it. */
+  emit?: (doc: RawDocument) => void
+}
+
+interface JobRunResult {
+  jobId: string
+  sourceId?: string
   status: 'completed' | 'failed'
-  summary: string
-  metrics?: Record<string, number>
+  summary?: string
+  documentsCreated: number
+  documentsUpdated: number
+  documentsDeleted: number
+  metrics?: Record<string, number>   // { factsExtracted: 5, contradictionsResolved: 2 }
   data?: Record<string, unknown>
+  durationMs: number
   error?: string
 }
 ```
@@ -390,8 +397,8 @@ All consolidation logic operates through `MemoryStoreAdapter` interface and the 
 
 | File | Phase | Change | Breaking? |
 |------|-------|--------|-----------|
-| `packages/core/src/types/job.ts` | 1 | Add `'memory'` to JobCategory union, add `execute()` and `resultSchema` | No |
-| `packages/core/src/d8um.ts` | 1 | Update `jobs.run()` to support `execute()` | No |
+| `packages/core/src/types/job.ts` | 1 | Add `'memory'` to JobCategory, unify `run()` signature, add `ctx.emit()`, extend `JobRunResult` with `summary`/`metrics`/`data` | No |
+| `packages/core/src/d8um.ts` | 1 | Update `jobs.run()` to call unified `run()` | No |
 | `packages/core/src/types/query.ts` | 2 | Add optional `temporalAt`, `includeInvalidated` to QueryOpts | No |
 | `packages/core/src/query/merger.ts` | 2 | Add optional `temporalBoost` to NormalizedResult | No |
 | `packages/core/src/types/hooks.ts` | 2 | Add optional memory hooks | No |

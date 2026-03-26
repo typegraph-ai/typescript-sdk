@@ -1,4 +1,4 @@
-import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument, JobRunResult } from '@d8um/core'
 
 /**
  * Fetches deals from a HubSpot CRM workspace incrementally.
@@ -39,7 +39,7 @@ export const dealsJob: JobTypeDefinition = {
     },
   ],
 
-  async *run(ctx: JobRunContext): AsyncIterable<RawDocument> {
+  async run(ctx: JobRunContext): Promise<JobRunResult> {
     // 1. Get the incremental cursor from previous run
     // const lastSyncedAt = ctx.state?.lastSyncedAt as string | undefined
     //
@@ -95,5 +95,15 @@ export const dealsJob: JobTypeDefinition = {
     // ctx.state.lastSyncedAt = new Date().toISOString()
 
     throw new Error('HubSpotIntegration deals job is not yet implemented')
+
+    return {
+      jobId: ctx.job.id,
+      sourceId: ctx.job.sourceId,
+      status: 'completed',
+      documentsCreated: 0,
+      documentsUpdated: 0,
+      documentsDeleted: 0,
+      durationMs: 0,
+    }
   },
 }

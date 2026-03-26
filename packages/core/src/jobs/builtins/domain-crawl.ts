@@ -1,4 +1,4 @@
-import type { JobTypeDefinition, JobRunContext } from '../../types/job.js'
+import type { JobTypeDefinition, JobRunContext, JobRunResult } from '../../types/job.js'
 import type { RawDocument } from '../../types/connector.js'
 import { fetchPage } from './url-scrape.js'
 import type { UrlMeta } from './url-scrape.js'
@@ -17,17 +17,17 @@ export const domainCrawlJob: JobTypeDefinition = {
     { key: 'max_pages', label: 'Max Pages', type: 'number', required: false, placeholder: '100' },
   ],
 
-  async *run(ctx: JobRunContext): AsyncIterable<RawDocument> {
-    const startUrl = ctx.job.config.domain as string
+  async run(ctx: JobRunContext): Promise<JobRunResult> {
+    const startUrl = ctx.job.config['domain'] as string
     if (!startUrl) throw new Error('domain_crawl: missing "domain" in job config')
 
-    const maxPages = (ctx.job.config.max_pages as number | undefined) ?? 500
-    const maxDepth = (ctx.job.config.max_depth as number | undefined) ?? 20
-    const crawlDelay = (ctx.job.config.crawl_delay as number | undefined) ?? 200
-    const userAgent = ctx.job.config.user_agent as string | undefined
-    const allowPatterns = ctx.job.config.allow_patterns as string[] | undefined
-    const denyPatterns = ctx.job.config.deny_patterns as string[] | undefined
-    const allowedDomains = ctx.job.config.allowed_domains as string[] | undefined
+    const maxPages = (ctx.job.config['max_pages'] as number | undefined) ?? 500
+    const maxDepth = (ctx.job.config['max_depth'] as number | undefined) ?? 20
+    const crawlDelay = (ctx.job.config['crawl_delay'] as number | undefined) ?? 200
+    const userAgent = ctx.job.config['user_agent'] as string | undefined
+    const allowPatterns = ctx.job.config['allow_patterns'] as string[] | undefined
+    const denyPatterns = ctx.job.config['deny_patterns'] as string[] | undefined
+    const allowedDomains = ctx.job.config['allowed_domains'] as string[] | undefined
 
     const crawler = new Crawler({
       startUrl,
@@ -40,7 +40,21 @@ export const domainCrawlJob: JobTypeDefinition = {
       allowedDomains,
     })
 
-    yield* crawler.crawl()
+    let created = 0
+    for await (const doc of crawler.crawl()) {
+      ctx.emit?.(doc)
+      created++
+    }
+
+    return {
+      jobId: ctx.job.id,
+      sourceId: ctx.job.sourceId,
+      status: 'completed',
+      documentsCreated: created,
+      documentsUpdated: 0,
+      documentsDeleted: 0,
+      durationMs: 0,
+    }
   },
 }
 

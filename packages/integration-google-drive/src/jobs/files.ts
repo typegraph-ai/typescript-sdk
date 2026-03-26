@@ -1,4 +1,4 @@
-import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument, JobRunResult } from '@d8um/core'
 
 /**
  * Fetches files from Google Drive.
@@ -55,7 +55,7 @@ export const filesJob: JobTypeDefinition = {
     },
   ],
 
-  async *run(ctx: JobRunContext): AsyncIterable<RawDocument> {
+  async run(ctx: JobRunContext): Promise<JobRunResult> {
     // 1. Build the query string for files.list
     //    const queryParts: string[] = []
     //
@@ -102,5 +102,15 @@ export const filesJob: JobTypeDefinition = {
     //    } while (pageToken && (!maxFiles || fileCount < maxFiles))
 
     throw new Error('GoogleDriveIntegration files job is not yet implemented')
+
+    return {
+      jobId: ctx.job.id,
+      sourceId: ctx.job.sourceId,
+      status: 'completed',
+      documentsCreated: 0,
+      documentsUpdated: 0,
+      documentsDeleted: 0,
+      durationMs: 0,
+    }
   },
 }

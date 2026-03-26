@@ -1,4 +1,4 @@
-import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument, JobRunResult } from '@d8um/core'
 
 /**
  * Fetches messages from Gmail.
@@ -49,7 +49,7 @@ export const messagesJob: JobTypeDefinition = {
     },
   ],
 
-  async *run(ctx: JobRunContext): AsyncIterable<RawDocument> {
+  async run(ctx: JobRunContext): Promise<JobRunResult> {
     // 1. Build the search query
     //    const queryParts: string[] = []
     //
@@ -105,5 +105,15 @@ export const messagesJob: JobTypeDefinition = {
     //    } while (pageToken && (!maxMessages || messageCount < maxMessages))
 
     throw new Error('GmailIntegration messages job is not yet implemented')
+
+    return {
+      jobId: ctx.job.id,
+      sourceId: ctx.job.sourceId,
+      status: 'completed',
+      documentsCreated: 0,
+      documentsUpdated: 0,
+      documentsDeleted: 0,
+      durationMs: 0,
+    }
   },
 }

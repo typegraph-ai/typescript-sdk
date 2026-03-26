@@ -1,4 +1,4 @@
-import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument, JobRunResult } from '@d8um/core'
 
 /**
  * Fetches tasks from an Attio workspace.
@@ -38,7 +38,7 @@ export const tasksJob: JobTypeDefinition = {
     },
   ],
 
-  async *run(ctx: JobRunContext): AsyncIterable<RawDocument> {
+  async run(ctx: JobRunContext): Promise<JobRunResult> {
     // 1. Initialize pagination token
     // let pageToken: string | undefined
     //
@@ -73,5 +73,15 @@ export const tasksJob: JobTypeDefinition = {
     // } while (pageToken)
 
     throw new Error('AttioIntegration tasks job is not yet implemented')
+
+    return {
+      jobId: ctx.job.id,
+      sourceId: ctx.job.sourceId,
+      status: 'completed',
+      documentsCreated: 0,
+      documentsUpdated: 0,
+      documentsDeleted: 0,
+      durationMs: 0,
+    }
   },
 }

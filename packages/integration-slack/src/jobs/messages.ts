@@ -1,4 +1,4 @@
-import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument, JobRunResult } from '@d8um/core'
 
 /**
  * Fetches messages from Slack channels.
@@ -45,7 +45,7 @@ export const messagesJob: JobTypeDefinition = {
     },
   ],
 
-  async *run(ctx: JobRunContext): AsyncIterable<RawDocument> {
+  async run(ctx: JobRunContext): Promise<JobRunResult> {
     // 1. Determine channel list
     //    - If ctx.job.config.channel_ids provided, use those
     //    - Otherwise, fetch all channels via conversations.list
@@ -89,5 +89,15 @@ export const messagesJob: JobTypeDefinition = {
     //    } while (cursor && (!maxMessages || messageCount < maxMessages))
 
     throw new Error('SlackIntegration messages job is not yet implemented')
+
+    return {
+      jobId: ctx.job.id,
+      sourceId: ctx.job.sourceId,
+      status: 'completed',
+      documentsCreated: 0,
+      documentsUpdated: 0,
+      documentsDeleted: 0,
+      durationMs: 0,
+    }
   },
 }

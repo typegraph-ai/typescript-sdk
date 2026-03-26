@@ -1,4 +1,4 @@
-import type { JobTypeDefinition, JobExecuteResult, JobRunContext, ConfigField } from '@d8um/core'
+import type { JobTypeDefinition, JobRunResult, JobRunContext, ConfigField } from '@d8um/core'
 
 /**
  * Memory conversation ingest job type definition.
@@ -9,7 +9,7 @@ import type { JobTypeDefinition, JobExecuteResult, JobRunContext, ConfigField } 
  *
  * The actual execution requires a MemoryExtractor and MemoryStoreAdapter
  * to be provided via the job config. This job type is registered in the
- * job registry but the execute() implementation delegates to the caller's
+ * job registry but the run() implementation delegates to the caller's
  * configured extraction pipeline.
  */
 export const conversationIngestJob: JobTypeDefinition = {
@@ -45,18 +45,18 @@ export const conversationIngestJob: JobTypeDefinition = {
     { key: 'operationsCount', label: 'Total operations', type: 'number' },
   ],
 
-  async execute(_ctx: JobRunContext): Promise<JobExecuteResult> {
-    // This is a placeholder — the actual execution is handled by D8umMemory
-    // which has access to the MemoryExtractor and MemoryStoreAdapter.
-    // The job type definition exists so it can be registered and scheduled.
+  async run(ctx: JobRunContext): Promise<JobRunResult> {
+    // Placeholder — actual execution is handled by D8umMemory
     return {
+      jobId: ctx.job.id,
+      sourceId: ctx.job.sourceId,
       status: 'completed',
-      summary: 'Conversation ingest job requires D8umMemory context to execute',
-      metrics: {
-        episodicCount: 0,
-        factsExtracted: 0,
-        operationsCount: 0,
-      },
+      summary: 'Conversation ingest job requires D8umMemory context to run',
+      documentsCreated: 0,
+      documentsUpdated: 0,
+      documentsDeleted: 0,
+      metrics: { episodicCount: 0, factsExtracted: 0, operationsCount: 0 },
+      durationMs: 0,
     }
   },
 }

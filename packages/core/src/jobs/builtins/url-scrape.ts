@@ -1,4 +1,4 @@
-import type { JobTypeDefinition, JobRunContext } from '../../types/job.js'
+import type { JobTypeDefinition, JobRunContext, JobRunResult } from '../../types/job.js'
 import type { RawDocument } from '../../types/connector.js'
 import * as cheerio from 'cheerio'
 import type { CheerioAPI } from 'cheerio'
@@ -19,12 +19,26 @@ export const urlScrapeJob: JobTypeDefinition = {
     { key: 'url', label: 'URL', type: 'url', required: true },
   ],
 
-  async *run(ctx: JobRunContext): AsyncIterable<RawDocument> {
-    const url = ctx.job.config.url as string
+  async run(ctx: JobRunContext): Promise<JobRunResult> {
+    const url = ctx.job.config['url'] as string
     if (!url) throw new Error('url_scrape: missing "url" in job config')
 
     const doc = await fetchPage(url)
-    if (doc) yield doc
+    let created = 0
+    if (doc) {
+      ctx.emit?.(doc)
+      created = 1
+    }
+
+    return {
+      jobId: ctx.job.id,
+      sourceId: ctx.job.sourceId,
+      status: 'completed',
+      documentsCreated: created,
+      documentsUpdated: 0,
+      documentsDeleted: 0,
+      durationMs: 0,
+    }
   },
 }
 

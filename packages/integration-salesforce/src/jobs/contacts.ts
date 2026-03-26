@@ -1,4 +1,4 @@
-import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument, JobRunResult } from '@d8um/core'
 
 /**
  * Fetches contacts from a Salesforce instance using SOQL.
@@ -39,7 +39,7 @@ export const contactsJob: JobTypeDefinition = {
     },
   ],
 
-  async *run(ctx: JobRunContext): AsyncIterable<RawDocument> {
+  async run(ctx: JobRunContext): Promise<JobRunResult> {
     // 1. Build SOQL query
     // const fields = [
     //   'Id', 'FirstName', 'LastName', 'Email', 'Phone', 'AccountId',
@@ -85,5 +85,15 @@ export const contactsJob: JobTypeDefinition = {
     // } while (true)
 
     throw new Error('SalesforceIntegration contacts job is not yet implemented')
+
+    return {
+      jobId: ctx.job.id,
+      sourceId: ctx.job.sourceId,
+      status: 'completed',
+      documentsCreated: 0,
+      documentsUpdated: 0,
+      documentsDeleted: 0,
+      durationMs: 0,
+    }
   },
 }

@@ -1,4 +1,4 @@
-import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument, JobRunResult } from '@d8um/core'
 
 /**
  * Fetches issues from a Linear workspace using the GraphQL API.
@@ -46,7 +46,7 @@ export const issuesJob: JobTypeDefinition = {
     },
   ],
 
-  async *run(ctx: JobRunContext): AsyncIterable<RawDocument> {
+  async run(ctx: JobRunContext): Promise<JobRunResult> {
     // 1. Build the filter object for the GraphQL query
     // const filter: Record<string, unknown> = {}
     // if (ctx.job.config.team_id) {
@@ -99,5 +99,15 @@ export const issuesJob: JobTypeDefinition = {
     // }
 
     throw new Error('LinearIntegration issues job is not yet implemented')
+
+    return {
+      jobId: ctx.job.id,
+      sourceId: ctx.job.sourceId,
+      status: 'completed',
+      documentsCreated: 0,
+      documentsUpdated: 0,
+      documentsDeleted: 0,
+      durationMs: 0,
+    }
   },
 }

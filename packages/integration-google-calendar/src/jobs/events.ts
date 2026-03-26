@@ -1,4 +1,4 @@
-import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument, JobRunResult } from '@d8um/core'
 
 /**
  * Fetches events from Google Calendar.
@@ -47,7 +47,7 @@ export const eventsJob: JobTypeDefinition = {
     },
   ],
 
-  async *run(ctx: JobRunContext): AsyncIterable<RawDocument> {
+  async run(ctx: JobRunContext): Promise<JobRunResult> {
     // 1. Determine calendar list
     //    - If ctx.job.config.calendar_ids provided, use those
     //    - Otherwise, fetch all calendars via calendarList.list
@@ -88,5 +88,15 @@ export const eventsJob: JobTypeDefinition = {
     //    } while (pageToken)
 
     throw new Error('GoogleCalendarIntegration events job is not yet implemented')
+
+    return {
+      jobId: ctx.job.id,
+      sourceId: ctx.job.sourceId,
+      status: 'completed',
+      documentsCreated: 0,
+      documentsUpdated: 0,
+      documentsDeleted: 0,
+      durationMs: 0,
+    }
   },
 }

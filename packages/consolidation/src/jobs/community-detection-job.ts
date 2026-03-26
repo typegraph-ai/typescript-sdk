@@ -1,4 +1,4 @@
-import type { JobTypeDefinition, JobRunContext, JobExecuteResult } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, JobRunResult } from '@d8um/core'
 
 export const memoryCommunityDetectionJob: JobTypeDefinition = {
   type: 'memory_community_detection',
@@ -7,17 +7,19 @@ export const memoryCommunityDetectionJob: JobTypeDefinition = {
   category: 'memory',
   requiresSource: false,
   available: true,
-
   configSchema: [],
+  resultSchema: [{ key: 'communitiesDetected', label: 'Communities detected', type: 'number' }],
 
-  resultSchema: [
-    { key: 'communitiesDetected', label: 'Communities detected', type: 'number' },
-  ],
-
-  async execute(_ctx: JobRunContext): Promise<JobExecuteResult> {
+  async run(ctx: JobRunContext): Promise<JobRunResult> {
     return {
+      jobId: ctx.job.id,
+      sourceId: ctx.job.sourceId,
       status: 'completed',
-      summary: 'Community detection job requires D8umMemory context to execute',
+      summary: 'Community detection job requires D8umMemory context to run',
+      documentsCreated: 0,
+      documentsUpdated: 0,
+      documentsDeleted: 0,
+      durationMs: 0,
     }
   },
 }

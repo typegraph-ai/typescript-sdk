@@ -6,10 +6,14 @@
  *
  * Jobs are not limited to ingestion. The same system handles:
  * - Ingestion: url_scrape, domain_crawl, file_upload, slack_sync, etc.
- * - Processing (future): reindex, re_embed, content_cleanup
- * - Export (future): export_csv, webhook_notify
- * - Maintenance (future): source_health_check, stale_document_cleanup
+ * - Processing: reindex, re_embed, content_cleanup
+ * - Export: export_csv, webhook_notify
+ * - Maintenance: source_health_check, stale_document_cleanup
+ * - Memory: consolidation, decay, correction, procedural promotion
  * - Custom: user-defined jobs with arbitrary config
+ *
+ * Every job type defines a single run() function. The job decides what
+ * it does and what it returns via JobRunResult.
  */
 
 export type JobCategory = 'ingestion' | 'processing' | 'export' | 'maintenance' | 'memory' | 'custom'
@@ -34,8 +38,17 @@ export interface JobTypeDefinition {
   /** Expected config shape for validation + UI generation */
   configSchema: ConfigField[]
 
-  /** The execution function — yields RawDocuments from the data source */
-  run?: ((ctx: JobRunContext) => AsyncIterable<import('./connector.js').RawDocument>) | undefined
+  /**
+   * The execution function. Every job has one run().
+   *
+   * What run() does is entirely up to the job definition:
+   * - Ingestion jobs emit documents via ctx.emit() and return counts
+   * - Memory jobs consolidate/decay/extract and return metrics
+   * - Processing jobs transform data and return summaries
+   *
+   * The result shape is defined by the job via resultSchema.
+   */
+  run?: ((ctx: JobRunContext) => Promise<JobRunResult>) | undefined
 
   /** Suggested schedule — cron expression or preset ('hourly', 'daily', 'weekly') */
   schedule?: string | undefined
@@ -48,14 +61,6 @@ export interface JobTypeDefinition {
 
   /** Auth scopes required by this job (integration jobs only) */
   scopes?: string[] | undefined
-
-  /**
-   * General-purpose execution — for jobs that don't yield documents
-   * (memory, processing, maintenance). A job defines EITHER run()
-   * (streaming doc yields) OR execute() (returns result).
-   * If both are defined, run() takes precedence for backward compatibility.
-   */
-  execute?: ((ctx: JobRunContext) => Promise<JobExecuteResult>) | undefined
 
   /** Describes the shape of results this job produces. Mirrors configSchema for outputs. */
   resultSchema?: ResultField[] | undefined
@@ -123,15 +128,35 @@ export interface JobRunContext {
   metadata?: Record<string, unknown> | undefined
   /** Persist a metadata key for the next run */
   setMetadata?: ((key: string, value: unknown) => void) | undefined
+  /**
+   * Emit a document during ingestion. Ingestion jobs call this
+   * to produce documents. Non-ingestion jobs ignore it.
+   */
+  emit?: ((doc: import('./connector.js').RawDocument) => void) | undefined
 }
 
+/**
+ * Result from any job's run() function.
+ *
+ * The shape is flexible — every job reports what's relevant to it:
+ * - Ingestion jobs populate documentsCreated/Updated/Deleted
+ * - Memory jobs populate metrics (e.g. { factsExtracted: 5, contradictionsResolved: 2 })
+ * - Any job can include a summary and arbitrary data
+ */
 export interface JobRunResult {
   jobId: string
   sourceId?: string | undefined
   status: 'completed' | 'failed'
+  /** Human-readable summary of what happened */
+  summary?: string | undefined
+  /** Document counts — primarily used by ingestion jobs */
   documentsCreated: number
   documentsUpdated: number
   documentsDeleted: number
+  /** Typed metrics — used by memory, processing, or any job that wants structured output */
+  metrics?: Record<string, number> | undefined
+  /** Arbitrary structured data the job wants to return */
+  data?: Record<string, unknown> | undefined
   durationMs: number
   error?: string | undefined
 }
@@ -153,22 +178,6 @@ export interface ApiResponse<T> {
   data: T
   status: number
   headers: Record<string, string>
-}
-
-/**
- * Result from a job's execute() function.
- * Used by non-ingestion jobs (memory, processing, maintenance) that
- * don't yield documents but still need to report what happened.
- */
-export interface JobExecuteResult {
-  status: 'completed' | 'failed'
-  /** Human-readable summary of what happened */
-  summary: string
-  /** Typed metrics (e.g., { memoriesConsolidated: 12, factsExtracted: 5 }) */
-  metrics?: Record<string, number> | undefined
-  /** Arbitrary structured data the job wants to return */
-  data?: Record<string, unknown> | undefined
-  error?: string | undefined
 }
 
 export interface ResultField {
