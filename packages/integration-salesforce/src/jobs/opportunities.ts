@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches opportunities from a Salesforce instance using SOQL.
@@ -14,12 +12,16 @@ import type { JobRunContext } from '@d8um/core'
  * 6. Yield each document
  * 7. If response.done is false, follow nextRecordsUrl for more pages
  */
-export const opportunitiesJob: IntegrationJobDefinition = {
-  name: 'opportunities',
+export const opportunitiesJob: JobTypeDefinition = {
+  type: 'salesforce_opportunities',
+  label: 'Salesforce: Opportunities',
   description: 'Fetches opportunities from Salesforce',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'SalesforceOpportunity',
-  frequency: 'hourly',
-  type: 'incremental',
+  schedule: 'hourly',
+  syncMode: 'incremental',
   scopes: ['api'],
   configSchema: [
     {

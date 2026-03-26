@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches calls from a Gong workspace incrementally.
@@ -14,12 +12,16 @@ import type { JobRunContext } from '@d8um/core'
  * 5. Yield each document with party info in content for search indexing
  * 6. Update ctx.state.lastSyncedAt with current timestamp
  */
-export const callsJob: IntegrationJobDefinition = {
-  name: 'calls',
+export const callsJob: JobTypeDefinition = {
+  type: 'gong_calls',
+  label: 'Gong: Calls',
   description: 'Fetches call recordings from Gong',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'GongCall',
-  frequency: 'hourly',
-  type: 'incremental',
+  schedule: 'hourly',
+  syncMode: 'incremental',
   scopes: ['api:calls:read:basic', 'api:calls:read:media-url'],
   configSchema: [
     {

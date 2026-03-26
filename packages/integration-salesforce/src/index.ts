@@ -37,5 +37,5 @@ export { contactsJob } from './jobs/contacts.js'
 export { accountsJob } from './jobs/accounts.js'
 export { opportunitiesJob } from './jobs/opportunities.js'
 
-// Actions
-export { queryRecordsAction } from './actions/query-records.js'
+// Actions (plain functions — call directly with an ApiClient)
+export { queryRecords, QueryRecordsInput, QueryRecordsOutput } from './actions/query-records.js'

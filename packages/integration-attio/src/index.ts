@@ -31,5 +31,5 @@ export { contactsJob } from './jobs/contacts.js'
 export { companiesJob } from './jobs/companies.js'
 export { tasksJob } from './jobs/tasks.js'
 
-// Actions
-export { listRecordsAction } from './actions/list-records.js'
+// Actions (plain functions — call directly with an ApiClient)
+export { listRecords, ListRecordsInput, ListRecordsOutput } from './actions/list-records.js'

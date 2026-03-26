@@ -19,8 +19,6 @@ import type { RawDocument, Chunk, Connector } from './types/connector.js'
 import type { d8umHooks } from './types/hooks.js'
 import type { ContextSearchOpts, ContextSearchResponse } from './query/context-search.js'
 import { aiSdkEmbeddingProvider, isAISDKEmbeddingInput } from './embedding/ai-sdk-adapter.js'
-import { OpenAIEmbedding } from './embedding/openai.js'
-import { CohereEmbedding } from './embedding/cohere.js'
 import { IndexEngine } from './index-engine/engine.js'
 import { searchWithContext as searchWithContextFn } from './query/context-search.js'
 import { assemble as assembleResults } from './query/assemble.js'
@@ -35,22 +33,6 @@ export interface d8umConfig {
   hooks?: d8umHooks | undefined
 }
 
-/**
- * @deprecated Use AI SDK providers with `AISDKEmbeddingInput` instead.
- */
-export interface EmbeddingProviderConfig {
-  provider: 'openai' | 'cohere'
-  model?: string | undefined
-  apiKey: string
-  dimensions?: number | undefined
-}
-
-function isEmbeddingProviderConfig(
-  value: EmbeddingInput
-): value is EmbeddingProviderConfig {
-  return 'provider' in value && 'apiKey' in value
-}
-
 function isEmbeddingProvider(
   value: EmbeddingInput
 ): value is EmbeddingProvider {
@@ -60,26 +42,6 @@ function isEmbeddingProvider(
 export function resolveEmbeddingProvider(config: EmbeddingInput): EmbeddingProvider {
   if (isEmbeddingProvider(config)) return config
   if (isAISDKEmbeddingInput(config)) return aiSdkEmbeddingProvider(config)
-
-  // Legacy path — deprecated
-  if (isEmbeddingProviderConfig(config)) {
-    switch (config.provider) {
-      case 'openai':
-        return new OpenAIEmbedding({
-          apiKey: config.apiKey,
-          model: config.model,
-          dimensions: config.dimensions,
-        })
-      case 'cohere':
-        return new CohereEmbedding({
-          apiKey: config.apiKey,
-          model: config.model,
-          dimensions: config.dimensions,
-        })
-      default:
-        throw new Error(`Unknown embedding provider: ${config.provider}`)
-    }
-  }
 
   throw new Error('Invalid embedding configuration')
 }
@@ -300,10 +262,8 @@ class d8umImpl implements d8umInstance {
       job.status = 'running'
       job.updatedAt = new Date()
 
-      // Job execution is delegated to the job type's run function
-      // This is a stub — actual execution depends on the job type
-      // Integration jobs use their IntegrationJobDefinition.run() function
-      // Built-in jobs (url_scrape, domain_crawl) use their executors
+      // Job execution is delegated to the job type's run() function
+      // All jobs (built-in and integration) use JobTypeDefinition.run()
 
       job.status = 'completed'
       job.lastRunAt = new Date()

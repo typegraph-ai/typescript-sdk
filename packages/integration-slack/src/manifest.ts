@@ -1,8 +1,6 @@
 import type { IntegrationDefinition } from '@d8um/integration-core'
 import { channelsJob } from './jobs/channels.js'
 import { messagesJob } from './jobs/messages.js'
-import { sendMessageAction } from './actions/send-message.js'
-import { listUsersAction } from './actions/list-users.js'
 
 export const SlackIntegration: IntegrationDefinition = {
   id: 'slack',
@@ -49,7 +47,6 @@ export const SlackIntegration: IntegrationDefinition = {
 
   features: {
     jobs: true,
-    actions: true,
     webhooks: true,
     incrementalJobs: true,
   },
@@ -65,6 +62,5 @@ export const SlackIntegration: IntegrationDefinition = {
   },
 
   jobs: [channelsJob, messagesJob],
-  actions: [sendMessageAction, listUsersAction],
   entities: ['channels', 'messages', 'users'],
 }

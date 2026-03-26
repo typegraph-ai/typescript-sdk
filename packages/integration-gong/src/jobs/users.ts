@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches users from a Gong workspace.
@@ -11,12 +9,16 @@ import type { JobRunContext } from '@d8um/core'
  * 3. Yield each document
  * 4. Follow records.cursor for next page until no more pages
  */
-export const usersJob: IntegrationJobDefinition = {
-  name: 'users',
+export const usersJob: JobTypeDefinition = {
+  type: 'gong_users',
+  label: 'Gong: Users',
   description: 'Fetches users from Gong workspace',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'GongUser',
-  frequency: 'daily',
-  type: 'full',
+  schedule: 'daily',
+  syncMode: 'full',
   scopes: ['api:users:read'],
   configSchema: [
     {

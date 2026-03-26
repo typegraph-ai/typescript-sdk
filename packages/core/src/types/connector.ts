@@ -23,6 +23,10 @@ export interface Chunk {
   metadata?: Record<string, unknown> | undefined
 }
 
+/**
+ * @deprecated Use JobTypeDefinition with a `run()` function instead.
+ * The Connector interface is superseded by the unified job system.
+ */
 export interface Connector<TMeta extends Record<string, unknown> = Record<string, unknown>> {
   fetch?(): AsyncIterable<RawDocument<TMeta>>
 

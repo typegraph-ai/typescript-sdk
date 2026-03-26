@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches deals from a HubSpot CRM workspace incrementally.
@@ -15,12 +13,16 @@ import type { JobRunContext } from '@d8um/core'
  * 6. Yield each document
  * 7. Update ctx.state.lastSyncedAt with current timestamp
  */
-export const dealsJob: IntegrationJobDefinition = {
-  name: 'deals',
+export const dealsJob: JobTypeDefinition = {
+  type: 'hubspot_deals',
+  label: 'HubSpot: Deals',
   description: 'Fetches deals from HubSpot CRM incrementally',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'HubSpotDeal',
-  frequency: 'hourly',
-  type: 'incremental',
+  schedule: 'hourly',
+  syncMode: 'incremental',
   scopes: ['crm.objects.deals.read'],
   configSchema: [
     {

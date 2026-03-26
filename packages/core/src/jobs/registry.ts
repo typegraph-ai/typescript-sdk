@@ -1,33 +1,14 @@
 import type { JobTypeDefinition, JobCategory } from '../types/job.js'
+import { urlScrapeJob } from './builtins/url-scrape.js'
+import { domainCrawlJob } from './builtins/domain-crawl.js'
 
 /**
  * Built-in job types available out of the box.
  * Integration packages register additional types via registerJobType().
  */
 const builtInJobTypes: Record<string, JobTypeDefinition> = {
-  url_scrape: {
-    type: 'url_scrape',
-    label: 'URL Scrape',
-    description: 'Scrape and index a single web page',
-    category: 'ingestion',
-    requiresSource: true,
-    available: true,
-    configSchema: [
-      { key: 'url', label: 'URL', type: 'url', required: true },
-    ],
-  },
-  domain_crawl: {
-    type: 'domain_crawl',
-    label: 'Domain Crawl',
-    description: 'Crawl and index pages from a domain',
-    category: 'ingestion',
-    requiresSource: true,
-    available: true,
-    configSchema: [
-      { key: 'domain', label: 'Domain', type: 'url', required: true },
-      { key: 'max_pages', label: 'Max Pages', type: 'number', required: false, placeholder: '100' },
-    ],
-  },
+  url_scrape: urlScrapeJob,
+  domain_crawl: domainCrawlJob,
   file_upload: {
     type: 'file_upload',
     label: 'File Upload',

@@ -1,14 +1,13 @@
 import { z } from 'zod'
-import type { IntegrationActionDefinition } from '@d8um/integration-core'
 import type { ApiClient } from '@d8um/core'
 
-const SendMessageInputSchema = z.object({
+export const SendMessageInput = z.object({
   channel: z.string().describe('Channel ID to send the message to'),
   text: z.string().describe('Message text'),
   thread_ts: z.string().optional().describe('Thread timestamp to reply to'),
 })
 
-const SendMessageOutputSchema = z.object({
+export const SendMessageOutput = z.object({
   ok: z.boolean(),
   channel: z.string(),
   ts: z.string(),
@@ -18,22 +17,16 @@ const SendMessageOutputSchema = z.object({
   }),
 })
 
-export const sendMessageAction: IntegrationActionDefinition = {
-  name: 'send-message',
-  description: 'Send a message to a Slack channel',
-  inputSchema: SendMessageInputSchema,
-  outputSchema: SendMessageOutputSchema,
-  scopes: ['chat:write'],
+export async function sendMessage(
+  client: ApiClient,
+  input: z.infer<typeof SendMessageInput>,
+): Promise<z.infer<typeof SendMessageOutput>> {
+  // const response = await client.post('chat.postMessage', {
+  //   channel: input.channel,
+  //   text: input.text,
+  //   ...(input.thread_ts ? { thread_ts: input.thread_ts } : {}),
+  // })
+  // return response.data
 
-  async run(ctx: { client: ApiClient }, input: unknown): Promise<unknown> {
-    // const parsed = SendMessageInputSchema.parse(input)
-    // const response = await ctx.client.post('chat.postMessage', {
-    //   channel: parsed.channel,
-    //   text: parsed.text,
-    //   ...(parsed.thread_ts ? { thread_ts: parsed.thread_ts } : {}),
-    // })
-    // return response.data
-
-    throw new Error('SlackIntegration send-message action is not yet implemented')
-  },
+  throw new Error('SlackIntegration sendMessage is not yet implemented')
 }

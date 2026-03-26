@@ -10,7 +10,6 @@ export type {
   CreateSourceInput,
   IndexConfig,
   EmbeddingInput,
-  EmbeddingProviderConfig,
 } from './source.js'
 
 export type {

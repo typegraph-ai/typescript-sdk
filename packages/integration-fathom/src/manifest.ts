@@ -1,6 +1,5 @@
 import type { IntegrationDefinition } from '@d8um/integration-core'
 import { callsJob } from './jobs/calls.js'
-import { listCallsAction } from './actions/list-calls.js'
 
 export const FathomIntegration: IntegrationDefinition = {
   id: 'fathom',
@@ -28,7 +27,6 @@ export const FathomIntegration: IntegrationDefinition = {
 
   features: {
     jobs: true,
-    actions: true,
     webhooks: true,
     incrementalJobs: true,
   },
@@ -44,6 +42,5 @@ export const FathomIntegration: IntegrationDefinition = {
   },
 
   jobs: [callsJob],
-  actions: [listCallsAction],
   entities: ['calls', 'transcripts'],
 }

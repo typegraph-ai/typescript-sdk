@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseUrl, normalizeUrl, normalizePath, isSameDomain, isSubdomain, matchesPattern } from '../../../connectors/domain/src/url-utils.js'
+import { parseUrl, normalizeUrl, normalizePath, isSameDomain, isSubdomain, matchesPattern } from '../jobs/builtins/domain-crawl.js'
 
 describe('parseUrl', () => {
   it('parses a full URL', () => {

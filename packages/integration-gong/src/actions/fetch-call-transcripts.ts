@@ -1,12 +1,11 @@
 import { z } from 'zod'
-import type { IntegrationActionDefinition } from '@d8um/integration-core'
 import type { ApiClient } from '@d8um/core'
 
-const FetchCallTranscriptsInputSchema = z.object({
+export const FetchCallTranscriptsInput = z.object({
   callIds: z.array(z.string()).describe('List of Gong call IDs to fetch transcripts for'),
 })
 
-const FetchCallTranscriptsOutputSchema = z.object({
+export const FetchCallTranscriptsOutput = z.object({
   requestId: z.string(),
   callTranscripts: z.array(z.object({
     callId: z.string(),
@@ -22,20 +21,14 @@ const FetchCallTranscriptsOutputSchema = z.object({
   })),
 })
 
-export const fetchCallTranscriptsAction: IntegrationActionDefinition = {
-  name: 'fetch-call-transcripts',
-  description: 'Fetch transcripts for specific Gong calls',
-  inputSchema: FetchCallTranscriptsInputSchema,
-  outputSchema: FetchCallTranscriptsOutputSchema,
-  scopes: ['api:calls:read:transcript'],
+export async function fetchCallTranscripts(
+  client: ApiClient,
+  input: z.infer<typeof FetchCallTranscriptsInput>,
+): Promise<z.infer<typeof FetchCallTranscriptsOutput>> {
+  // const response = await client.post('/v2/calls/transcript', {
+  //   filter: { callIds: input.callIds },
+  // })
+  // return response.data
 
-  async run(ctx: { client: ApiClient }, input: unknown): Promise<unknown> {
-    // const parsed = FetchCallTranscriptsInputSchema.parse(input)
-    // const response = await ctx.client.post('/v2/calls/transcript', {
-    //   filter: { callIds: parsed.callIds },
-    // })
-    // return response.data
-
-    throw new Error('GongIntegration fetch-call-transcripts action is not yet implemented')
-  },
+  throw new Error('GongIntegration fetch-call-transcripts action is not yet implemented')
 }

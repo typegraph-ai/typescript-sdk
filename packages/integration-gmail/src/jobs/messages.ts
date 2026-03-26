@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches messages from Gmail.
@@ -14,12 +12,16 @@ import type { JobRunContext } from '@d8um/core'
  * 6. Transform each message into a RawDocument via toMessageDocument mapper
  * 7. Yield each document
  */
-export const messagesJob: IntegrationJobDefinition = {
-  name: 'messages',
+export const messagesJob: JobTypeDefinition = {
+  type: 'gmail_messages',
+  label: 'Gmail: Messages',
   description: 'Fetches messages from Gmail',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'GmailMessage',
-  frequency: 'hourly',
-  type: 'incremental',
+  schedule: 'hourly',
+  syncMode: 'incremental',
   scopes: [
     'https://www.googleapis.com/auth/gmail.readonly',
   ],

@@ -72,7 +72,7 @@ Most RAG setups devolve into bespoke plumbing - a different retrieval path for e
 | **Philosophy**   | Build *inside* the framework       | Compose *alongside* your stack                                              |
 | **Embeddings**   | Baked-in provider wrappers         | [Vercel AI SDK](https://ai-sdk.dev) ecosystem - 40+ providers, zero lock-in |
 | **Multi-model**  | One model for everything           | Per-source embedding models, merged at query time                           |
-| **Data sources** | Per-source wiring                  | Unified `Connector` interface                                               |
+| **Data sources** | Per-source wiring                  | Unified `JobTypeDefinition` interface                                       |
 | **Retrieval**    | Manual per-source                  | Fan-out + merge + re-rank in one call                                       |
 | **Storage**      | Tightly coupled                    | Swappable adapters (Postgres, SQLite, ...)                                  |
 | **Output**       | Raw results                        | Prompt-ready context (`xml`, `markdown`, `plain`)                           |
@@ -245,14 +245,12 @@ npm install @d8um/adapter-pgvector      # Production - Postgres + pgvector
 # npm install @d8um/adapter-sqlite-vec  # Local dev - zero external dependencies
 # ... or any other pre-built, or custom vector store adapters
 
-# Pick connectors (optional)
-#npm install @d8um/connector-domain          # Recursively crawl a domain/website
-#npm install @d8um/connector-url             # Scrape individual web pages
-#npm install @d8um/connector-slack           # Sync Slack conversations
-#npm install @d8um/connector-google-drive    # Sync Google Drive documents and files
-#npm install @d8um/connector-fathom          # Sync Fathom call transcripts
-#npm install @d8um/connector-notion          # Sync Notion pages and databases
-# ... or any other pre-built, or custom connectors
+# Pick integrations (optional — 3rd party connectors)
+#npm install @d8um/integration-core          # Shared integration types
+#npm install @d8um/integration-slack         # Slack messages & channels
+#npm install @d8um/integration-google-drive  # Google Drive files
+#npm install @d8um/integration-hubspot       # HubSpot CRM contacts, companies, deals
+# ... or any other integration package
 ```
 
 #### 2) Initialize
@@ -610,27 +608,42 @@ const response = await d8um.query('search text', {
 
 | Package                                                            | Description                                                              | Status |
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------ | ------ |
-| `[@d8um/core](packages/core)`                                      | Query engine, index engine, types, embedding providers                   | Alpha  |
+| `[@d8um/core](packages/core)`                                      | Query engine, index engine, types, job registry, built-in jobs           | Alpha  |
 | `[@d8um/hosted](packages/hosted)`                                  | Hosted client SDK - zero infrastructure, just an API key                 | Alpha  |
 | `[@d8um/embedding-local](packages/embeddings/local)`               | Local embeddings via fastembed + ONNX Runtime (bge-small-en-v1.5, MIT)   | Alpha  |
 | `[@d8um/adapter-pgvector](packages/adapters/pgvector)`             | PostgreSQL + pgvector - driver-agnostic (bring your own Postgres client) | Alpha  |
 | `[@d8um/adapter-sqlite-vec](packages/adapters/sqlite-vec)`         | SQLite + sqlite-vec - zero-infra local development                       | Alpha  |
-| `[@d8um/connector-domain](packages/connectors/domain)`             | Recursively crawl a domain with BFS, respecting depth/page limits        | Alpha  |
-| `[@d8um/connector-url](packages/connectors/url)`                   | Scrape individual web pages, strip HTML to clean text                    | Alpha  |
-| `[@d8um/connector-notion](packages/connectors/notion)`             | Sync Notion pages and databases with block-aware chunking                | Alpha  |
-| `[@d8um/connector-slack](packages/connectors/slack)`               | Sync Slack conversations, threads, and messages                          | Stub   |
-| `[@d8um/connector-google-drive](packages/connectors/google-drive)` | Sync Google Drive documents, spreadsheets, and files                     | Stub   |
-| `[@d8um/connector-fathom](packages/connectors/fathom)`             | Sync Fathom call recordings and transcripts                              | Stub   |
+| `[@d8um/integration-core](packages/integration-core)`              | Shared integration types (IntegrationDefinition)                         | Alpha  |
+| `[@d8um/integration-slack](packages/integration-slack)`            | Slack messages, channels, users                                          | Alpha  |
+| `[@d8um/integration-google-drive](packages/integration-google-drive)` | Google Drive files and folders                                        | Alpha  |
+| `[@d8um/integration-google-calendar](packages/integration-google-calendar)` | Google Calendar events                                          | Alpha  |
+| `[@d8um/integration-gmail](packages/integration-gmail)`            | Gmail messages, threads, labels                                          | Alpha  |
+| `[@d8um/integration-hubspot](packages/integration-hubspot)`        | HubSpot contacts, companies, deals                                       | Alpha  |
+| `[@d8um/integration-gong](packages/integration-gong)`              | Gong calls, transcripts, users                                           | Alpha  |
+| `[@d8um/integration-fathom](packages/integration-fathom)`          | Fathom call recordings and transcripts                                   | Alpha  |
+| `[@d8um/integration-salesforce](packages/integration-salesforce)`  | Salesforce contacts, accounts, opportunities, leads                      | Alpha  |
+| `[@d8um/integration-attio](packages/integration-attio)`            | Attio contacts, companies, tasks                                         | Alpha  |
+| `[@d8um/integration-linear](packages/integration-linear)`          | Linear issues, projects, teams                                           | Alpha  |
 
 
 ### Build Your Own
 
-d8um is designed to be extended. Implement the `Connector` interface to add any data source, or the `VectorStoreAdapter` interface to bring your own storage.
+d8um is designed to be extended. Define a custom `JobTypeDefinition` to add any data source, or implement the `VectorStoreAdapter` interface to bring your own storage.
 
 ```ts
-// Custom connector - just implement fetch()
-const myConnector: Connector = {
-  async *fetch() {
+import { registerJobType } from '@d8um/core'
+import type { JobTypeDefinition } from '@d8um/core'
+
+// Custom job — define type, config, and a run() function that yields documents
+const myDataJob: JobTypeDefinition = {
+  type: 'my_data_sync',
+  label: 'My Data Sync',
+  description: 'Sync data from my custom source',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
+  configSchema: [],
+  async *run(ctx) {
     for (const item of await getMyData()) {
       yield {
         id: item.id,
@@ -643,12 +656,7 @@ const myConnector: Connector = {
   },
 }
 
-d8um.addSource({
-  id: 'my-source',
-  connector: myConnector,
-  mode: 'indexed',
-  index: { chunkSize: 512, chunkOverlap: 64, deduplicateBy: ['id'] },
-})
+registerJobType(myDataJob)
 ```
 
 ## Architecture
@@ -659,14 +667,17 @@ d8um.addSource({
 ├── embedding/
 │   ├── provider.ts     EmbeddingProvider interface
 │   └── ai-sdk-adapter  Wraps any AI SDK model via structural typing (zero deps)
+├── jobs/
+│   ├── registry.ts     Job type registry (registerJobType, getJobType, etc.)
+│   └── builtins/       Built-in jobs (url_scrape, domain_crawl) with run() implementations
 ├── IndexEngine         Chunk, embed, store - model-aware, idempotent
 ├── QueryPlanner        Multi-model fan-out, timeout, error handling
-├── ScoreMerger         Normalize + RRF + dedup across modes and models
+├── ScoreMerger         Normalize + RRF + dedup across models
 ├── assemble()          Format results for prompt injection
 └── types/              Full TypeScript type system
 
 @d8um/adapter-*         Swappable vector store backends (per-model table isolation)
-@d8um/connector-*       Pluggable data source integrations
+@d8um/integration-*     Modular 3rd party integrations (Slack, HubSpot, Google Drive, etc.)
 ```
 
 **Key design decisions:**
@@ -677,7 +688,7 @@ d8um.addSource({
 - **Atomic writes** - All chunks for a document are written in a single operation. No partial states.
 - **Multi-tenant** - Every operation accepts an optional `tenantId` for data isolation.
 - **Hybrid search** - pgvector adapter supports both semantic (HNSW) and keyword (tsvector) search with RRF fusion.
-- **Connector-owned chunking** - Connectors can override the default token-count chunker with structure-aware splitting (e.g., Notion chunks by block hierarchy).
+- **Built-in web scraping** - URL scraping and domain crawling are built-in job types with full HTML parsing (cheerio + turndown), link extraction, and BFS crawling.
 
 ## Embedding Providers
 
@@ -784,23 +795,13 @@ The repo uses [Turborepo](https://turbo.build) for build orchestration and [pnpm
 
 ## Roadmap
 
-- AI SDK embedding provider integration (40+ providers)
-- Per-source embedding model support with automatic multi-model query fan-out
-- Per-model vector table isolation
-- Indexed query runner and QueryPlanner implementation
-- Full pgvector adapter with hybrid search (iterative HNSW + tsvector RRF)
-- Driver-agnostic pgvector adapter (bring your own Postgres client)
-- URL connector with HTML stripping and link extraction
-- Domain connector with BFS crawling, domain boundaries, and allow/deny patterns
-- Hosted client SDK (`@d8um/hosted`) - zero-infra SaaS mode
-- Live and cached query runners
-- SQLite-vec adapter implementation
-- Notion connector with block tree traversal
+- Implement integration job `run()` functions (currently framework stubs)
 - Neighbor chunk joining in `assemble()`
 - Token budget trimming
 - Additional adapters (Qdrant, Pinecone, Weaviate)
-- Additional connectors (GitHub, Confluence, Google Drive, S3)
+- Additional integrations (GitHub, Confluence, Notion, S3)
 - MCP server integration
+- Webhook support for real-time integration syncs
 
 ## Contributing
 

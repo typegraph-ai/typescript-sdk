@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches channels from a Slack workspace.
@@ -11,12 +9,16 @@ import type { JobRunContext } from '@d8um/core'
  * 3. Transform each channel into a RawDocument via mapper
  * 4. Yield each document
  */
-export const channelsJob: IntegrationJobDefinition = {
-  name: 'channels',
+export const channelsJob: JobTypeDefinition = {
+  type: 'slack_channels',
+  label: 'Slack: Channels',
   description: 'Fetches channels from Slack workspace',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'SlackChannel',
-  frequency: 'daily',
-  type: 'full',
+  schedule: 'daily',
+  syncMode: 'full',
   scopes: ['channels:read', 'groups:read'],
   configSchema: [
     {

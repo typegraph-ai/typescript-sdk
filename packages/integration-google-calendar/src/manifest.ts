@@ -1,6 +1,5 @@
 import type { IntegrationDefinition } from '@d8um/integration-core'
 import { eventsJob } from './jobs/events.js'
-import { listEventsAction } from './actions/list-events.js'
 
 export const GoogleCalendarIntegration: IntegrationDefinition = {
   id: 'google-calendar',
@@ -33,7 +32,6 @@ export const GoogleCalendarIntegration: IntegrationDefinition = {
 
   features: {
     jobs: true,
-    actions: true,
     webhooks: true,
     incrementalJobs: true,
   },
@@ -48,6 +46,5 @@ export const GoogleCalendarIntegration: IntegrationDefinition = {
   },
 
   jobs: [eventsJob],
-  actions: [listEventsAction],
   entities: ['calendars', 'events'],
 }

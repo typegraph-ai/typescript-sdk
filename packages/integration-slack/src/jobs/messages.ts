@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches messages from Slack channels.
@@ -13,12 +11,16 @@ import type { JobRunContext } from '@d8um/core'
  * 5. Transform each message via toMessageDocument() mapper
  * 6. Yield each RawDocument
  */
-export const messagesJob: IntegrationJobDefinition = {
-  name: 'messages',
+export const messagesJob: JobTypeDefinition = {
+  type: 'slack_messages',
+  label: 'Slack: Messages',
   description: 'Fetches messages from Slack channels',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'SlackMessage',
-  frequency: 'hourly',
-  type: 'incremental',
+  schedule: 'hourly',
+  syncMode: 'incremental',
   scopes: ['channels:history', 'groups:history'],
   configSchema: [
     {

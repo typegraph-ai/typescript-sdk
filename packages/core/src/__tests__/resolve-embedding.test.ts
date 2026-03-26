@@ -19,15 +19,6 @@ describe('resolveEmbeddingProvider', () => {
     expect(typeof resolved.embedBatch).toBe('function')
   })
 
-  it('throws for unknown legacy provider', () => {
-    expect(() =>
-      resolveEmbeddingProvider({
-        provider: 'unknown' as 'openai',
-        apiKey: 'key',
-      })
-    ).toThrow('Unknown embedding provider')
-  })
-
   it('throws for invalid config', () => {
     expect(() =>
       resolveEmbeddingProvider({} as any)

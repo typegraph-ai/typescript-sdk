@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches files from Google Drive.
@@ -13,12 +11,16 @@ import type { JobRunContext } from '@d8um/core'
  * 5. For Google Docs/Sheets/Slides, could export content via files.export
  * 6. Yield each document
  */
-export const filesJob: IntegrationJobDefinition = {
-  name: 'files',
+export const filesJob: JobTypeDefinition = {
+  type: 'google_drive_files',
+  label: 'Google Drive: Files',
   description: 'Fetches files from Google Drive',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'GoogleDriveFile',
-  frequency: 'daily',
-  type: 'full',
+  schedule: 'daily',
+  syncMode: 'full',
   scopes: [
     'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/drive.file',

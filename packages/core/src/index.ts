@@ -1,8 +1,6 @@
 // Main public API
 export { d8um, d8umCreate, resolveEmbeddingProvider } from './d8um.js'
 export type { d8umConfig, d8umInstance, SourcesApi, JobsApi, DocumentJobsApi } from './d8um.js'
-/** @deprecated Use AI SDK providers instead. */
-export type { EmbeddingProviderConfig } from './d8um.js'
 
 // Types
 export type {
@@ -56,10 +54,6 @@ export { IndexError } from './types/index.js'
 export type { EmbeddingProvider } from './embedding/index.js'
 export { aiSdkEmbeddingProvider, isAISDKEmbeddingInput } from './embedding/index.js'
 export type { AISDKEmbeddingModel, AISDKEmbeddingInput } from './embedding/index.js'
-/** @deprecated Use AI SDK providers instead. */
-export { OpenAIEmbedding, CohereEmbedding } from './embedding/index.js'
-/** @deprecated Use AI SDK providers instead. */
-export type { OpenAIEmbeddingConfig, CohereEmbeddingConfig } from './embedding/index.js'
 
 // Index engine
 export { IndexEngine, defaultChunker, sha256, stripMarkdown } from './index-engine/index.js'
@@ -80,3 +74,9 @@ export {
   listJobTypesByCategory,
   builtInJobTypes,
 } from './jobs/index.js'
+
+// Built-in job implementations
+export { urlScrapeJob, fetchPage, DEFAULT_STRIP_ELEMENTS, DEFAULT_STRIP_SELECTORS } from './jobs/index.js'
+export type { UrlMeta } from './jobs/index.js'
+export { domainCrawlJob, Crawler } from './jobs/index.js'
+export type { CrawlerConfig } from './jobs/index.js'

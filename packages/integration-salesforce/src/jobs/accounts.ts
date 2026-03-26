@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches accounts from a Salesforce instance using SOQL.
@@ -13,12 +11,16 @@ import type { JobRunContext } from '@d8um/core'
  * 5. Yield each document
  * 6. If response.done is false, follow nextRecordsUrl for more pages
  */
-export const accountsJob: IntegrationJobDefinition = {
-  name: 'accounts',
+export const accountsJob: JobTypeDefinition = {
+  type: 'salesforce_accounts',
+  label: 'Salesforce: Accounts',
   description: 'Fetches accounts from Salesforce',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'SalesforceAccount',
-  frequency: 'daily',
-  type: 'full',
+  schedule: 'daily',
+  syncMode: 'full',
   scopes: ['api'],
   configSchema: [
     {

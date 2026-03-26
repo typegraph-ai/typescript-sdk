@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches contacts (people) from an Attio workspace.
@@ -13,12 +11,16 @@ import type { JobRunContext } from '@d8um/core'
  * 5. Yield each document
  * 6. Continue until no next_page_token is returned
  */
-export const contactsJob: IntegrationJobDefinition = {
-  name: 'contacts',
+export const contactsJob: JobTypeDefinition = {
+  type: 'attio_contacts',
+  label: 'Attio: Contacts',
   description: 'Fetches contacts from Attio workspace',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'AttioContact',
-  frequency: 'daily',
-  type: 'full',
+  schedule: 'daily',
+  syncMode: 'full',
   scopes: ['records:read', 'objects:read'],
   configSchema: [
     {

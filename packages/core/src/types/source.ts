@@ -22,15 +22,7 @@ export interface CreateSourceInput {
   tenantId?: string | undefined
 }
 
-/** @deprecated Use AI SDK providers instead. */
-export interface EmbeddingProviderConfig {
-  provider: 'openai' | 'cohere'
-  model?: string | undefined
-  apiKey: string
-  dimensions?: number | undefined
-}
-
-export type EmbeddingInput = EmbeddingProvider | EmbeddingProviderConfig | AISDKEmbeddingInput
+export type EmbeddingInput = EmbeddingProvider | AISDKEmbeddingInput
 
 /**
  * Index configuration for chunking & embedding documents.

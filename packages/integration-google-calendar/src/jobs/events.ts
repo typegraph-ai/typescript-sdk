@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches events from Google Calendar.
@@ -12,12 +10,16 @@ import type { JobRunContext } from '@d8um/core'
  * 4. Transform each event into a RawDocument via toEventDocument mapper
  * 5. Yield each document
  */
-export const eventsJob: IntegrationJobDefinition = {
-  name: 'events',
+export const eventsJob: JobTypeDefinition = {
+  type: 'google_calendar_events',
+  label: 'Google Calendar: Events',
   description: 'Fetches events from Google Calendar',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'GoogleCalendarEvent',
-  frequency: 'hourly',
-  type: 'incremental',
+  schedule: 'hourly',
+  syncMode: 'incremental',
   scopes: [
     'https://www.googleapis.com/auth/calendar.readonly',
     'https://www.googleapis.com/auth/calendar.events.readonly',

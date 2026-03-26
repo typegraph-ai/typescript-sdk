@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches tasks from an Attio workspace.
@@ -13,12 +11,16 @@ import type { JobRunContext } from '@d8um/core'
  * 5. Yield each document
  * 6. Continue until no next_page_token is returned
  */
-export const tasksJob: IntegrationJobDefinition = {
-  name: 'tasks',
+export const tasksJob: JobTypeDefinition = {
+  type: 'attio_tasks',
+  label: 'Attio: Tasks',
   description: 'Fetches tasks from Attio workspace',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'AttioTask',
-  frequency: 'hourly',
-  type: 'incremental',
+  schedule: 'hourly',
+  syncMode: 'incremental',
   scopes: ['tasks:read'],
   configSchema: [
     {

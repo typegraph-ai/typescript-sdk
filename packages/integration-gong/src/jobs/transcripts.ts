@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches call transcripts from a Gong workspace incrementally.
@@ -16,12 +14,16 @@ import type { JobRunContext } from '@d8um/core'
  * 7. Yield each document
  * 8. Update ctx.state.lastTranscriptSyncedAt with current timestamp
  */
-export const transcriptsJob: IntegrationJobDefinition = {
-  name: 'transcripts',
+export const transcriptsJob: JobTypeDefinition = {
+  type: 'gong_transcripts',
+  label: 'Gong: Transcripts',
   description: 'Fetches call transcripts from Gong',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'GongCallTranscript',
-  frequency: 'hourly',
-  type: 'incremental',
+  schedule: 'hourly',
+  syncMode: 'incremental',
   scopes: ['api:calls:read:transcript'],
   configSchema: [
     {

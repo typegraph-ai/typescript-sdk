@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches companies from a HubSpot CRM workspace.
@@ -12,12 +10,16 @@ import type { JobRunContext } from '@d8um/core'
  * 4. Yield each document
  * 5. Follow paging.next.after for next page until no more pages
  */
-export const companiesJob: IntegrationJobDefinition = {
-  name: 'companies',
+export const companiesJob: JobTypeDefinition = {
+  type: 'hubspot_companies',
+  label: 'HubSpot: Companies',
   description: 'Fetches companies from HubSpot CRM',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'HubSpotCompany',
-  frequency: 'daily',
-  type: 'full',
+  schedule: 'daily',
+  syncMode: 'full',
   scopes: ['crm.objects.companies.read'],
   configSchema: [
     {

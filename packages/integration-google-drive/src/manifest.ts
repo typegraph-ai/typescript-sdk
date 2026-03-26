@@ -1,7 +1,5 @@
 import type { IntegrationDefinition } from '@d8um/integration-core'
 import { filesJob } from './jobs/files.js'
-import { listFilesAction } from './actions/list-files.js'
-import { getFileAction } from './actions/get-file.js'
 
 export const GoogleDriveIntegration: IntegrationDefinition = {
   id: 'google-drive',
@@ -34,7 +32,6 @@ export const GoogleDriveIntegration: IntegrationDefinition = {
 
   features: {
     jobs: true,
-    actions: true,
     webhooks: false,
     incrementalJobs: false,
   },
@@ -50,6 +47,5 @@ export const GoogleDriveIntegration: IntegrationDefinition = {
   },
 
   jobs: [filesJob],
-  actions: [listFilesAction, getFileAction],
   entities: ['files', 'folders'],
 }

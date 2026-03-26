@@ -2,7 +2,6 @@ import type { IntegrationDefinition } from '@d8um/integration-core'
 import { contactsJob } from './jobs/contacts.js'
 import { accountsJob } from './jobs/accounts.js'
 import { opportunitiesJob } from './jobs/opportunities.js'
-import { queryRecordsAction } from './actions/query-records.js'
 
 export const SalesforceIntegration: IntegrationDefinition = {
   id: 'salesforce',
@@ -40,7 +39,6 @@ export const SalesforceIntegration: IntegrationDefinition = {
 
   features: {
     jobs: true,
-    actions: true,
     webhooks: true,
     incrementalJobs: true,
   },
@@ -56,6 +54,5 @@ export const SalesforceIntegration: IntegrationDefinition = {
   },
 
   jobs: [contactsJob, accountsJob, opportunitiesJob],
-  actions: [queryRecordsAction],
   entities: ['contacts', 'accounts', 'opportunities', 'leads'],
 }

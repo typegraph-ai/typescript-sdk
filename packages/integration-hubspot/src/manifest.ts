@@ -2,7 +2,6 @@ import type { IntegrationDefinition } from '@d8um/integration-core'
 import { contactsJob } from './jobs/contacts.js'
 import { companiesJob } from './jobs/companies.js'
 import { dealsJob } from './jobs/deals.js'
-import { createContactAction } from './actions/create-contact.js'
 
 export const HubSpotIntegration: IntegrationDefinition = {
   id: 'hubspot',
@@ -38,7 +37,6 @@ export const HubSpotIntegration: IntegrationDefinition = {
 
   features: {
     jobs: true,
-    actions: true,
     webhooks: true,
     incrementalJobs: true,
   },
@@ -54,6 +52,5 @@ export const HubSpotIntegration: IntegrationDefinition = {
   },
 
   jobs: [contactsJob, companiesJob, dealsJob],
-  actions: [createContactAction],
   entities: ['contacts', 'companies', 'deals'],
 }

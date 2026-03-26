@@ -26,5 +26,5 @@ export { toGoogleCalendarEvent, toEventDocument } from './mappers/to-event.js'
 // Jobs
 export { eventsJob } from './jobs/events.js'
 
-// Actions
-export { listEventsAction } from './actions/list-events.js'
+// Actions (plain functions — call directly with an ApiClient)
+export { listEvents, ListEventsInput, ListEventsOutput } from './actions/list-events.js'

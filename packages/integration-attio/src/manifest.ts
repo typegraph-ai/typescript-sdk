@@ -2,7 +2,6 @@ import type { IntegrationDefinition } from '@d8um/integration-core'
 import { contactsJob } from './jobs/contacts.js'
 import { companiesJob } from './jobs/companies.js'
 import { tasksJob } from './jobs/tasks.js'
-import { listRecordsAction } from './actions/list-records.js'
 
 export const AttioIntegration: IntegrationDefinition = {
   id: 'attio',
@@ -49,7 +48,6 @@ export const AttioIntegration: IntegrationDefinition = {
 
   features: {
     jobs: true,
-    actions: true,
     webhooks: true,
     incrementalJobs: true,
   },
@@ -65,6 +63,5 @@ export const AttioIntegration: IntegrationDefinition = {
   },
 
   jobs: [contactsJob, companiesJob, tasksJob],
-  actions: [listRecordsAction],
   entities: ['contacts', 'companies', 'tasks'],
 }

@@ -1,6 +1,5 @@
 import type { IntegrationDefinition } from '@d8um/integration-core'
 import { issuesJob } from './jobs/issues.js'
-import { listIssuesAction } from './actions/list-issues.js'
 
 export const LinearIntegration: IntegrationDefinition = {
   id: 'linear',
@@ -31,7 +30,6 @@ export const LinearIntegration: IntegrationDefinition = {
 
   features: {
     jobs: true,
-    actions: true,
     webhooks: true,
     incrementalJobs: true,
   },
@@ -47,6 +45,5 @@ export const LinearIntegration: IntegrationDefinition = {
   },
 
   jobs: [issuesJob],
-  actions: [listIssuesAction],
   entities: ['issues', 'projects', 'teams'],
 }

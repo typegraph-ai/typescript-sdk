@@ -1,6 +1,5 @@
 import type { IntegrationDefinition } from '@d8um/integration-core'
 import { messagesJob } from './jobs/messages.js'
-import { listMessagesAction } from './actions/list-messages.js'
 
 export const GmailIntegration: IntegrationDefinition = {
   id: 'gmail',
@@ -35,7 +34,6 @@ export const GmailIntegration: IntegrationDefinition = {
 
   features: {
     jobs: true,
-    actions: true,
     webhooks: true,
     incrementalJobs: true,
   },
@@ -51,6 +49,5 @@ export const GmailIntegration: IntegrationDefinition = {
   },
 
   jobs: [messagesJob],
-  actions: [listMessagesAction],
   entities: ['messages', 'threads', 'labels'],
 }

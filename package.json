@@ -2,7 +2,7 @@
   "name": "d8um",
   "private": true,
   "packageManager": "pnpm@10.18.0",
-  "workspaces": ["packages/*", "packages/adapters/*", "packages/connectors/*", "examples/*"],
+  "workspaces": ["packages/*", "packages/adapters/*", "packages/embeddings/*"],
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",

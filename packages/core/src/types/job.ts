@@ -33,6 +33,21 @@ export interface JobTypeDefinition {
   available: boolean
   /** Expected config shape for validation + UI generation */
   configSchema: ConfigField[]
+
+  /** The execution function — yields RawDocuments from the data source */
+  run?: ((ctx: JobRunContext) => AsyncIterable<import('./connector.js').RawDocument>) | undefined
+
+  /** Suggested schedule — cron expression or preset ('hourly', 'daily', 'weekly') */
+  schedule?: string | undefined
+
+  /** Whether this job supports incremental fetching or always does a full sync */
+  syncMode?: 'incremental' | 'full' | undefined
+
+  /** Output entity name — maps to a model in the integration's models.ts (integration jobs only) */
+  entity?: string | undefined
+
+  /** Auth scopes required by this job (integration jobs only) */
+  scopes?: string[] | undefined
 }
 
 export interface ConfigField {

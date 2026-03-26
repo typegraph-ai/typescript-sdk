@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches calls (meetings) from Fathom incrementally.
@@ -16,12 +14,16 @@ import type { JobRunContext } from '@d8um/core'
  * 6. Yield each document
  * 7. Update ctx.state.lastCursor with the pagination cursor
  */
-export const callsJob: IntegrationJobDefinition = {
-  name: 'calls',
+export const callsJob: JobTypeDefinition = {
+  type: 'fathom_calls',
+  label: 'Fathom: Calls',
   description: 'Fetches call recordings and transcripts from Fathom',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'FathomCall',
-  frequency: 'hourly',
-  type: 'incremental',
+  schedule: 'hourly',
+  syncMode: 'incremental',
   scopes: ['public_api'],
   configSchema: [
     {

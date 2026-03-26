@@ -2,7 +2,6 @@ import type { IntegrationDefinition } from '@d8um/integration-core'
 import { callsJob } from './jobs/calls.js'
 import { transcriptsJob } from './jobs/transcripts.js'
 import { usersJob } from './jobs/users.js'
-import { fetchCallTranscriptsAction } from './actions/fetch-call-transcripts.js'
 
 export const GongIntegration: IntegrationDefinition = {
   id: 'gong',
@@ -36,7 +35,6 @@ export const GongIntegration: IntegrationDefinition = {
 
   features: {
     jobs: true,
-    actions: true,
     webhooks: true,
     incrementalJobs: true,
   },
@@ -52,6 +50,5 @@ export const GongIntegration: IntegrationDefinition = {
   },
 
   jobs: [callsJob, transcriptsJob, usersJob],
-  actions: [fetchCallTranscriptsAction],
   entities: ['calls', 'transcripts', 'users'],
 }

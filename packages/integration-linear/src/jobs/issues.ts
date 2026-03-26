@@ -1,6 +1,4 @@
-import type { IntegrationJobDefinition } from '@d8um/integration-core'
-import type { RawDocument } from '@d8um/core'
-import type { JobRunContext } from '@d8um/core'
+import type { JobTypeDefinition, JobRunContext, RawDocument } from '@d8um/core'
 
 /**
  * Fetches issues from a Linear workspace using the GraphQL API.
@@ -14,12 +12,16 @@ import type { JobRunContext } from '@d8um/core'
  * 6. Yield each document
  * 7. Continue fetching while pageInfo.hasNextPage is true using endCursor
  */
-export const issuesJob: IntegrationJobDefinition = {
-  name: 'issues',
+export const issuesJob: JobTypeDefinition = {
+  type: 'linear_issues',
+  label: 'Linear: Issues',
   description: 'Fetches issues from Linear workspace',
+  category: 'ingestion',
+  requiresSource: true,
+  available: true,
   entity: 'LinearIssue',
-  frequency: 'hourly',
-  type: 'incremental',
+  schedule: 'hourly',
+  syncMode: 'incremental',
   scopes: ['read', 'issues:read'],
   configSchema: [
     {
