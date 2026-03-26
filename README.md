@@ -52,8 +52,11 @@ d8um.initialize({
   vectorStore: new SqliteVecAdapter({ dbPath: './my-app.db' }),
 })
 
+// Create a source
+const faq = d8um.sources.create({ name: 'faq' })
+
 // Ingest a document
-await d8um.ingest('faq', {
+await d8um.ingest(faq.id, {
   title: 'How do I set up SSO?',
   content: 'Navigate to Settings > Authentication and select your identity provider.',
   updatedAt: new Date(),
