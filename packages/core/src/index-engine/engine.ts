@@ -232,7 +232,7 @@ export class IndexEngine {
 
   /**
    * Ingest a document with pre-built chunks.
-   * Skips the default chunker — uses the provided chunks directly.
+   * Skips the default chunker - uses the provided chunks directly.
    */
   async ingestWithChunks(
     sourceId: string,

@@ -1,7 +1,7 @@
 {
   "name": "@d8um/consolidation",
   "version": "0.1.0",
-  "description": "Memory lifecycle management — consolidation, decay, forgetting, correction, and procedural promotion",
+  "description": "Memory lifecycle management - consolidation, decay, forgetting, correction, and procedural promotion",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

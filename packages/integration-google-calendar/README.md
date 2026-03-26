@@ -1,6 +1,6 @@
 # @d8um/integration-google-calendar
 
-Google Calendar integration for d8um — sync calendars and events into your sources.
+Google Calendar integration for d8um - sync calendars and events into your sources.
 
 ## Install
 

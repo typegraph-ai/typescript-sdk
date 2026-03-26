@@ -1,7 +1,7 @@
 {
   "name": "@d8um/vercel-ai-provider",
   "version": "0.1.0",
-  "description": "Vercel AI SDK integration — memory tools and middleware for auto-context injection",
+  "description": "Vercel AI SDK integration - memory tools and middleware for auto-context injection",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

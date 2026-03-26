@@ -31,5 +31,5 @@ export { toLinearTeam } from './mappers/to-team.js'
 // Jobs
 export { issuesJob } from './jobs/issues.js'
 
-// Actions (plain functions — call directly with an ApiClient)
+// Actions (plain functions - call directly with an ApiClient)
 export { listIssues, ListIssuesInput, ListIssuesOutput } from './actions/list-issues.js'

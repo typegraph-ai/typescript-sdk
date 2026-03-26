@@ -11,7 +11,7 @@ export function sanitizeModelKey(model: string): string {
 }
 
 /**
- * DDL for the model registry table — tracks which embedding models
+ * DDL for the model registry table - tracks which embedding models
  * have been initialized and their table names / dimensions.
  */
 export const REGISTRY_SQL = (registryTable: string) => `
@@ -25,7 +25,7 @@ export const REGISTRY_SQL = (registryTable: string) => `
 `
 
 /**
- * DDL for a per-model chunks table (regular table — metadata + content).
+ * DDL for a per-model chunks table (regular table - metadata + content).
  * The vector data lives in a separate vec0 virtual table.
  */
 export const MODEL_CHUNKS_SQL = (chunksTable: string) => `

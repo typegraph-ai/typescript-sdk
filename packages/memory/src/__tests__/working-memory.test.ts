@@ -70,8 +70,8 @@ describe('WorkingMemory', () => {
       tokenizer: (text) => text.length, // 1 char = 1 token for simplicity
     })
     wm.add('12345', 'user', 1)  // 5 tokens
-    wm.add('67890', 'user', 2)  // 5 tokens — total 10, at limit
-    wm.add('abcde', 'user', 3)  // 5 tokens — exceeds, evicts lowest priority
+    wm.add('67890', 'user', 2)  // 5 tokens - total 10, at limit
+    wm.add('abcde', 'user', 3)  // 5 tokens - exceeds, evicts lowest priority
 
     expect(wm.size).toBe(2)
     const items = wm.list()

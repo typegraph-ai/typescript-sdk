@@ -37,7 +37,7 @@ export interface TemporalRecord {
 export interface MemoryRecord extends TemporalRecord {
   id: string
   category: MemoryCategory
-  /** Lifecycle status — drives query filtering and allowed operations */
+  /** Lifecycle status - drives query filtering and allowed operations */
   status: MemoryStatus
   /** Human-readable content */
   content: string
@@ -56,7 +56,7 @@ export interface MemoryRecord extends TemporalRecord {
 }
 
 // ── Episodic Memory ──
-// Timestamped events with full context — "what happened"
+// Timestamped events with full context - "what happened"
 
 export interface EpisodicMemory extends MemoryRecord {
   category: 'episodic'
@@ -72,8 +72,8 @@ export interface EpisodicMemory extends MemoryRecord {
   consolidatedAt?: Date | undefined
 }
 
-// ── Semantic Memory — Entities ──
-// Extracted knowledge entities — "who/what exists"
+// ── Semantic Memory - Entities ──
+// Extracted knowledge entities - "who/what exists"
 
 export interface SemanticEntity {
   id: string
@@ -91,8 +91,8 @@ export interface SemanticEntity {
   temporal: TemporalRecord
 }
 
-// ── Semantic Memory — Edges ──
-// Relationships between entities — "how things relate"
+// ── Semantic Memory - Edges ──
+// Relationships between entities - "how things relate"
 
 export interface SemanticEdge {
   id: string
@@ -110,8 +110,8 @@ export interface SemanticEdge {
   evidence: string[]
 }
 
-// ── Semantic Memory — Facts ──
-// Extracted knowledge as subject-predicate-object triples — "what is known"
+// ── Semantic Memory - Facts ──
+// Extracted knowledge as subject-predicate-object triples - "what is known"
 
 export interface SemanticFact extends MemoryRecord {
   category: 'semantic'
@@ -128,7 +128,7 @@ export interface SemanticFact extends MemoryRecord {
 }
 
 // ── Procedural Memory ──
-// Learned procedures from repeated patterns — "how to do things"
+// Learned procedures from repeated patterns - "how to do things"
 
 export interface ProceduralMemory extends MemoryRecord {
   category: 'procedural'

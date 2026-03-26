@@ -2,7 +2,7 @@ import type { d8umMemory } from '@d8um/memory'
 
 // ── Tool Definition ──
 // Structural type matching Vercel AI SDK's tool definition pattern.
-// No imports from `ai` or `@ai-sdk/*` — pure structural typing.
+// No imports from `ai` or `@ai-sdk/*` - pure structural typing.
 
 export interface ToolDefinition {
   description: string

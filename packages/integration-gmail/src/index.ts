@@ -31,5 +31,5 @@ export { toGmailLabel } from './mappers/to-label.js'
 // Jobs
 export { messagesJob } from './jobs/messages.js'
 
-// Actions (plain functions — call directly with an ApiClient)
+// Actions (plain functions - call directly with an ApiClient)
 export { listMessages, ListMessagesInput, ListMessagesOutput } from './actions/list-messages.js'

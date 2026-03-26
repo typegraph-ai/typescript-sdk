@@ -1,6 +1,6 @@
 # @d8um/integration-salesforce
 
-Salesforce integration for d8um — sync contacts, accounts, opportunities, and leads into your sources.
+Salesforce integration for d8um - sync contacts, accounts, opportunities, and leads into your sources.
 
 ## Install
 

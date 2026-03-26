@@ -67,14 +67,14 @@ export interface MemoryStoreAdapter {
   /** Increment access count and update lastAccessedAt for a record */
   recordAccess?(id: string): Promise<void>
 
-  // ── Entity Storage (optional — needed for semantic memory graph) ──
+  // ── Entity Storage (optional - needed for semantic memory graph) ──
 
   upsertEntity?(entity: SemanticEntity): Promise<SemanticEntity>
   getEntity?(id: string): Promise<SemanticEntity | null>
   findEntities?(query: string, scope: MemoryScope, limit?: number): Promise<SemanticEntity[]>
   searchEntities?(embedding: number[], scope: MemoryScope, limit?: number): Promise<SemanticEntity[]>
 
-  // ── Edge Storage (optional — needed for semantic memory graph) ──
+  // ── Edge Storage (optional - needed for semantic memory graph) ──
 
   upsertEdge?(edge: SemanticEdge): Promise<SemanticEdge>
   getEdges?(entityId: string, direction?: 'in' | 'out' | 'both'): Promise<SemanticEdge[]>

@@ -1,6 +1,6 @@
 # @d8um/integration-slack
 
-Slack integration for d8um — sync channels, messages, and users into your sources.
+Slack integration for d8um - sync channels, messages, and users into your sources.
 
 ## Install
 

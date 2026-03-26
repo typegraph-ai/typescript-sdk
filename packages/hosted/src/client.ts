@@ -26,7 +26,7 @@ export interface d8umHostedInstance extends d8umInstance {
 
 /**
  * Create a d8um instance backed by the hosted SaaS service.
- * Everything runs server-side — embedding, indexing, storage, connectors.
+ * Everything runs server-side - embedding, indexing, storage, connectors.
  * Just pass an API key.
  */
 export function d8umHosted(config: HostedConfig): d8umHostedInstance {
@@ -127,15 +127,15 @@ export function d8umHosted(config: HostedConfig): d8umHostedInstance {
     documentJobs,
 
     getEmbeddingForSource(_sourceId: string): EmbeddingProvider {
-      throw new Error('getEmbeddingForSource() is not available in hosted mode — embedding is managed server-side')
+      throw new Error('getEmbeddingForSource() is not available in hosted mode - embedding is managed server-side')
     },
 
     getDistinctEmbeddings(): Map<string, EmbeddingProvider> {
-      throw new Error('getDistinctEmbeddings() is not available in hosted mode — embedding is managed server-side')
+      throw new Error('getDistinctEmbeddings() is not available in hosted mode - embedding is managed server-side')
     },
 
     groupSourcesByModel(): Map<string, string[]> {
-      throw new Error('groupSourcesByModel() is not available in hosted mode — embedding is managed server-side')
+      throw new Error('groupSourcesByModel() is not available in hosted mode - embedding is managed server-side')
     },
 
     async indexWithConnector(

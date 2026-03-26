@@ -78,7 +78,7 @@ export interface DocumentJobsApi {
   addRelation(documentId: string, jobId: string, relation: DocumentJobRelationType): void
 }
 
-/** The d8um instance interface — all public methods. */
+/** The d8um instance interface - all public methods. */
 export interface d8umInstance {
   initialize(config: d8umConfig): this
 
@@ -242,8 +242,8 @@ class d8umImpl implements d8umInstance {
             r => r.documentId === rel.documentId && r.jobId !== jobId
           )
           if (otherRelations.length === 0) {
-            // This is the sole job — document is orphaned, would be deleted
-            // (actual document deletion depends on adapter — flag for deletion)
+            // This is the sole job - document is orphaned, would be deleted
+            // (actual document deletion depends on adapter - flag for deletion)
             // In a real implementation, adapter.deleteDocuments() would be called
           }
         }

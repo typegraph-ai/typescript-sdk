@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>A context and memory SDK for your LLM agent.</strong>
+  <strong>A context and memory SDK for agents.</strong>
 </p>
 
 <p align="center">
@@ -31,9 +31,9 @@ d8um closes that gap:
 
 - **Retrieval + memory in one SDK** - not two separate tools bolted together
 - **TypeScript-native** - no Python runtime, no managed service, no vendor lock-in
-- **Lightweight infrastructure** - runs on pgvector or SQLite. No Neo4j, no Redis, no Qdrant
+- **Lightweight infrastructure** - runs on Postgres+pgvector or SQLite. No Neo4j, no Redis, no Qdrant
 - **Composable** - works alongside your stack, not inside a framework
-- **Per-source embedding models** - different models for different content, merged at query time via RRF
+- **Option for per-source embedding models** - different models for different content, merged at query time via RRF
 - **Job system** - schedule memory consolidation, decay, and extraction as recurring tasks
 
 ## Quick Start

@@ -1,6 +1,6 @@
 # @d8um/integration-gmail
 
-Gmail integration for d8um — sync messages, threads, and labels into your sources.
+Gmail integration for d8um - sync messages, threads, and labels into your sources.
 
 ## Install
 

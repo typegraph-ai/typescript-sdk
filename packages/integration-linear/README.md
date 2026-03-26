@@ -1,6 +1,6 @@
 # @d8um/integration-linear
 
-Linear integration for d8um — sync issues, projects, and teams into your sources.
+Linear integration for d8um - sync issues, projects, and teams into your sources.
 
 ## Install
 

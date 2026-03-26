@@ -35,5 +35,5 @@ export { callsJob } from './jobs/calls.js'
 export { transcriptsJob } from './jobs/transcripts.js'
 export { usersJob } from './jobs/users.js'
 
-// Actions (plain functions — call directly with an ApiClient)
+// Actions (plain functions - call directly with an ApiClient)
 export { fetchCallTranscripts, FetchCallTranscriptsInput, FetchCallTranscriptsOutput } from './actions/fetch-call-transcripts.js'

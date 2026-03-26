@@ -1,6 +1,6 @@
 /**
  * Structural type for an LLM provider.
- * No imports from `@ai-sdk/*` — pure structural typing.
+ * No imports from `@ai-sdk/*` - pure structural typing.
  * Any object matching this shape works (AI SDK models, custom implementations, test mocks).
  *
  * The provider must support structured JSON output for memory extraction.

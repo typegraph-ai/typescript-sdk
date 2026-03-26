@@ -1,6 +1,6 @@
 # @d8um/integration-gong
 
-Gong integration for d8um — sync calls, transcripts, and users into your sources.
+Gong integration for d8um - sync calls, transcripts, and users into your sources.
 
 ## Install
 

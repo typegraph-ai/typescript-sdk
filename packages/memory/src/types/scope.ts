@@ -51,7 +51,7 @@ export function scopeKey(scope: MemoryScope): string {
  *
  * A record matches if every field present in the query scope
  * is also present and equal in the record scope.
- * Extra fields in the record scope are ignored — the query
+ * Extra fields in the record scope are ignored - the query
  * acts as a "subset filter".
  *
  * Examples:

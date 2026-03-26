@@ -21,7 +21,7 @@ export interface IntegrationDefinition {
   connectPermission: 'admin' | 'member'
 
   /**
-   * Auth requirements — describes WHAT is needed, not HOW to do it.
+   * Auth requirements - describes WHAT is needed, not HOW to do it.
    * The consuming app provides the auth implementation (e.g. via OAuth proxy, API keys, etc.)
    */
   auth: {
@@ -52,7 +52,7 @@ export interface IntegrationDefinition {
     aboutSummary: string
   }
 
-  /** Job definitions — uses core's JobTypeDefinition directly */
+  /** Job definitions - uses core's JobTypeDefinition directly */
   jobs: JobTypeDefinition[]
   /** Entity names this integration provides (e.g. ['messages', 'channels', 'users']) */
   entities: string[]

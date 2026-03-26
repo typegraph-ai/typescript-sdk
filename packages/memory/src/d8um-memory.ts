@@ -28,7 +28,7 @@ export interface d8umMemoryConfig {
 
 // ── d8umMemory ──
 // Unified developer-facing API for cognitive memory.
-// Imperative mode — direct calls, instant results.
+// Imperative mode - direct calls, instant results.
 // Same engines used by job system for automation.
 
 export class d8umMemory {

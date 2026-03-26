@@ -1,6 +1,6 @@
 # @d8um/integration-attio
 
-Attio integration for d8um — sync contacts, companies, and tasks into your sources.
+Attio integration for d8um - sync contacts, companies, and tasks into your sources.
 
 ## Install
 

@@ -20,7 +20,7 @@ export interface ConsolidationOpts {
   strategies?: ConsolidationStrategy[] | undefined
   /** Only consolidate episodes older than this (ms). Default: 1 hour */
   minEpisodicAgeMs?: number | undefined
-  /** Dry run — report what would change without modifying the store */
+  /** Dry run - report what would change without modifying the store */
   dryRun?: boolean | undefined
 }
 

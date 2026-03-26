@@ -32,6 +32,6 @@ export { toSlackUser } from './mappers/to-user.js'
 export { channelsJob } from './jobs/channels.js'
 export { messagesJob } from './jobs/messages.js'
 
-// Actions (plain functions — call directly with an ApiClient)
+// Actions (plain functions - call directly with an ApiClient)
 export { sendMessage, SendMessageInput, SendMessageOutput } from './actions/send-message.js'
 export { listUsers, ListUsersInput, ListUsersOutput } from './actions/list-users.js'

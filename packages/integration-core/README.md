@@ -10,7 +10,7 @@ npm install @d8um/integration-core
 
 ## IntegrationDefinition
 
-Every integration package exports a single `IntegrationDefinition` — the manifest that describes the integration and its capabilities.
+Every integration package exports a single `IntegrationDefinition` - the manifest that describes the integration and its capabilities.
 
 ```ts
 import type { IntegrationDefinition } from '@d8um/integration-core'

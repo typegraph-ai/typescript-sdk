@@ -14,11 +14,11 @@ That's it. No database server, no API keys, no cloud accounts.
 # Core SDK
 npm install @d8um/core
 
-# Local embedding model — BAAI/bge-small-en-v1.5 via fastembed + ONNX Runtime
+# Local embedding model - BAAI/bge-small-en-v1.5 via fastembed + ONNX Runtime
 # MIT licensed, 33M params, 384 dimensions, ~32 MB model (downloaded on first run)
 npm install @d8um/embedding-local
 
-# SQLite vector store — zero-infra, single-file database
+# SQLite vector store - zero-infra, single-file database
 npm install @d8um/adapter-sqlite-vec
 ```
 
@@ -29,7 +29,7 @@ import { d8um } from '@d8um/core'
 import { LocalEmbeddingProvider } from '@d8um/embedding-local'
 import { SqliteVecAdapter } from '@d8um/adapter-sqlite-vec'
 
-// Initialize d8um — fully local, no API keys needed
+// Initialize d8um - fully local, no API keys needed
 const embedding = new LocalEmbeddingProvider()
 
 d8um.initialize({
@@ -48,7 +48,7 @@ d8um.initialize({
 ## 3) Create a Source
 
 ```ts
-// Same API as the hosted and self-hosted options — the source config is identical
+// Same API as the hosted and self-hosted options - the source config is identical
 d8um.addSource({
   id: 'faq',
   mode: 'indexed',

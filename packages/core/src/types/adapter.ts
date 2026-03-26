@@ -51,7 +51,7 @@ export interface VectorStoreAdapter {
 
   hashStore: HashStoreAdapter
 
-  // --- Document record methods (optional — adapters that support documents implement these) ---
+  // --- Document record methods (optional - adapters that support documents implement these) ---
 
   /** Create or update a document record. Returns the document with its UUID. */
   upsertDocumentRecord?(input: UpsertDocumentInput): Promise<d8umDocument>

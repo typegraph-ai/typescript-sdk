@@ -46,7 +46,7 @@ export const conversationIngestJob: JobTypeDefinition = {
   ],
 
   async run(ctx: JobRunContext): Promise<JobRunResult> {
-    // Placeholder — actual execution is handled by d8umMemory
+    // Placeholder - actual execution is handled by d8umMemory
     return {
       jobId: ctx.job.id,
       sourceId: ctx.job.sourceId,

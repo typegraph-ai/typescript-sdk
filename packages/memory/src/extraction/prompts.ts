@@ -1,6 +1,6 @@
 /**
  * Prompt templates for memory extraction.
- * Plain TypeScript string functions — no template engine dependency.
+ * Plain TypeScript string functions - no template engine dependency.
  */
 
 export function factExtractionPrompt(conversation: string, existingFacts?: string): string {
@@ -75,7 +75,7 @@ For each comparison, decide one operation:
 - "ADD": The new fact is genuinely new information not covered by any existing fact
 - "UPDATE": The new fact augments or refines an existing fact (specify which by index)
 - "DELETE": The new fact contradicts an existing fact, making it invalid (specify which by index)
-- "NOOP": The new fact is already captured by an existing fact — no action needed
+- "NOOP": The new fact is already captured by an existing fact - no action needed
 
 Respond with only valid JSON:
 {

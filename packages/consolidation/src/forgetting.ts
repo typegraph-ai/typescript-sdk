@@ -84,7 +84,7 @@ export class ForgettingEngine {
     let summarized = 0
     for (const [_category, group] of byCategory) {
       if (group.length < 2) {
-        // Not enough to summarize — just archive
+        // Not enough to summarize - just archive
         for (const m of group) {
           await this.store.expire(m.id)
         }

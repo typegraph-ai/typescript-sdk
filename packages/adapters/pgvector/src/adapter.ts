@@ -7,7 +7,7 @@ import { PgDocumentStore, buildDocWhere } from './document-store.js'
 
 /**
  * A function that runs a parameterized SQL query and returns rows.
- * Bring your own Postgres driver — Neon, node-postgres, Drizzle, etc.
+ * Bring your own Postgres driver - Neon, node-postgres, Drizzle, etc.
  *
  * @example
  * ```ts
@@ -452,7 +452,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
   }
 
   async destroy(): Promise<void> {
-    // No-op — the developer owns the connection lifecycle
+    // No-op - the developer owns the connection lifecycle
   }
 }
 
@@ -495,7 +495,7 @@ function mapRowToScoredChunk(
     tenantId: (row.tenant_id as string) ?? undefined,
     documentId: row.document_id as string,
     content: row.content as string,
-    embedding: [], // Don't return the full vector — too large and unnecessary
+    embedding: [], // Don't return the full vector - too large and unnecessary
     embeddingModel: row.embedding_model as string,
     chunkIndex: row.chunk_index as number,
     totalChunks: row.total_chunks as number,

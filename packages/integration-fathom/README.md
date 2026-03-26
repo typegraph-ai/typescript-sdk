@@ -1,6 +1,6 @@
 # @d8um/integration-fathom
 
-Fathom integration for d8um — sync call recordings and transcripts into your sources.
+Fathom integration for d8um - sync call recordings and transcripts into your sources.
 
 ## Install
 

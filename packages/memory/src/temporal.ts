@@ -29,7 +29,7 @@ export function isActiveBetween(record: TemporalRecord, start: Date, end: Date):
 }
 
 /**
- * Invalidate a temporal record — mark it as no longer true in the real world.
+ * Invalidate a temporal record - mark it as no longer true in the real world.
  * Returns a new record with invalidAt set. Does not mutate the original.
  */
 export function invalidateRecord<T extends TemporalRecord>(
@@ -44,7 +44,7 @@ export function invalidateRecord<T extends TemporalRecord>(
 }
 
 /**
- * Expire a temporal record — mark it as superseded in the system.
+ * Expire a temporal record - mark it as superseded in the system.
  * Returns a new record with expiredAt set. Does not mutate the original.
  */
 export function expireRecord<T extends TemporalRecord>(record: T): T {

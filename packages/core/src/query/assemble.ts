@@ -7,7 +7,7 @@ export function assemble(results: d8umResult[], opts: AssembleOpts = {}): string
     citeSources = true,
   } = opts
 
-  // TODO: implement neighbor joining — stitch adjacent chunks into passages
+  // TODO: implement neighbor joining - stitch adjacent chunks into passages
   // TODO: implement token budget trimming
 
   const trimmed = results

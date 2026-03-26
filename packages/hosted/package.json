@@ -1,7 +1,7 @@
 {
   "name": "@d8um/hosted",
   "version": "0.1.0",
-  "description": "Hosted client SDK for d8um — zero infrastructure, just an API key",
+  "description": "Hosted client SDK for d8um - zero infrastructure, just an API key",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

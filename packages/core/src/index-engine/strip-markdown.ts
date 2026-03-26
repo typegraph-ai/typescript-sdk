@@ -10,7 +10,7 @@ export function stripMarkdown(content: string): string {
     .replace(/`([^`]+)`/g, '$1')
     // Images
     .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
-    // Links — keep link text
+    // Links - keep link text
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     // Headings
     .replace(/#{1,6}\s+/g, '')

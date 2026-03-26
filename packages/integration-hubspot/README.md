@@ -1,6 +1,6 @@
 # @d8um/integration-hubspot
 
-HubSpot integration for d8um — sync contacts, companies, and deals into your sources.
+HubSpot integration for d8um - sync contacts, companies, and deals into your sources.
 
 ## Install
 

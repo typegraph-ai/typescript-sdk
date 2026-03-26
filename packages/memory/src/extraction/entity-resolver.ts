@@ -61,7 +61,7 @@ export class EntityResolver {
       }
     }
 
-    // No match found — create new entity
+    // No match found - create new entity
     const nameEmbedding = await this.embedding.embed(name)
     const entity: SemanticEntity = {
       id: randomUUID(),

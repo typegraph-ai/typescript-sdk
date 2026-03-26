@@ -25,7 +25,7 @@ npm install @d8um/adapter-pgvector      # Production - Postgres + pgvector
 # npm install @d8um/adapter-sqlite-vec  # Local dev - zero external dependencies
 # ... or any other pre-built, or custom vector store adapters
 
-# Pick integrations (optional — 3rd party connectors)
+# Pick integrations (optional - 3rd party connectors)
 #npm install @d8um/integration-core          # Shared integration types
 #npm install @d8um/integration-slack         # Slack messages & channels
 #npm install @d8um/integration-google-drive  # Google Drive files
@@ -46,7 +46,7 @@ import { openai } from '@ai-sdk/openai'
 // i.e. your vector database provider
 import { neon } from '@neondatabase/serverless'
 
-// 1) Initialize d8um — point it at your embedding model and your database
+// 1) Initialize d8um - point it at your embedding model and your database
 d8um.initialize({
   embedding: {
     model: openai.embedding('text-embedding-3-small'),

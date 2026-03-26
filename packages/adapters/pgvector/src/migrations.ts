@@ -1,5 +1,5 @@
 /**
- * DDL for the model registry table — tracks which embedding models
+ * DDL for the model registry table - tracks which embedding models
  * have been initialized and their table names / dimensions.
  */
 export const REGISTRY_SQL = (registryTable: string) => `
@@ -81,7 +81,7 @@ export const HASH_TABLE_SQL = (hashesTable: string) => `
 `
 
 /**
- * DDL for the documents table — tracks indexed documents with metadata.
+ * DDL for the documents table - tracks indexed documents with metadata.
  * Created once during initialize().
  */
 export const DOCUMENTS_TABLE_SQL = (documentsTable: string) => `

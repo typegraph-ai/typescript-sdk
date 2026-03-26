@@ -15,7 +15,7 @@ export interface CorrectionResult {
 
 // ── Memory Corrector ──
 // Parses natural language corrections and applies versioned updates.
-// Old facts are invalidated, new facts are created — preserving full history.
+// Old facts are invalidated, new facts are created - preserving full history.
 
 export class MemoryCorrector {
   private readonly store: MemoryStoreAdapter
@@ -134,7 +134,7 @@ Respond with only valid JSON:
     facts: SemanticFact[],
   ): Promise<SemanticFact[]> {
     const targetLower = targetContent.toLowerCase()
-    // Simple content matching — in production, this would use embedding similarity
+    // Simple content matching - in production, this would use embedding similarity
     return facts.filter(f =>
       f.content.toLowerCase().includes(targetLower) ||
       targetLower.includes(f.content.toLowerCase())

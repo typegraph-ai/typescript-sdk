@@ -14,7 +14,7 @@ export interface d8umDocument {
   contentHash: string
   chunkCount: number
   status: DocumentStatus
-  /** Access scope. Optional — not all apps need scoped access. */
+  /** Access scope. Optional - not all apps need scoped access. */
   scope?: DocumentScope | undefined
   /** UUID. For group-scoped documents. */
   groupId?: string | undefined

@@ -17,7 +17,7 @@ export interface Contradiction {
 
 // ── Invalidation Engine ──
 // Detects contradictions between new and existing facts.
-// Inspired by Graphiti's edge invalidation — old facts are preserved
+// Inspired by Graphiti's edge invalidation - old facts are preserved
 // with invalidAt set, never deleted.
 
 export interface InvalidationConfig {
@@ -81,7 +81,7 @@ export class InvalidationEngine {
 
   /**
    * Resolve detected contradictions by invalidating old facts.
-   * Old facts are preserved with invalidAt set — never deleted.
+   * Old facts are preserved with invalidAt set - never deleted.
    */
   async resolveContradictions(contradictions: Contradiction[]): Promise<void> {
     for (const contradiction of contradictions) {

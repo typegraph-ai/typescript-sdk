@@ -50,13 +50,13 @@ export interface JobTypeDefinition {
    */
   run?: ((ctx: JobRunContext) => Promise<JobRunResult>) | undefined
 
-  /** Suggested schedule — cron expression or preset ('hourly', 'daily', 'weekly') */
+  /** Suggested schedule - cron expression or preset ('hourly', 'daily', 'weekly') */
   schedule?: string | undefined
 
   /** Whether this job supports incremental fetching or always does a full sync */
   syncMode?: 'incremental' | 'full' | undefined
 
-  /** Output entity name — maps to a model in the integration's models.ts (integration jobs only) */
+  /** Output entity name - maps to a model in the integration's models.ts (integration jobs only) */
   entity?: string | undefined
 
   /** Auth scopes required by this job (integration jobs only) */
@@ -78,7 +78,7 @@ export interface ConfigField {
 }
 
 /**
- * A job instance — a configured execution unit.
+ * A job instance - a configured execution unit.
  */
 export interface Job {
   id: string
@@ -122,7 +122,7 @@ export interface JobRunContext {
   job: Job
   /** Auth-agnostic API client for integration jobs */
   client?: ApiClient | undefined
-  /** For incremental jobs — when was the last successful run? */
+  /** For incremental jobs - when was the last successful run? */
   lastRunAt?: Date | undefined
   /** Persisted cursor/page state between runs */
   metadata?: Record<string, unknown> | undefined
@@ -138,7 +138,7 @@ export interface JobRunContext {
 /**
  * Result from any job's run() function.
  *
- * The shape is flexible — every job reports what's relevant to it:
+ * The shape is flexible - every job reports what's relevant to it:
  * - Ingestion jobs populate documentsCreated/Updated/Deleted
  * - Memory jobs populate metrics (e.g. { factsExtracted: 5, contradictionsResolved: 2 })
  * - Any job can include a summary and arbitrary data
@@ -149,11 +149,11 @@ export interface JobRunResult {
   status: 'completed' | 'failed'
   /** Human-readable summary of what happened */
   summary?: string | undefined
-  /** Document counts — primarily used by ingestion jobs */
+  /** Document counts - primarily used by ingestion jobs */
   documentsCreated: number
   documentsUpdated: number
   documentsDeleted: number
-  /** Typed metrics — used by memory, processing, or any job that wants structured output */
+  /** Typed metrics - used by memory, processing, or any job that wants structured output */
   metrics?: Record<string, number> | undefined
   /** Arbitrary structured data the job wants to return */
   data?: Record<string, unknown> | undefined

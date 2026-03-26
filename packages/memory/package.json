@@ -1,7 +1,7 @@
 {
   "name": "@d8um/memory",
   "version": "0.1.0",
-  "description": "Cognitive memory substrate for AI agents — working memory, episodic recall, semantic knowledge, procedural learning",
+  "description": "Cognitive memory substrate for AI agents - working memory, episodic recall, semantic knowledge, procedural learning",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

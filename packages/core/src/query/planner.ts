@@ -29,7 +29,7 @@ export class QueryPlanner {
     for (const sourceId of activeSourceIds) {
       const emb = this.sourceEmbeddings.get(sourceId)
       if (!emb) {
-        warnings.push(`Source "${sourceId}" has no embedding provider — skipped`)
+        warnings.push(`Source "${sourceId}" has no embedding provider - skipped`)
         continue
       }
       const existing = modelGroups.get(emb.model)

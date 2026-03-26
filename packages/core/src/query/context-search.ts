@@ -36,7 +36,7 @@ export interface ContextSearchResponse {
 }
 
 /**
- * Hybrid search with neighbor expansion — returns both raw ranked chunks
+ * Hybrid search with neighbor expansion - returns both raw ranked chunks
  * and stitched passages (each hit + its ±N neighbor chunks, grouped by document).
  */
 export async function searchWithContext(

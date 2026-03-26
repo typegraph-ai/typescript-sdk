@@ -19,7 +19,7 @@ const MODEL_DIMENSIONS: Partial<Record<EmbeddingModel, number>> = {
 
 /**
  * Local embedding provider using fastembed + ONNX Runtime.
- * Runs entirely on-device — no API keys or network calls needed.
+ * Runs entirely on-device - no API keys or network calls needed.
  *
  * Default model: BAAI/bge-small-en-v1.5 (33M params, 384 dims, MIT license)
  */

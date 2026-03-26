@@ -25,6 +25,6 @@ export { toGoogleDriveFolder } from './mappers/to-folder.js'
 // Jobs
 export { filesJob } from './jobs/files.js'
 
-// Actions (plain functions — call directly with an ApiClient)
+// Actions (plain functions - call directly with an ApiClient)
 export { listFiles, ListFilesInput, ListFilesOutput } from './actions/list-files.js'
 export { getFile, GetFileInput, GetFileOutput } from './actions/get-file.js'

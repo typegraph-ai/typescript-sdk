@@ -4,9 +4,9 @@ import type { AISDKEmbeddingInput } from '../embedding/ai-sdk-adapter.js'
 
 /**
  * A source is a named container for documents.
- * Sources have no type — they are user-defined buckets for organizing documents.
+ * Sources have no type - they are user-defined buckets for organizing documents.
  * A source named "Marketing Docs" could receive documents from a URL scrape,
- * a domain crawl, file uploads, and a Slack sync — all at the same time.
+ * a domain crawl, file uploads, and a Slack sync - all at the same time.
  */
 export interface Source {
   id: string

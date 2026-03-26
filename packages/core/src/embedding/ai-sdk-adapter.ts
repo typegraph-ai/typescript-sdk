@@ -2,7 +2,7 @@ import type { EmbeddingProvider } from './provider.js'
 
 /**
  * Structural type matching the Vercel AI SDK's EmbeddingModelV3 interface.
- * No imports from `@ai-sdk/provider` needed — pure structural typing.
+ * No imports from `@ai-sdk/provider` needed - pure structural typing.
  * Any object matching this shape works (AI SDK models, custom implementations, test mocks).
  */
 export interface AISDKEmbeddingModel {
@@ -33,7 +33,7 @@ export interface AISDKEmbeddingInput {
 
 /**
  * Wraps an AI SDK embedding model into d8um's EmbeddingProvider interface.
- * Calls `model.doEmbed()` directly — no dependency on the `ai` core package.
+ * Calls `model.doEmbed()` directly - no dependency on the `ai` core package.
  * Automatically batches requests according to `model.maxEmbeddingsPerCall`.
  */
 export function aiSdkEmbeddingProvider(config: AISDKEmbeddingInput): EmbeddingProvider {

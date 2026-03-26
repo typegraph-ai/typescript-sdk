@@ -1,6 +1,6 @@
 # @d8um/integration-google-drive
 
-Google Drive integration for d8um — sync files and folders into your sources.
+Google Drive integration for d8um - sync files and folders into your sources.
 
 ## Install
 

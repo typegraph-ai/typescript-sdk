@@ -28,5 +28,5 @@ export { toFathomTranscript } from './mappers/to-transcript.js'
 // Jobs
 export { callsJob } from './jobs/calls.js'
 
-// Actions (plain functions — call directly with an ApiClient)
+// Actions (plain functions - call directly with an ApiClient)
 export { listCalls, ListCallsInput, ListCallsOutput } from './actions/list-calls.js'
