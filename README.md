@@ -624,6 +624,12 @@ const response = await d8um.query('search text', {
 | `[@d8um/integration-salesforce](packages/integration-salesforce)`  | Salesforce contacts, accounts, opportunities, leads                      | Alpha  |
 | `[@d8um/integration-attio](packages/integration-attio)`            | Attio contacts, companies, tasks                                         | Alpha  |
 | `[@d8um/integration-linear](packages/integration-linear)`          | Linear issues, projects, teams                                           | Alpha  |
+| **Cognitive Memory**                                               |                                                                          |        |
+| `[@d8um/memory](packages/memory)`                                  | Memory type system, working memory, extraction, scoping                  | Alpha  |
+| `[@d8um/memory-graph](packages/memory-graph)`                      | Embedded graph layer — BFS/DFS traversal, subgraph extraction            | Alpha  |
+| `[@d8um/consolidation](packages/consolidation)`                    | Lifecycle management — decay, forgetting, consolidation, correction      | Alpha  |
+| `[@d8um/mcp-server](packages/mcp-server)`                          | MCP server — memory tools and resources for AI agents                    | Alpha  |
+| `[@d8um/vercel-ai-provider](packages/vercel-ai-provider)`          | Vercel AI SDK — memory tools and middleware                              | Alpha  |
 
 
 ### Build Your Own
@@ -678,6 +684,18 @@ registerJobType(myDataJob)
 
 @d8um/adapter-*         Swappable vector store backends (per-model table isolation)
 @d8um/integration-*     Modular 3rd party integrations (Slack, HubSpot, Google Drive, etc.)
+
+@d8um/memory            Cognitive memory substrate
+├── types/              TemporalRecord, MemoryRecord, EpisodicMemory, SemanticFact, etc.
+├── working-memory      Bounded in-memory buffer with priority eviction
+├── extraction/         LLM-driven fact extraction, entity resolution, invalidation
+├── D8umMemory          Unified API: remember(), recall(), correct(), assembleContext()
+└── jobs/               Memory job type definitions (conversation ingest)
+
+@d8um/memory-graph      Embedded graph layer (no external graph DB required)
+@d8um/consolidation     Lifecycle: decay scoring, forgetting, episodic→semantic promotion
+@d8um/mcp-server        MCP tools: d8um_remember, d8um_recall, d8um_correct, etc.
+@d8um/vercel-ai-provider Memory tools + middleware for Vercel AI SDK
 ```
 
 **Key design decisions:**
@@ -793,14 +811,55 @@ pnpm run typecheck
 
 The repo uses [Turborepo](https://turbo.build) for build orchestration and [pnpm](https://pnpm.io) workspaces for package management.
 
+## Cognitive Memory
+
+d8um includes a cognitive memory substrate inspired by human memory systems. It adds working memory, episodic recall, semantic knowledge graphs, and procedural learning to any TypeScript AI agent.
+
+```ts
+import { D8umMemory } from '@d8um/memory'
+
+const memory = new D8umMemory({ memoryStore, embedding, llm, scope: { userId: 'alice' } })
+
+// Store memories from conversations
+await memory.addConversationTurn([
+  { role: 'user', content: 'I just switched from MySQL to PostgreSQL at work' }
+])
+
+// Recall facts
+const facts = await memory.recallFacts('database preference')
+// → [{ content: 'Alice uses PostgreSQL', subject: 'Alice', predicate: 'uses', object: 'PostgreSQL' }]
+
+// Correct memories with natural language
+await memory.correct('Actually, I use MariaDB now, not PostgreSQL')
+
+// Build LLM-ready context from memory
+const context = await memory.assembleContext('What database does Alice use?')
+```
+
+Memory operations are also available as schedulable jobs:
+
+```ts
+import { registerConsolidationJobs } from '@d8um/consolidation'
+registerConsolidationJobs()
+
+// Schedule nightly consolidation (episodic → semantic promotion)
+d8um.jobs.create({ type: 'memory_consolidation', schedule: '0 3 * * *' })
+
+// Schedule hourly decay
+d8um.jobs.create({ type: 'memory_decay', schedule: '0 * * * *' })
+```
+
+See [docs/cognitive-memory-plan.md](docs/cognitive-memory-plan.md) for the full architecture and competitive analysis.
+
 ## Roadmap
 
-- Implement integration job `run()` functions (currently framework stubs)
+- MemoryStoreAdapter implementations for pgvector and sqlite-vec
+- Integration job `run()` function implementations
 - Neighbor chunk joining in `assemble()`
 - Token budget trimming
 - Additional adapters (Qdrant, Pinecone, Weaviate)
 - Additional integrations (GitHub, Confluence, Notion, S3)
-- MCP server integration
+- Full MCP server with @modelcontextprotocol/sdk transport
 - Webhook support for real-time integration syncs
 
 ## Contributing
