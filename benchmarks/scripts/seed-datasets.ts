@@ -21,6 +21,12 @@
  *   datasets/beir/nfcorpus/qrels.json     — [{query-id, corpus-id, score}, ...]
  *   datasets/beir/scifact/...
  *   datasets/beir/arguana/...
+ *   datasets/isaacus/australian-tax-guidance-retrieval/...
+ *   datasets/isaacus/contractual-clause-retrieval/...
+ *   datasets/isaacus/mleb-scalr/...
+ *   datasets/isaacus/license-tldr-retrieval/...
+ *   datasets/isaacus/legal-rag-bench/corpus.json   — [{id, title, text, footnotes}, ...]
+ *   datasets/isaacus/legal-rag-bench/qa.json        — [{id, question, answer, relevant_passage_id}, ...]
  */
 
 import { put, list } from '@vercel/blob'
@@ -38,12 +44,17 @@ interface SplitSource {
 
 interface DatasetDef {
   name: string
+  /** Blob storage prefix (e.g. 'datasets/beir' or 'datasets/isaacus') */
+  blobPrefix: string
   sources: SplitSource[]
 }
 
-const DATASETS: DatasetDef[] = [
+// ── BeIR Datasets ──
+
+const BEIR_DATASETS: DatasetDef[] = [
   {
     name: 'nfcorpus',
+    blobPrefix: 'datasets/beir',
     sources: [
       { hfDataset: 'BeIR/nfcorpus', config: 'corpus', split: 'corpus', blobName: 'corpus' },
       { hfDataset: 'BeIR/nfcorpus', config: 'queries', split: 'queries', blobName: 'queries' },
@@ -52,6 +63,7 @@ const DATASETS: DatasetDef[] = [
   },
   {
     name: 'scifact',
+    blobPrefix: 'datasets/beir',
     sources: [
       { hfDataset: 'BeIR/scifact', config: 'corpus', split: 'corpus', blobName: 'corpus' },
       { hfDataset: 'BeIR/scifact', config: 'queries', split: 'queries', blobName: 'queries' },
@@ -60,6 +72,7 @@ const DATASETS: DatasetDef[] = [
   },
   {
     name: 'arguana',
+    blobPrefix: 'datasets/beir',
     sources: [
       { hfDataset: 'BeIR/arguana', config: 'corpus', split: 'corpus', blobName: 'corpus' },
       { hfDataset: 'BeIR/arguana', config: 'queries', split: 'queries', blobName: 'queries' },
@@ -68,7 +81,66 @@ const DATASETS: DatasetDef[] = [
   },
 ]
 
-const BLOB_PREFIX = 'datasets/beir'
+// ── Isaacus Legal Datasets (BEIR-format) ──
+
+const ISAACUS_BEIR_DATASETS: DatasetDef[] = [
+  {
+    name: 'australian-tax-guidance-retrieval',
+    blobPrefix: 'datasets/isaacus',
+    sources: [
+      { hfDataset: 'isaacus/australian-tax-guidance-retrieval', config: 'corpus', split: 'corpus', blobName: 'corpus' },
+      { hfDataset: 'isaacus/australian-tax-guidance-retrieval', config: 'queries', split: 'queries', blobName: 'queries' },
+      { hfDataset: 'isaacus/australian-tax-guidance-retrieval', config: 'default', split: 'test', blobName: 'qrels' },
+    ],
+  },
+  {
+    name: 'contractual-clause-retrieval',
+    blobPrefix: 'datasets/isaacus',
+    sources: [
+      { hfDataset: 'isaacus/contractual-clause-retrieval', config: 'corpus', split: 'corpus', blobName: 'corpus' },
+      { hfDataset: 'isaacus/contractual-clause-retrieval', config: 'queries', split: 'queries', blobName: 'queries' },
+      { hfDataset: 'isaacus/contractual-clause-retrieval', config: 'default', split: 'test', blobName: 'qrels' },
+    ],
+  },
+  {
+    name: 'mleb-scalr',
+    blobPrefix: 'datasets/isaacus',
+    sources: [
+      { hfDataset: 'isaacus/mleb-scalr', config: 'corpus', split: 'corpus', blobName: 'corpus' },
+      { hfDataset: 'isaacus/mleb-scalr', config: 'queries', split: 'queries', blobName: 'queries' },
+      { hfDataset: 'isaacus/mleb-scalr', config: 'default', split: 'test', blobName: 'qrels' },
+    ],
+  },
+  {
+    name: 'license-tldr-retrieval',
+    blobPrefix: 'datasets/isaacus',
+    sources: [
+      { hfDataset: 'isaacus/license-tldr-retrieval', config: 'corpus', split: 'corpus', blobName: 'corpus' },
+      { hfDataset: 'isaacus/license-tldr-retrieval', config: 'queries', split: 'queries', blobName: 'queries' },
+      { hfDataset: 'isaacus/license-tldr-retrieval', config: 'default', split: 'test', blobName: 'qrels' },
+    ],
+  },
+]
+
+// ── Isaacus Legal RAG Bench (custom format) ──
+
+const LEGAL_RAG_BENCH: DatasetDef[] = [
+  {
+    name: 'legal-rag-bench',
+    blobPrefix: 'datasets/isaacus',
+    sources: [
+      { hfDataset: 'isaacus/legal-rag-bench', config: 'corpus', split: 'test', blobName: 'corpus' },
+      { hfDataset: 'isaacus/legal-rag-bench', config: 'qa', split: 'test', blobName: 'qa' },
+    ],
+  },
+]
+
+const DATASETS: DatasetDef[] = [
+  ...BEIR_DATASETS,
+  ...ISAACUS_BEIR_DATASETS,
+  ...LEGAL_RAG_BENCH,
+]
+const BLOB_PREFIXES = [...new Set(DATASETS.map(d => d.blobPrefix))]
 const HF_PARQUET_API = 'https://datasets-server.huggingface.co/parquet'
 
 // ── Helpers ──
@@ -166,7 +238,7 @@ async function main() {
   console.log('╚══════════════════════════════════════════════════╝')
   console.log()
   console.log(`  HuggingFace token: ${process.env.HF_TOKEN ? '✓ authenticated' : 'anonymous (set HF_TOKEN for better limits)'}`)
-  console.log(`  Blob prefix:       ${BLOB_PREFIX}/`)
+  console.log(`  Blob prefixes:     ${BLOB_PREFIXES.join(', ')}`)
   console.log(`  Datasets:          ${DATASETS.map(d => d.name).join(', ')}`)
   console.log()
 
@@ -180,7 +252,7 @@ async function main() {
     console.log(`── ${dataset.name} ${'─'.repeat(40 - dataset.name.length)}`)
 
     for (const source of dataset.sources) {
-      const blobPath = `${BLOB_PREFIX}/${dataset.name}/${source.blobName}.json`
+      const blobPath = `${dataset.blobPrefix}/${dataset.name}/${source.blobName}.json`
 
       // Idempotent: skip if already uploaded
       if (await blobExists(blobPath)) {
@@ -249,12 +321,14 @@ async function main() {
   console.log(`  Uploaded: ${totalUploaded}  Skipped: ${totalSkipped}`)
   console.log()
 
-  // List all blobs under our prefix
+  // List all blobs under our prefixes
   console.log('  Blob storage contents:')
-  const { blobs } = await list({ prefix: BLOB_PREFIX })
-  for (const blob of blobs) {
-    const sizeKB = (blob.size / 1024).toFixed(0)
-    console.log(`    ${blob.pathname} (${sizeKB} KB)`)
+  for (const prefix of BLOB_PREFIXES) {
+    const { blobs } = await list({ prefix })
+    for (const blob of blobs) {
+      const sizeKB = (blob.size / 1024).toFixed(0)
+      console.log(`    ${blob.pathname} (${sizeKB} KB)`)
+    }
   }
   console.log('══════════════════════════════════════════════════')
 }

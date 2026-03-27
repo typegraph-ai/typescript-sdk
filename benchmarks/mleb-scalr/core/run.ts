@@ -1,0 +1,164 @@
+#!/usr/bin/env npx tsx
+/**
+ * MLEB-SCALR Benchmark — d8um Core (Hybrid Search)
+ *
+ * Runs the isaacus/mleb-scalr benchmark (523 docs, 120 queries)
+ * using d8um core with hybrid search (vector + BM25, RRF fusion).
+ * Supreme Court legal holdings retrieval.
+ *
+ * Required env vars:
+ *   NEON_DATABASE_URL, AI_GATEWAY_API_KEY, BLOB_READ_WRITE_TOKEN
+ *
+ * Usage:
+ *   npx tsx mleb-scalr/core/run.ts           # query-only
+ *   npx tsx mleb-scalr/core/run.ts --seed    # re-index
+ */
+
+import { d8umCreate } from '@d8um/core'
+import { gateway } from '@ai-sdk/gateway'
+import { writeFileSync } from 'fs'
+
+import { createBenchmarkAdapter } from '../../lib/adapter.js'
+import { loadCorpus, loadQueries, loadQrels, buildQrelsMap } from '../../lib/datasets.js'
+import { scoreAllQueries } from '../../lib/metrics.js'
+import { printResults, formatMarkdown, type BenchmarkResult } from '../../lib/report.js'
+
+// ── Configuration ──
+
+const DATASET = 'mleb-scalr'
+const BLOB_PREFIX = 'datasets/isaacus'
+const BUCKET_NAME = 'mleb-scalr'
+const TABLE_PREFIX = 'bench_mleb_core_'
+const EMBEDDING_MODEL = 'openai/text-embedding-3-small'
+const EMBEDDING_DIMS = 1536
+const CHUNK_SIZE = 512
+const CHUNK_OVERLAP = 64
+const K = 10
+
+const shouldSeed = process.argv.includes('--seed')
+
+// ── Main ──
+
+async function main() {
+  const totalStart = performance.now()
+
+  console.log('╔══════════════════════════════════════════════════════════════╗')
+  console.log('║  MLEB-SCALR Benchmark — d8um Core (Hybrid Search)           ║')
+  console.log('╚══════════════════════════════════════════════════════════════╝')
+  console.log()
+  console.log(`  Mode: ${shouldSeed ? 'seed + query' : 'query-only (use --seed to re-index)'}`)
+  console.log()
+
+  console.log('Phase 1: Initializing d8um with Neon pgvector...')
+  const adapter = createBenchmarkAdapter(TABLE_PREFIX)
+  const d = await d8umCreate({
+    vectorStore: adapter,
+    embedding: {
+      model: gateway.embeddingModel(EMBEDDING_MODEL),
+      dimensions: EMBEDDING_DIMS,
+    },
+  })
+
+  const existingBuckets = await d.buckets.list()
+  let bucket = existingBuckets.find(b => b.name === BUCKET_NAME)
+  if (bucket && !shouldSeed) {
+    console.log(`  Using existing bucket: ${bucket.name} (${bucket.id})`)
+  } else if (!bucket) {
+    console.log(`  No existing bucket found, will create and seed`)
+  }
+  console.log()
+
+  console.log('Phase 2: Loading dataset from Vercel Blob...')
+  const [corpus, queries, qrels] = await Promise.all([
+    loadCorpus(DATASET, BLOB_PREFIX),
+    loadQueries(DATASET, BLOB_PREFIX),
+    loadQrels(DATASET, BLOB_PREFIX),
+  ])
+
+  const qrelsMap = buildQrelsMap(qrels)
+  const testQueries = queries.filter(q => qrelsMap.has(String(q['_id'])))
+  console.log(`  Test queries with relevance judgments: ${testQueries.length}`)
+  console.log()
+
+  let ingestDuration: number | undefined
+
+  if (!bucket || shouldSeed) {
+    if (!bucket) {
+      bucket = await d.buckets.create({ name: BUCKET_NAME })
+    }
+
+    console.log(`Phase 3: Ingesting ${corpus.length} documents...`)
+    const ingestStart = performance.now()
+    let ingested = 0
+
+    for (const doc of corpus) {
+      const docId = String(doc['_id'])
+      const title = String(doc['title'] ?? '')
+      const text = String(doc['text'] ?? '')
+
+      await d.ingest(bucket.id, [{
+        id: docId, title,
+        content: title ? `${title}\n\n${text}` : text,
+        updatedAt: new Date(),
+        metadata: { corpusId: docId },
+      }], { chunkSize: CHUNK_SIZE, chunkOverlap: CHUNK_OVERLAP, deduplicateBy: ['content'] })
+
+      ingested++
+      if (ingested % 100 === 0 || ingested === corpus.length) {
+        process.stdout.write(`\r  Ingested: ${ingested}/${corpus.length}`)
+      }
+    }
+
+    ingestDuration = (performance.now() - ingestStart) / 1000
+    console.log(`\n  Ingestion complete: ${ingestDuration.toFixed(1)}s`)
+  } else {
+    console.log('Phase 3: Skipping ingestion (bucket exists, no --seed flag)')
+  }
+  console.log()
+
+  console.log(`Phase 4: Running ${testQueries.length} queries (mode: hybrid)...`)
+  const queryStart = performance.now()
+  const allResults = new Map<string, string[]>()
+  let queriesDone = 0
+
+  for (const query of testQueries) {
+    const queryId = String(query['_id'])
+    const response = await d.query(String(query['text']), {
+      mode: 'hybrid', count: K, buckets: [bucket!.id],
+    })
+    allResults.set(queryId, response.results.map(r => r.metadata['corpusId'] as string).filter(Boolean))
+    queriesDone++
+    if (queriesDone % 20 === 0 || queriesDone === testQueries.length) {
+      process.stdout.write(`\r  Queries: ${queriesDone}/${testQueries.length}`)
+    }
+  }
+
+  const queryDuration = (performance.now() - queryStart) / 1000
+  const avgQueryMs = (queryDuration * 1000) / testQueries.length
+  console.log(`\n  Queries complete: ${queryDuration.toFixed(1)}s (avg ${avgQueryMs.toFixed(1)}ms/query)`)
+  console.log()
+
+  console.log('Phase 5: Computing IR metrics...')
+  const { metrics, scored } = scoreAllQueries(allResults, qrelsMap, K)
+  const totalDuration = (performance.now() - totalStart) / 1000
+
+  const result: BenchmarkResult = {
+    benchmark: 'MLEB-SCALR (isaacus)',
+    dataset: DATASET, mode: 'hybrid', variant: 'core',
+    corpus: corpus.length, queries: scored, k: K, metrics,
+    timing: {
+      ingestionSeconds: ingestDuration ? Number(ingestDuration.toFixed(1)) : undefined,
+      avgQueryMs: Number(avgQueryMs.toFixed(1)),
+      totalSeconds: Number(totalDuration.toFixed(1)),
+    },
+    config: { embedding: EMBEDDING_MODEL, embeddingDims: EMBEDDING_DIMS, chunkSize: CHUNK_SIZE, chunkOverlap: CHUNK_OVERLAP },
+  }
+
+  printResults(result)
+  writeFileSync('./mleb-scalr-results-core.json', JSON.stringify(result, null, 2))
+  writeFileSync('./mleb-scalr-results-core.md', formatMarkdown(result))
+  console.log('  Results: mleb-scalr-results-core.json, mleb-scalr-results-core.md')
+  console.log('══════════════════════════════════════════════════════')
+}
+
+main().catch(err => { console.error('Benchmark failed:', err); process.exit(1) })
