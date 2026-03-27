@@ -8,8 +8,8 @@ import type { EmbeddingProvider } from './provider.js'
 export interface AISDKEmbeddingModel {
   readonly provider: string
   readonly modelId: string
-  readonly maxEmbeddingsPerCall: number | undefined
-  readonly supportsParallelCalls: boolean
+  readonly maxEmbeddingsPerCall: number | PromiseLike<number | undefined> | undefined
+  readonly supportsParallelCalls: boolean | PromiseLike<boolean>
   doEmbed(options: { values: string[] }): Promise<{ embeddings: number[][] }>
 }
 
@@ -51,7 +51,7 @@ export function aiSdkEmbeddingProvider(config: AISDKEmbeddingInput): EmbeddingPr
     async embedBatch(texts: string[]): Promise<number[][]> {
       if (texts.length === 0) return []
 
-      const batchSize = model.maxEmbeddingsPerCall ?? texts.length
+      const batchSize = (await model.maxEmbeddingsPerCall) ?? texts.length
       const allEmbeddings: number[][] = []
 
       for (let i = 0; i < texts.length; i += batchSize) {
