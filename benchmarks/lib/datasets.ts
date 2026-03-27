@@ -1,13 +1,15 @@
 /**
- * datasets.ts — Download BEIR datasets from Vercel Blob Storage
+ * datasets.ts — Download benchmark datasets from Vercel Blob Storage
  *
  * Datasets are seeded once via scripts/seed-datasets.ts (HF Parquet → Blob).
  * These helpers fetch the cached JSON for use in benchmark scripts.
+ *
+ * Supports both BEIR-format datasets and custom formats (legal-rag-bench).
  */
 
 import { list } from '@vercel/blob'
 
-const BLOB_PREFIX = 'datasets/beir'
+// ── BEIR Format Types ──
 
 export interface BeirCorpusRow {
   _id: string
@@ -26,8 +28,25 @@ export interface BeirQrelRow {
   score: number
 }
 
+// ── Legal RAG Bench Types ──
+
+export interface LegalRagCorpusRow {
+  id: string
+  title: string
+  text: string
+  footnotes: string
+}
+
+export interface LegalRagQaRow {
+  id: number
+  question: string
+  answer: string
+  relevant_passage_id: string
+}
+
+// ── Generic Blob Fetcher ──
+
 async function fetchBlobJson<T>(blobPath: string): Promise<T> {
-  // List blobs to find the URL for this pathname
   const { blobs } = await list({ prefix: blobPath, limit: 1 })
   const blob = blobs.find(b => b.pathname === blobPath)
   if (!blob) {
@@ -40,23 +59,25 @@ async function fetchBlobJson<T>(blobPath: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export async function loadCorpus(dataset: string): Promise<BeirCorpusRow[]> {
+// ── BEIR Dataset Loaders ──
+
+export async function loadCorpus(dataset: string, blobPrefix = 'datasets/beir'): Promise<BeirCorpusRow[]> {
   console.log(`  Loading ${dataset}/corpus from blob storage...`)
-  const rows = await fetchBlobJson<BeirCorpusRow[]>(`${BLOB_PREFIX}/${dataset}/corpus.json`)
+  const rows = await fetchBlobJson<BeirCorpusRow[]>(`${blobPrefix}/${dataset}/corpus.json`)
   console.log(`  ✓ ${rows.length.toLocaleString()} corpus documents`)
   return rows
 }
 
-export async function loadQueries(dataset: string): Promise<BeirQueryRow[]> {
+export async function loadQueries(dataset: string, blobPrefix = 'datasets/beir'): Promise<BeirQueryRow[]> {
   console.log(`  Loading ${dataset}/queries from blob storage...`)
-  const rows = await fetchBlobJson<BeirQueryRow[]>(`${BLOB_PREFIX}/${dataset}/queries.json`)
+  const rows = await fetchBlobJson<BeirQueryRow[]>(`${blobPrefix}/${dataset}/queries.json`)
   console.log(`  ✓ ${rows.length.toLocaleString()} queries`)
   return rows
 }
 
-export async function loadQrels(dataset: string): Promise<BeirQrelRow[]> {
+export async function loadQrels(dataset: string, blobPrefix = 'datasets/beir'): Promise<BeirQrelRow[]> {
   console.log(`  Loading ${dataset}/qrels from blob storage...`)
-  const rows = await fetchBlobJson<BeirQrelRow[]>(`${BLOB_PREFIX}/${dataset}/qrels.json`)
+  const rows = await fetchBlobJson<BeirQrelRow[]>(`${blobPrefix}/${dataset}/qrels.json`)
   console.log(`  ✓ ${rows.length.toLocaleString()} relevance judgments`)
   return rows
 }
@@ -72,6 +93,35 @@ export function buildQrelsMap(qrels: BeirQrelRow[]): Map<string, Map<string, num
     const score = Number(qrel['score'])
     if (!map.has(queryId)) map.set(queryId, new Map())
     map.get(queryId)!.set(corpusId, score)
+  }
+  return map
+}
+
+// ── Legal RAG Bench Loaders ──
+
+export async function loadLegalRagCorpus(): Promise<LegalRagCorpusRow[]> {
+  console.log(`  Loading legal-rag-bench/corpus from blob storage...`)
+  const rows = await fetchBlobJson<LegalRagCorpusRow[]>(`datasets/isaacus/legal-rag-bench/corpus.json`)
+  console.log(`  ✓ ${rows.length.toLocaleString()} corpus passages`)
+  return rows
+}
+
+export async function loadLegalRagQa(): Promise<LegalRagQaRow[]> {
+  console.log(`  Loading legal-rag-bench/qa from blob storage...`)
+  const rows = await fetchBlobJson<LegalRagQaRow[]>(`datasets/isaacus/legal-rag-bench/qa.json`)
+  console.log(`  ✓ ${rows.length.toLocaleString()} QA pairs`)
+  return rows
+}
+
+/**
+ * Build qrels from Legal RAG Bench QA data.
+ * Each QA pair has a single relevant_passage_id with score 1.
+ */
+export function buildLegalRagQrelsMap(qa: LegalRagQaRow[]): Map<string, Map<string, number>> {
+  const map = new Map<string, Map<string, number>>()
+  for (const row of qa) {
+    const queryId = String(row.id)
+    map.set(queryId, new Map([[row.relevant_passage_id, 1]]))
   }
   return map
 }
