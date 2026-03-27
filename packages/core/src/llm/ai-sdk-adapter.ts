@@ -17,7 +17,7 @@ export interface AISDKLanguageModel {
     temperature?: number
   }): PromiseLike<{
     content: Array<{ type: string; text?: string }>
-    finishReason: string
+    finishReason: string | { unified: string; raw?: string }
   }>
 }
 
