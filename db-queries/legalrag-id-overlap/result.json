@@ -1,0 +1,6 @@
+{
+  "status": "ok",
+  "query": "-- Check chunk distribution and corpusId coverage for legal-rag-bench\n-- We need to understand if relevant_passage_ids from QA can match stored corpusIds\n\n-- 1. Chunk count distribution per document\nSELECT\n  'chunks_per_doc_distribution' AS section,\n  total_chunks::text AS key,\n  COUNT(DISTINCT document_id)::text AS value\nFROM bench_legalrag_core__gateway_openai_text_embedding_3_small\nWHERE metadata->>'corpusId' IS NOT NULL\nGROUP BY total_chunks\nORDER BY total_chunks;",
+  "rows": 4,
+  "output": "section,key,value\nchunks_per_doc_distribution,1,5069\nchunks_per_doc_distribution,2,1535\nchunks_per_doc_distribution,3,28\nchunks_per_doc_distribution,4,2"
+}
