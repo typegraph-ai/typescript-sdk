@@ -1,0 +1,21 @@
+{
+  "dataset": "australian-tax-guidance-retrieval",
+  "description": "Australian tax law document retrieval (isaacus MLEB)",
+  "baselines": [
+    {
+      "system": "Voyage 4 Large",
+      "metrics": { "nDCG@10": 0.7996 },
+      "source": "MLEB Leaderboard (isaacus)"
+    },
+    {
+      "system": "text-embedding-3-large",
+      "metrics": { "nDCG@10": 0.7775 },
+      "source": "MLEB Leaderboard (isaacus)"
+    },
+    {
+      "system": "text-embedding-3-small",
+      "metrics": { "nDCG@10": 0.7431 },
+      "source": "MLEB Leaderboard (isaacus)"
+    }
+  ]
+}

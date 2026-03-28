@@ -1,0 +1,21 @@
+{
+  "dataset": "license-tldr-retrieval",
+  "description": "Software license TLDR-to-full-text retrieval (isaacus MLEB)",
+  "baselines": [
+    {
+      "system": "Voyage 4 Large",
+      "metrics": { "nDCG@10": 0.8142 },
+      "source": "MLEB Leaderboard (isaacus)"
+    },
+    {
+      "system": "text-embedding-3-large",
+      "metrics": { "nDCG@10": 0.6668 },
+      "source": "MLEB Leaderboard (isaacus)"
+    },
+    {
+      "system": "text-embedding-3-small",
+      "metrics": { "nDCG@10": 0.5985 },
+      "source": "MLEB Leaderboard (isaacus)"
+    }
+  ]
+}
