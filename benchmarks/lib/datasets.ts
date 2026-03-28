@@ -52,7 +52,11 @@ async function fetchBlobJson<T>(blobPath: string): Promise<T> {
   if (!blob) {
     throw new Error(`Dataset not found in blob storage: ${blobPath}\nRun: npx tsx scripts/seed-datasets.ts`)
   }
-  const res = await fetch(blob.downloadUrl)
+  const res = await fetch(blob.downloadUrl, {
+    headers: process.env.BLOB_READ_WRITE_TOKEN
+      ? { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` }
+      : {},
+  })
   if (!res.ok) {
     throw new Error(`Failed to download ${blobPath}: ${res.status}`)
   }
