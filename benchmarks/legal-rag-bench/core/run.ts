@@ -146,6 +146,8 @@ async function main() {
   const queryStart = performance.now()
   const allResults = new Map<string, string[]>()
   let queriesDone = 0
+  let totalRetrieved = 0
+  let totalWithCorpusId = 0
 
   for (const q of qa) {
     const queryId = String(q.id)
@@ -158,6 +160,29 @@ async function main() {
       .map(r => r.metadata['corpusId'] as string)
       .filter(Boolean)
 
+    totalRetrieved += response.results.length
+    totalWithCorpusId += retrievedIds.length
+
+    // Debug: log first query's details
+    if (queriesDone === 0) {
+      console.log(`\n  [Debug] First query: "${q.question.slice(0, 80)}..."`)
+      console.log(`  [Debug] Results returned: ${response.results.length}`)
+      console.log(`  [Debug] Results with corpusId: ${retrievedIds.length}`)
+      console.log(`  [Debug] Expected relevant: ${q.relevant_passage_id}`)
+      if (response.results.length > 0) {
+        const r0 = response.results[0]
+        console.log(`  [Debug] First result metadata keys: ${Object.keys(r0.metadata).join(', ')}`)
+        console.log(`  [Debug] First result metadata: ${JSON.stringify(r0.metadata)}`)
+        console.log(`  [Debug] First result content preview: ${r0.content?.slice(0, 100)}...`)
+      }
+      if (retrievedIds.length > 0) {
+        console.log(`  [Debug] Retrieved IDs (first 5): ${retrievedIds.slice(0, 5).join(', ')}`)
+      }
+      if (response.warnings && response.warnings.length > 0) {
+        console.log(`  [Debug] Warnings: ${response.warnings.join('; ')}`)
+      }
+    }
+
     allResults.set(queryId, retrievedIds)
 
     queriesDone++
@@ -169,6 +194,7 @@ async function main() {
   const queryDuration = (performance.now() - queryStart) / 1000
   const avgQueryMs = (queryDuration * 1000) / qa.length
   console.log(`\n  Queries complete: ${queryDuration.toFixed(1)}s (avg ${avgQueryMs.toFixed(1)}ms/query)`)
+  console.log(`  Total results returned: ${totalRetrieved}, with corpusId: ${totalWithCorpusId}`)
   console.log()
 
   console.log('Phase 5: Computing IR metrics...')
