@@ -142,7 +142,7 @@ async function main() {
   }
   console.log()
 
-  console.log(`Phase 4: Running ${qa.length} queries (mode: hybrid)...`)
+  console.log(`Phase 4: Running ${qa.length} queries (mode: fast / pure vector)...`)
   const queryStart = performance.now()
   const allResults = new Map<string, string[]>()
   let queriesDone = 0
@@ -154,7 +154,7 @@ async function main() {
     const queryId = String(q.id)
 
     const response = await d.query(q.question, {
-      mode: 'hybrid', count: K, buckets: [bucket!.id],
+      mode: 'fast', count: K, buckets: [bucket!.id],
     })
 
     const retrievedIds = response.results
@@ -202,7 +202,7 @@ async function main() {
   const result: BenchmarkResult = {
     benchmark: 'Legal RAG Bench (isaacus)',
     dataset: 'legal-rag-bench',
-    mode: 'hybrid', variant: 'core',
+    mode: 'fast', variant: 'core',
     corpus: corpus.length, queries: scored, k: K, metrics,
     timing: {
       ingestionSeconds: ingestDuration ? Number(ingestDuration.toFixed(1)) : undefined,
