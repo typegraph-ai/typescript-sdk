@@ -148,7 +148,7 @@ async function main() {
     const response = await d.query(String(query['text']), {
       mode: 'hybrid', count: K, buckets: [bucket!.id],
     })
-    allResults.set(queryId, response.results.map(r => r.metadata['corpusId'] as string).filter(Boolean))
+    allResults.set(queryId, response.results.map(r => r.metadata['corpusId'] as string).filter(Boolean).filter((id, i, arr) => arr.indexOf(id) === i))
     queriesDone++
     if (queriesDone % 20 === 0 || queriesDone === testQueries.length) {
       process.stdout.write(`\r  Queries: ${queriesDone}/${testQueries.length}`)

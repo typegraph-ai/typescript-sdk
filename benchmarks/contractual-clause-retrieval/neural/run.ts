@@ -235,7 +235,9 @@ async function main() {
 
     const retrievedIds = response.results
       .map(r => r.metadata['corpusId'] as string)
+      
       .filter(Boolean)
+      .filter((id, i, arr) => arr.indexOf(id) === i)
 
     allResults.set(queryId, retrievedIds)
 
