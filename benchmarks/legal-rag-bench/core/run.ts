@@ -85,36 +85,58 @@ async function main() {
     }
 
     console.log(`Phase 3: Ingesting ${corpus.length} passages...`)
+    console.log(`  Config: chunk_size=${CHUNK_SIZE}, chunk_overlap=${CHUNK_OVERLAP}, embedding=${EMBEDDING_MODEL}`)
     const ingestStart = performance.now()
+
+    const BATCH_SIZE = 30
     let ingested = 0
+    let totalChunks = 0
+    let batchNum = 0
+    const totalBatches = Math.ceil(corpus.length / BATCH_SIZE)
 
-    for (const doc of corpus) {
-      const docId = String(doc.id)
-      const title = String(doc.title ?? '')
-      const text = String(doc.text ?? '')
-      const footnotes = String(doc.footnotes ?? '')
+    for (let i = 0; i < corpus.length; i += BATCH_SIZE) {
+      batchNum++
+      const batch = corpus.slice(i, i + BATCH_SIZE)
+      const batchStart = performance.now()
 
-      // Include footnotes as part of content for richer retrieval
-      const content = [
-        title ? `${title}\n\n${text}` : text,
-        footnotes ? `\n\nFootnotes:\n${footnotes}` : '',
-      ].join('')
+      const docs = batch.map(doc => {
+        const docId = String(doc.id)
+        const title = String(doc.title ?? '')
+        const text = String(doc.text ?? '')
+        const footnotes = String(doc.footnotes ?? '')
+        const content = [
+          title ? `${title}\n\n${text}` : text,
+          footnotes ? `\n\nFootnotes:\n${footnotes}` : '',
+        ].join('')
+        return {
+          id: docId, title, content,
+          updatedAt: new Date(),
+          metadata: { corpusId: docId },
+        }
+      })
 
-      await d.ingest(bucket.id, [{
-        id: docId, title,
-        content,
-        updatedAt: new Date(),
-        metadata: { corpusId: docId },
-      }], { chunkSize: CHUNK_SIZE, chunkOverlap: CHUNK_OVERLAP, deduplicateBy: ['content'] })
+      const result = await d.ingest(
+        bucket.id, docs,
+        { chunkSize: CHUNK_SIZE, chunkOverlap: CHUNK_OVERLAP, deduplicateBy: ['content'], propagateMetadata: ['metadata.corpusId'] },
+      )
 
-      ingested++
-      if (ingested % 500 === 0 || ingested === corpus.length) {
-        process.stdout.write(`\r  Ingested: ${ingested}/${corpus.length}`)
-      }
+      ingested += batch.length
+      totalChunks += result.inserted
+      const batchMs = performance.now() - batchStart
+      const elapsed = (performance.now() - ingestStart) / 1000
+      const docsPerSec = ingested / elapsed
+      const eta = (corpus.length - ingested) / docsPerSec
+
+      console.log(
+        `  Batch ${batchNum}/${totalBatches}: ${batch.length} docs, ` +
+        `${result.inserted} chunks inserted, ${result.skipped} skipped ` +
+        `(${batchMs.toFixed(0)}ms) — ${ingested}/${corpus.length} total, ` +
+        `${docsPerSec.toFixed(0)} docs/s, ETA ${eta.toFixed(0)}s`
+      )
     }
 
     ingestDuration = (performance.now() - ingestStart) / 1000
-    console.log(`\n  Ingestion complete: ${ingestDuration.toFixed(1)}s (${(ingested / ingestDuration).toFixed(0)} docs/sec)`)
+    console.log(`  Ingestion complete: ${ingestDuration.toFixed(1)}s, ${ingested} docs, ${totalChunks} chunks (${(ingested / ingestDuration).toFixed(0)} docs/sec)`)
   } else {
     console.log('Phase 3: Skipping ingestion (bucket exists, no --seed flag)')
   }
@@ -124,6 +146,9 @@ async function main() {
   const queryStart = performance.now()
   const allResults = new Map<string, string[]>()
   let queriesDone = 0
+  let totalRetrieved = 0
+  let totalWithCorpusId = 0
+  let debugInfo: Record<string, unknown> | undefined
 
   for (const q of qa) {
     const queryId = String(q.id)
@@ -134,7 +159,27 @@ async function main() {
 
     const retrievedIds = response.results
       .map(r => r.metadata['corpusId'] as string)
+      
       .filter(Boolean)
+      .filter((id, i, arr) => arr.indexOf(id) === i)
+
+    totalRetrieved += response.results.length
+    totalWithCorpusId += retrievedIds.length
+
+    // Capture first query diagnostics for the result JSON
+    if (queriesDone === 0) {
+      const r0 = response.results[0]
+      debugInfo = {
+        firstQuery: q.question.slice(0, 120),
+        expectedRelevantId: q.relevant_passage_id,
+        resultsReturned: response.results.length,
+        resultsWithCorpusId: retrievedIds.length,
+        retrievedIds: retrievedIds.slice(0, 5),
+        firstResultMetadata: r0 ? r0.metadata : null,
+        firstResultContent: r0 ? r0.content?.slice(0, 150) : null,
+        warnings: response.warnings ?? [],
+      }
+    }
 
     allResults.set(queryId, retrievedIds)
 
@@ -147,6 +192,7 @@ async function main() {
   const queryDuration = (performance.now() - queryStart) / 1000
   const avgQueryMs = (queryDuration * 1000) / qa.length
   console.log(`\n  Queries complete: ${queryDuration.toFixed(1)}s (avg ${avgQueryMs.toFixed(1)}ms/query)`)
+  console.log(`  Total results returned: ${totalRetrieved}, with corpusId: ${totalWithCorpusId}`)
   console.log()
 
   console.log('Phase 5: Computing IR metrics...')
