@@ -222,12 +222,12 @@ jobs:
               console.log('No baselines.json found for ' + dataset);
             }
 
-            const metricNames = Object.keys(m).filter(k => typeof m[k] === 'number');
             const baselineCols = baselines.filter(b => b.metrics['nDCG@10'] != null).slice(0, 3);
 
             // Process each result (hybrid + fast)
             for (const result of results) {
               const m = result.metrics;
+              const metricNames = Object.keys(m).filter(k => typeof m[k] === 'number');
               const t = result.timing;
 
               // Load mode-specific history
