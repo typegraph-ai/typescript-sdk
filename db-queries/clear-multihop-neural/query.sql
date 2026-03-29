@@ -1,7 +1,6 @@
--- Clear multihop-rag neural data for reseed with concurrency + embedding perf
+-- Clear multihop-rag neural data for reseed with 10x concurrency
 -- Neural variant tables use prefix: bench_multihop_neural_
 -- Bucket name: multihop-rag-neural
--- Perf: 5x concurrent doc processing + eliminated redundant embed() calls
 
 TRUNCATE TABLE bench_multihop_neural__gateway_openai_text_embedding_3_small;
 TRUNCATE TABLE bench_multihop_neural__registry;
