@@ -1,4 +1,4 @@
--- Clear multihop-rag neural data for reseed with 10x concurrency
+-- Clear multihop-rag neural data for reseed with timeout fix
 -- Neural variant tables use prefix: bench_multihop_neural_
 -- Bucket name: multihop-rag-neural
 
