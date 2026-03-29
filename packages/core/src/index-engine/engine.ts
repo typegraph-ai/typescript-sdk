@@ -10,6 +10,16 @@ import { defaultChunker } from './chunker.js'
 import { stripMarkdown } from './strip-markdown.js'
 import type { TripleExtractor } from './triple-extractor.js'
 
+/** Race a promise against a timeout. Resolves to undefined on timeout (never rejects). */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  return Promise.race([
+    promise,
+    new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), ms)),
+  ])
+}
+
+const TRIPLE_EXTRACTION_TIMEOUT_MS = 120_000 // 2 minutes per chunk
+
 export class IndexEngine {
   tripleExtractor?: TripleExtractor
 
@@ -164,7 +174,10 @@ export class IndexEngine {
       if (this.tripleExtractor && !dryRun) {
         await Promise.allSettled(
           chunks.map(chunk =>
-            this.tripleExtractor!.extractFromChunk(chunk.content, bucketId, chunk.chunkIndex)
+            withTimeout(
+              this.tripleExtractor!.extractFromChunk(chunk.content, bucketId, chunk.chunkIndex),
+              TRIPLE_EXTRACTION_TIMEOUT_MS,
+            )
           )
         )
       }
@@ -323,7 +336,10 @@ export class IndexEngine {
       if (this.tripleExtractor && !dryRun) {
         await Promise.allSettled(
           chunks.map(chunk =>
-            this.tripleExtractor!.extractFromChunk(chunk.content, bucketId, chunk.chunkIndex)
+            withTimeout(
+              this.tripleExtractor!.extractFromChunk(chunk.content, bucketId, chunk.chunkIndex),
+              TRIPLE_EXTRACTION_TIMEOUT_MS,
+            )
           )
         )
       }
@@ -489,7 +505,10 @@ export class IndexEngine {
       if (this.tripleExtractor && !dryRun) {
         await Promise.allSettled(
           chunks.map(chunk =>
-            this.tripleExtractor!.extractFromChunk(chunk.content, bucketId, chunk.chunkIndex)
+            withTimeout(
+              this.tripleExtractor!.extractFromChunk(chunk.content, bucketId, chunk.chunkIndex),
+              TRIPLE_EXTRACTION_TIMEOUT_MS,
+            )
           )
         )
       }
