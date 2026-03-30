@@ -24,10 +24,7 @@ export interface NormalizedResult {
 
 export function dedupKey(r: NormalizedResult): string {
   if (r.url) return r.url
-  // Content hash enables cross-runner score aggregation: when graph and indexed
-  // find the same chunk, their RRF scores ADD (0.5 indexed + 0.3 graph = 0.8).
-  // The old documentId::chunkIndex key prevented this because graph results use
-  // fake documentIds (graph-0, graph-1, ...) that never match indexed results.
+  if (r.chunk) return `${r.documentId}::${r.chunk.index}`
   return createHash('sha256').update(r.content).digest('hex')
 }
 
@@ -48,7 +45,7 @@ const DEFAULT_WEIGHTS: Record<string, number> = {
   live: 0.1,
   cached: 0.1,
   memory: 0.2,
-  graph: 0.3,
+  graph: 0.5,
 }
 
 export function mergeAndRank(
