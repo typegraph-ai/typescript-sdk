@@ -11,17 +11,53 @@ d8um is a TypeScript SDK for retrieval + memory for AI agents, built on Postgres
 - **LLM**: AI Gateway → google/gemini-3.1-flash-lite-preview
 - **Blob storage**: Vercel Blob (for benchmark datasets)
 
-## Sandbox Limitations
+## Sandbox Access
 
-Claude Code's sandbox has outbound access to GitHub (github.com, api.github.com) and **Neon DB** (neon.tech domains allowlisted). Other external services (AI Gateway, Vercel Blob, npm registry for installs) are still unreachable.
+Claude Code's sandbox has outbound access to **all required services**:
+- GitHub (github.com, api.github.com)
+- Neon DB (neon.tech domains)
+- AI Gateway / Vercel services (embeddings, LLM, Blob storage)
 
-**You can query the database directly** using `@neondatabase/serverless` from the `benchmarks/` directory (which has the package installed). The connection string is in `benchmarks/.env`. **You cannot run benchmarks directly** — those still require CI (they need AI Gateway for embeddings/LLM).
+**All credentials are in `benchmarks/.env`.** You can run benchmarks and DB queries directly from the sandbox without CI.
+
+**Prerequisite:** Always run `pnpm run build` from the repo root before running benchmarks. The benchmark runners import from the SDK's `dist/` output (not source), so an outdated build causes silent errors or incorrect behavior.
 
 ## Running Benchmarks
 
-Benchmarks are triggered via GitHub Actions using commit message tags. Results are posted as PR comments.
+Benchmarks can be run **locally** (preferred) or via **GitHub Actions CI** (for PR comment history and concurrent runs).
 
-### Prerequisites
+### Running Locally
+
+```bash
+# From repo root — always build first
+pnpm run build
+
+# Run a benchmark (query-only if already seeded)
+cd benchmarks
+npx tsx --env-file=.env {dataset}/{variant}/run.ts
+
+# Run with seeding (re-indexes corpus)
+npx tsx --env-file=.env {dataset}/{variant}/run.ts --seed
+```
+
+Examples:
+```bash
+npx tsx --env-file=.env license-tldr-retrieval/core/run.ts
+npx tsx --env-file=.env multihop-rag/neural/run.ts --eval-answers-only
+npx tsx --env-file=.env multihop-rag/neural/run.ts --seed
+```
+
+**Notes:**
+- Run from the `benchmarks/` directory so relative imports resolve correctly
+- `--env-file=.env` (relative path) requires being in `benchmarks/` when running
+- Results are printed to stdout as JSON after `---BENCH_RESULT_JSON---`. CI parses this to update history files; when running locally you must update history files manually if you want to record the result.
+- Seeding large datasets locally (nfcorpus, legal-rag-bench) will be slow but works
+
+### Running via CI
+
+CI is still useful for: recording results to history files automatically, running on PR branches, concurrent multi-benchmark runs, and the timeout handling for very large jobs.
+
+#### Prerequisites
 
 1. You must be on a **non-main branch** with an **open PR**
 2. Push a commit with a benchmark tag in the commit message
@@ -95,15 +131,20 @@ Query Neon directly from the sandbox using `@neondatabase/serverless`. Run queri
 ### How to Query
 
 ```bash
-cd /path/to/d8um/benchmarks
+# From benchmarks/ directory (has @neondatabase/serverless installed)
 node -e "
 const { neon } = require('@neondatabase/serverless');
-const sql = neon(process.env.NEON_DATABASE_URL || 'postgresql://neondb_owner:REDACTED@ep-young-lake-an4yj1r0-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require');
+require('dotenv').config(); // optional — or just hardcode/export NEON_DATABASE_URL
+const sql = neon(process.env.NEON_DATABASE_URL);
 sql\`SELECT ...\`.then(r => console.log(JSON.stringify(r, null, 2))).catch(e => console.error(e.message));
 "
 ```
 
-Or for longer queries, write a `.js` script that `require`s `@neondatabase/serverless` and run it with `node`.
+Since `node` doesn't auto-load `.env`, either:
+- Use the connection string directly in the script (it's in `benchmarks/.env`)
+- Or run `export $(grep -v '^#' .env | xargs) && node -e "..."`
+
+For longer queries, write a `.js` file in `benchmarks/` and run with `node`.
 
 ### Notes
 
@@ -155,9 +196,11 @@ When `--eval-answers` or `--eval-answers-only` is passed, multihop-rag runners a
 
 ```bash
 pnpm install          # Install SDK deps
-pnpm run build        # Build SDK
+pnpm run build        # Build SDK (REQUIRED before running benchmarks locally)
 cd benchmarks && npm install  # Install benchmark deps (separate npm)
 ```
+
+**Always rebuild before running benchmarks locally.** The benchmark runners import SDK packages via their `dist/` output (package.json `exports` field points to `dist/`). Running against a stale build causes silent failures or wrong behavior — e.g., multi-statement DDL errors on deploy if `execStatements` split wasn't in the build.
 
 ## Secrets (configured in GitHub repo settings)
 
