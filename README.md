@@ -235,18 +235,6 @@ d8um overall ACC (58.4%) is statistically significant over HippoRAG2 (56.5%) at 
 | `[@d8um/graph](packages/graph)`                                             | Knowledge graph, cognitive memory, PPR, entity linking, consolidation | Alpha  |
 | `[@d8um/mcp-server](packages/mcp-server)`                                   | MCP tools + resources for agent frameworks                            | Alpha  |
 | `[@d8um/vercel-ai-provider](packages/vercel-ai-provider)`                   | Vercel AI SDK memory tools + middleware                               | Alpha  |
-| **Integrations**                                                            |                                                                       |        |
-| `[@d8um/integration-core](packages/integration-core)`                       | Shared integration types (IntegrationDefinition)                      | Alpha  |
-| `[@d8um/integration-slack](packages/integration-slack)`                     | Messages, channels, users                                             | Alpha  |
-| `[@d8um/integration-google-drive](packages/integration-google-drive)`       | Files and folders                                                     | Alpha  |
-| `[@d8um/integration-google-calendar](packages/integration-google-calendar)` | Events                                                                | Alpha  |
-| `[@d8um/integration-gmail](packages/integration-gmail)`                     | Messages, threads, labels                                             | Alpha  |
-| `[@d8um/integration-hubspot](packages/integration-hubspot)`                 | Contacts, companies, deals                                            | Alpha  |
-| `[@d8um/integration-gong](packages/integration-gong)`                       | Calls, transcripts, users                                             | Alpha  |
-| `[@d8um/integration-fathom](packages/integration-fathom)`                   | Call recordings, transcripts                                          | Alpha  |
-| `[@d8um/integration-salesforce](packages/integration-salesforce)`           | Contacts, accounts, opportunities, leads                              | Alpha  |
-| `[@d8um/integration-attio](packages/integration-attio)`                     | Contacts, companies, tasks                                            | Alpha  |
-| `[@d8um/integration-linear](packages/integration-linear)`                   | Issues, projects, teams                                               | Alpha  |
 
 
 ## Guides
