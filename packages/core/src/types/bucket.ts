@@ -13,6 +13,7 @@ export interface Bucket {
   name: string
   description?: string | undefined
   status: 'active' | 'inactive'
+  indexDefaults?: IndexDefaults | undefined
   tenantId?: string | undefined
   groupId?: string | undefined
   userId?: string | undefined
@@ -20,9 +21,21 @@ export interface Bucket {
   sessionId?: string | undefined
 }
 
+/**
+ * Bucket-level index defaults. These are applied to every ingest() call
+ * targeting the bucket unless overridden per-call in IndexConfig.
+ */
+export interface IndexDefaults {
+  deduplicateBy?: string[] | undefined
+  visibility?: import('./d8um-document.js').Visibility | undefined
+  stripMarkdownForEmbedding?: boolean | undefined
+  propagateMetadata?: string[] | undefined
+}
+
 export interface CreateBucketInput {
   name: string
   description?: string | undefined
+  indexDefaults?: IndexDefaults | undefined
   tenantId?: string | undefined
   groupId?: string | undefined
   userId?: string | undefined
@@ -37,7 +50,7 @@ export type EmbeddingInput = EmbeddingProvider | AISDKEmbeddingInput
  * Used inside job configs for ingestion jobs.
  */
 export interface IndexConfig extends ChunkOpts {
-  deduplicateBy: string[] | ((doc: import('./connector.js').RawDocument) => string)
+  deduplicateBy?: string[] | ((doc: import('./connector.js').RawDocument) => string) | undefined
   propagateMetadata?: string[] | undefined
   /** If true, strip markdown syntax from chunk content before embedding. Original content is stored as-is. */
   stripMarkdownForEmbedding?: boolean | undefined

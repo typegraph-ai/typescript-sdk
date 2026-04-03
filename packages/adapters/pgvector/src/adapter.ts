@@ -578,19 +578,21 @@ export class PgVectorAdapter implements VectorStoreAdapter {
   async upsertBucket(bucket: Bucket): Promise<Bucket> {
     const rows = await this.sql(
       `INSERT INTO ${this.bucketsTable}
-        (id, name, description, status, tenant_id, group_id, user_id, agent_id, session_id, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+        (id, name, description, status, tenant_id, group_id, user_id, agent_id, session_id, index_defaults, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
        ON CONFLICT (id) DO UPDATE SET
          name = EXCLUDED.name, description = EXCLUDED.description,
          status = EXCLUDED.status, tenant_id = EXCLUDED.tenant_id,
          group_id = EXCLUDED.group_id, user_id = EXCLUDED.user_id,
          agent_id = EXCLUDED.agent_id, session_id = EXCLUDED.session_id,
+         index_defaults = EXCLUDED.index_defaults,
          updated_at = NOW()
        RETURNING *`,
       [
         bucket.id, bucket.name, bucket.description ?? null, bucket.status,
         bucket.tenantId ?? null, bucket.groupId ?? null, bucket.userId ?? null,
         bucket.agentId ?? null, bucket.sessionId ?? null,
+        bucket.indexDefaults ? JSON.stringify(bucket.indexDefaults) : null,
       ]
     )
     return mapRowToBucket(rows[0]!)
@@ -842,11 +844,16 @@ function mapRowToScoredChunk(
 }
 
 function mapRowToBucket(row: Record<string, unknown>): Bucket {
+  const raw = row.index_defaults
+  const indexDefaults = raw
+    ? (typeof raw === 'string' ? JSON.parse(raw) : raw) as Bucket['indexDefaults']
+    : undefined
   return {
     id: row.id as string,
     name: row.name as string,
     description: (row.description as string) ?? undefined,
     status: row.status as Bucket['status'],
+    indexDefaults,
     tenantId: (row.tenant_id as string) ?? undefined,
     groupId: (row.group_id as string) ?? undefined,
     userId: (row.user_id as string) ?? undefined,

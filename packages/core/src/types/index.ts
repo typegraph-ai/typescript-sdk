@@ -7,6 +7,7 @@ export type {
 export type {
   Bucket,
   CreateBucketInput,
+  IndexDefaults,
   IndexConfig,
   EmbeddingInput,
 } from './bucket.js'

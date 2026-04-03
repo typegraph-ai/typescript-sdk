@@ -94,7 +94,7 @@ export interface BucketsApi {
   create(input: CreateBucketInput): Promise<Bucket>
   get(bucketId: string): Promise<Bucket | undefined>
   list(tenantId?: string): Promise<Bucket[]>
-  update(bucketId: string, input: Partial<Pick<Bucket, 'name' | 'description' | 'status'>>): Promise<Bucket>
+  update(bucketId: string, input: Partial<Pick<Bucket, 'name' | 'description' | 'status' | 'indexDefaults'>>): Promise<Bucket>
   delete(bucketId: string): Promise<void>
 }
 
@@ -189,6 +189,7 @@ class d8umImpl implements d8umInstance {
         name: input.name,
         description: input.description,
         status: 'active',
+        indexDefaults: input.indexDefaults,
         tenantId: input.tenantId ?? this.config.tenantId,
       }
       if (this.adapter.upsertBucket) {
@@ -204,7 +205,15 @@ class d8umImpl implements d8umInstance {
 
     get: async (bucketId: string): Promise<Bucket | undefined> => {
       if (this.adapter.getBucket) {
-        return (await this.adapter.getBucket(bucketId)) ?? undefined
+        const bucket = await this.adapter.getBucket(bucketId)
+        if (bucket) {
+          // Hydrate in-memory maps so getEmbeddingForBucket() works
+          this._buckets.set(bucket.id, bucket)
+          if (!this.bucketEmbeddings.has(bucket.id)) {
+            this.bucketEmbeddings.set(bucket.id, this.defaultEmbedding)
+          }
+        }
+        return bucket ?? undefined
       }
       return this._buckets.get(bucketId)
     },
@@ -218,12 +227,13 @@ class d8umImpl implements d8umInstance {
       return all
     },
 
-    update: async (bucketId: string, input: Partial<Pick<Bucket, 'name' | 'description' | 'status'>>): Promise<Bucket> => {
+    update: async (bucketId: string, input: Partial<Pick<Bucket, 'name' | 'description' | 'status' | 'indexDefaults'>>): Promise<Bucket> => {
       const bucket = await this.buckets.get(bucketId)
       if (!bucket) throw new Error(`Bucket "${bucketId}" not found`)
       if (input.name !== undefined) bucket.name = input.name
       if (input.description !== undefined) bucket.description = input.description
       if (input.status !== undefined) bucket.status = input.status
+      if (input.indexDefaults !== undefined) bucket.indexDefaults = input.indexDefaults
       if (this.adapter.upsertBucket) {
         return this.adapter.upsertBucket(bucket)
       }
@@ -630,6 +640,34 @@ class d8umImpl implements d8umInstance {
     return embedding
   }
 
+  /**
+   * Resolves the embedding for a bucket, falling back to a DB lookup if the
+   * in-memory cache is stale. Callers in async contexts should prefer this
+   * over the synchronous getEmbeddingForBucket().
+   */
+  private async resolveEmbeddingForBucket(bucketId: string): Promise<EmbeddingProvider> {
+    const cached = this.bucketEmbeddings.get(bucketId)
+    if (cached) return cached
+    // Cache miss — try loading from DB before giving up
+    const bucket = await this.buckets.get(bucketId)
+    if (!bucket) throw new Error(`Bucket "${bucketId}" not found`)
+    // buckets.get() hydrates the maps, so this should now succeed
+    return this.bucketEmbeddings.get(bucketId) ?? this.defaultEmbedding
+  }
+
+  /** Merge bucket-level index defaults into per-call IndexConfig. Per-call values win. */
+  private mergeIndexConfig(config: IndexConfig, bucket: Bucket): IndexConfig {
+    const defaults = bucket.indexDefaults
+    if (!defaults) return config
+    return {
+      ...config,
+      deduplicateBy: config.deduplicateBy ?? defaults.deduplicateBy,
+      visibility: config.visibility ?? defaults.visibility,
+      stripMarkdownForEmbedding: config.stripMarkdownForEmbedding ?? defaults.stripMarkdownForEmbedding,
+      propagateMetadata: config.propagateMetadata ?? defaults.propagateMetadata,
+    }
+  }
+
   getDistinctEmbeddings(bucketIds?: string[]): Map<string, EmbeddingProvider> {
     const map = new Map<string, EmbeddingProvider>()
     const ids = bucketIds ?? [...this._buckets.keys()]
@@ -662,12 +700,14 @@ class d8umImpl implements d8umInstance {
     await this.ensureInitialized()
     const bucket = await this.buckets.get(bucketId)
     if (!bucket) throw new Error(`Bucket "${bucketId}" not found`)
+    // Merge bucket-level index defaults with per-call config (per-call wins)
+    const merged = this.mergeIndexConfig(indexConfig, bucket)
     const { defaultChunker: chunker } = await import('./index-engine/chunker.js')
-    const items = docs.map(doc => ({ doc, chunks: chunker(doc, indexConfig) }))
-    const embedding = this.getEmbeddingForBucket(bucketId)
+    const items = docs.map(doc => ({ doc, chunks: chunker(doc, merged) }))
+    const embedding = await this.resolveEmbeddingForBucket(bucketId)
     const engine = this.createIndexEngine(embedding)
     await this.config.hooks?.onIndexStart?.(bucketId, opts ?? {})
-    const result = await engine.ingestBatch(bucketId, items, opts, indexConfig)
+    const result = await engine.ingestBatch(bucketId, items, opts, merged)
     await this.config.hooks?.onIndexComplete?.(bucketId, result)
     return result
   }
@@ -681,7 +721,7 @@ class d8umImpl implements d8umInstance {
     await this.ensureInitialized()
     const bucket = await this.buckets.get(bucketId)
     if (!bucket) throw new Error(`Bucket "${bucketId}" not found`)
-    const embedding = this.getEmbeddingForBucket(bucketId)
+    const embedding = await this.resolveEmbeddingForBucket(bucketId)
     const engine = this.createIndexEngine(embedding)
 
     await this.config.hooks?.onIndexStart?.(bucketId, opts ?? {})
