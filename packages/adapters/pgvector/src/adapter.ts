@@ -264,7 +264,13 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     const table = this.getTable(model)
     const vectorStr = `[${embedding.join(',')}]`
     const { where, params } = buildWhere(opts.filter)
-    const filterClause = where ? `WHERE ${where}` : ''
+    // Add temporal filtering if requested
+    const temporalConditions: string[] = where ? [where] : []
+    if (opts.temporalAt) {
+      params.push(opts.temporalAt.toISOString())
+      temporalConditions.push(`indexed_at <= $${params.length}`)
+    }
+    const filterClause = temporalConditions.length > 0 ? `WHERE ${temporalConditions.join(' AND ')}` : ''
     const count = opts.count
 
     const runQuery = async (sql: SqlExecutor, inTransaction: boolean): Promise<ScoredChunk[]> => {
@@ -282,7 +288,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
          LIMIT $${paramOffset + 2}`,
         [...params, vectorStr, count]
       )
-      return rows.map(row => mapRowToScoredChunk(row, { vector: row.similarity as number }))
+      return rows.map(row => mapRowToScoredChunk(row, { semantic: row.similarity as number }))
     }
 
     if (this.transaction) {
@@ -301,7 +307,12 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     const vectorStr = `[${embedding.join(',')}]`
     const count = opts.count
     const { where: filterWhere, params: filterParams } = buildWhere(opts.filter)
-    const filterClause = filterWhere ? `AND ${filterWhere}` : ''
+    // Add temporal filtering — appended to filterParams so it gets reindexed with everything else
+    if (opts.temporalAt) {
+      filterParams.push(opts.temporalAt.toISOString())
+    }
+    const temporalCond = opts.temporalAt ? ` AND indexed_at <= $${filterParams.length}` : ''
+    const filterClause = (filterWhere ? `AND ${filterWhere}` : '') + temporalCond
 
     // Offset param indices past filter params: $1=vectorStr, $2=query, $3=count, then filter params
     const baseOffset = 3
@@ -326,7 +337,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
             FROM ${table}
             WHERE TRUE ${reindexedFilter}
             ORDER BY embedding <=> $1::vector
-            LIMIT 60
+            LIMIT ${count * 3}
           ),
           keyword_ranked AS (
             SELECT *, ts_rank(search_vector, tsq.q) AS kw_score,
@@ -334,7 +345,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
             FROM ${table}, tsq
             WHERE search_vector @@ tsq.q ${reindexedFilter}
             ORDER BY ts_rank(search_vector, tsq.q) DESC
-            LIMIT 60
+            LIMIT ${count * 3}
           ),
           combined AS (
             SELECT id, bucket_id, tenant_id, document_id, idempotency_key, content,
@@ -368,7 +379,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
       )
 
       return rows.map(row => mapRowToScoredChunk(row, {
-        vector: (row.similarity as number) ?? undefined,
+        semantic: (row.similarity as number) ?? undefined,
         keyword: (row.keyword_score as number) ?? undefined,
         rrf: Number(row.rrf_score),
       }))
@@ -401,8 +412,8 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     return this.documentStore.get(id)
   }
 
-  async listDocuments(filter: DocumentFilter): Promise<d8umDocument[]> {
-    return this.documentStore.list(filter)
+  async listDocuments(filter: DocumentFilter, pagination?: import('@d8um-ai/core').PaginationOpts): Promise<d8umDocument[] | import('@d8um-ai/core').PaginatedResult<d8umDocument>> {
+    return this.documentStore.list(filter, pagination)
   }
 
   async deleteDocuments(filter: DocumentFilter): Promise<number> {
@@ -436,8 +447,10 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     return count
   }
 
-  async updateDocument(id: string, input: Partial<Pick<d8umDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<d8umDocument | null> {
-    return this.documentStore.update(id, input)
+  async updateDocument(id: string, input: Partial<Pick<d8umDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<d8umDocument> {
+    const doc = await this.documentStore.update(id, input)
+    if (!doc) throw new Error(`Document not found: ${id}`)
+    return doc
   }
 
   async updateDocumentStatus(id: string, status: DocumentStatus, chunkCount?: number): Promise<void> {
@@ -456,7 +469,12 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     const vectorStr = `[${embedding.join(',')}]`
     const count = opts.count
     const { where: chunkFilterWhere, params: chunkFilterParams } = buildWhere(opts.filter)
-    const chunkFilterClause = chunkFilterWhere ? `AND ${chunkFilterWhere}` : ''
+    // Add temporal filtering
+    if (opts.temporalAt) {
+      chunkFilterParams.push(opts.temporalAt.toISOString())
+    }
+    const temporalCond = opts.temporalAt ? ` AND c.indexed_at <= $${chunkFilterParams.length}` : ''
+    const chunkFilterClause = (chunkFilterWhere ? `AND ${chunkFilterWhere}` : '') + temporalCond
     const { where: docFilterWhere, params: docFilterParams } = buildDocWhere(opts.documentFilter ?? {})
 
     // Base params: $1=vector, $2=query, $3=count
@@ -490,7 +508,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
             JOIN ${this.documentsTable} d ON c.document_id = d.id
             WHERE TRUE ${reindexedChunkFilter} ${docFilterClause}
             ORDER BY c.embedding <=> $1::vector
-            LIMIT 60
+            LIMIT ${count * 3}
           ),
           keyword_ranked AS (
             SELECT c.*, ts_rank(c.search_vector, tsq.q) AS kw_score,
@@ -500,7 +518,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
             JOIN ${this.documentsTable} d ON c.document_id = d.id
             WHERE c.search_vector @@ tsq.q ${reindexedChunkFilter} ${docFilterClause}
             ORDER BY ts_rank(c.search_vector, tsq.q) DESC
-            LIMIT 60
+            LIMIT ${count * 3}
           ),
           combined AS (
             SELECT id, bucket_id, tenant_id, document_id, idempotency_key, content,
@@ -549,7 +567,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
 
       return rows.map(row => ({
         ...mapRowToScoredChunk(row, {
-          vector: (row.similarity as number) ?? undefined,
+          semantic: (row.similarity as number) ?? undefined,
           keyword: (row.keyword_score as number) ?? undefined,
           rrf: Number(row.rrf_score),
         }),
@@ -611,7 +629,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     return rows.length > 0 ? mapRowToBucket(rows[0]!) : null
   }
 
-  async listBuckets(filter?: import('@d8um-ai/core').BucketListFilter): Promise<Bucket[]> {
+  async listBuckets(filter?: import('@d8um-ai/core').BucketListFilter, pagination?: import('@d8um-ai/core').PaginationOpts): Promise<Bucket[] | import('@d8um-ai/core').PaginatedResult<Bucket>> {
     const conditions: string[] = []
     const params: unknown[] = []
     if (filter?.tenantId) { params.push(filter.tenantId); conditions.push(`tenant_id = $${params.length}`) }
@@ -620,6 +638,19 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     if (filter?.agentId) { params.push(filter.agentId); conditions.push(`agent_id = $${params.length}`) }
     if (filter?.conversationId) { params.push(filter.conversationId); conditions.push(`conversation_id = $${params.length}`) }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+    if (pagination) {
+      const limit = pagination.limit ?? 100
+      const offset = pagination.offset ?? 0
+      const countRows = await this.sql(`SELECT COUNT(*)::int AS total FROM ${this.bucketsTable} ${where}`, params)
+      const total = (countRows[0]?.total as number) ?? 0
+      const rows = await this.sql(
+        `SELECT * FROM ${this.bucketsTable} ${where} ORDER BY created_at LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit, offset]
+      )
+      return { items: rows.map(mapRowToBucket), total, limit, offset }
+    }
+
     const rows = await this.sql(`SELECT * FROM ${this.bucketsTable} ${where} ORDER BY created_at`, params)
     return rows.map(mapRowToBucket)
   }
@@ -688,7 +719,7 @@ function buildWhere(filter?: ChunkFilter): { where: string; params: unknown[] } 
 
 function mapRowToScoredChunk(
   row: Record<string, unknown>,
-  scores: { vector?: number; keyword?: number; rrf?: number }
+  scores: { semantic?: number; keyword?: number; rrf?: number }
 ): ScoredChunk {
   return {
     idempotencyKey: row.idempotency_key as string,
@@ -707,7 +738,7 @@ function mapRowToScoredChunk(
     metadata: (typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata) as Record<string, unknown>,
     indexedAt: new Date(row.indexed_at as string),
     scores: {
-      vector: scores.vector,
+      semantic: scores.semantic,
       keyword: scores.keyword,
       rrf: scores.rrf,
     },

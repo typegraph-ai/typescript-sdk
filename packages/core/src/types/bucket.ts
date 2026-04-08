@@ -7,12 +7,16 @@ import type { AISDKEmbeddingInput } from '../embedding/ai-sdk-adapter.js'
  * Buckets have no type - they are user-defined namespaces for organizing documents.
  * A bucket named "Marketing Docs" could receive documents from a URL scrape,
  * a domain crawl, file uploads, and a Slack sync - all at the same time.
+ *
+ * Each bucket supports exactly one embedding model, set at creation time.
  */
 export interface Bucket {
   id: string
   name: string
   description?: string | undefined
   status: 'active' | 'inactive'
+  /** Embedding model for this bucket. Set at creation, immutable. */
+  embeddingModel?: string | undefined
   indexDefaults?: IndexDefaults | undefined
   tenantId?: string | undefined
   groupId?: string | undefined
@@ -26,6 +30,8 @@ export interface Bucket {
  * targeting the bucket unless overridden per-call in IndexConfig.
  */
 export interface IndexDefaults {
+  chunkSize?: number | undefined
+  chunkOverlap?: number | undefined
   deduplicateBy?: string[] | undefined
   visibility?: import('./d8um-document.js').Visibility | undefined
   stripMarkdownForEmbedding?: boolean | undefined
@@ -35,6 +41,8 @@ export interface IndexDefaults {
 export interface CreateBucketInput {
   name: string
   description?: string | undefined
+  /** Embedding model for this bucket. Once set, cannot be changed. Defaults to the instance's default embedding. */
+  embeddingModel?: string | undefined
   indexDefaults?: IndexDefaults | undefined
   tenantId?: string | undefined
   groupId?: string | undefined
@@ -51,7 +59,9 @@ export interface BucketListFilter {
   conversationId?: string | undefined
 }
 
-export type EmbeddingInput = EmbeddingProvider | AISDKEmbeddingInput
+/** @deprecated Use EmbeddingConfig instead. */
+export type EmbeddingInput = EmbeddingConfig
+export type EmbeddingConfig = EmbeddingProvider | AISDKEmbeddingInput
 
 /**
  * Index configuration for chunking & embedding documents.

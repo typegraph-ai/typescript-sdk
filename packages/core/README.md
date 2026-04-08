@@ -11,24 +11,29 @@ npm install @d8um-ai/core
 ## Usage
 
 ```ts
-import { d8um, registerJobType, assemble } from '@d8um-ai/core'
+import { d8umInit, d8umDeploy } from '@d8um-ai/core'
 
-await d8um.deploy({
+// One-time setup (creates tables)
+const d = await d8umDeploy({
   vectorStore: myAdapter,
   embedding: embeddingModel,
 })
 
-await d8um.initialize({
+// Runtime init (no DDL, ready for queries)
+const d = await d8umInit({
   vectorStore: myAdapter,
   embedding: embeddingModel,
 })
 
-const bucket = await d8um.buckets.create({ name: 'docs' })
+const bucket = await d.buckets.create({ name: 'docs' })
 
-await d8um.ingest(bucket.id, [{ id: 'doc-1', content: 'Your content here', title: 'Doc 1', updatedAt: new Date(), metadata: {} }], { chunkSize: 512, chunkOverlap: 64, deduplicateBy: ['content'] })
+await d.ingest(
+  [{ id: 'doc-1', content: 'Your content here', title: 'Doc 1', updatedAt: new Date(), metadata: {} }],
+  { chunkSize: 512, chunkOverlap: 64, deduplicateBy: ['content'] },
+  { bucketId: bucket.id }
+)
 
-const { results } = await d8um.query('How does authentication work?')
-const context = d8um.assemble(results)
+const { results, context } = await d.query('How does authentication work?', { format: 'xml' })
 ```
 
 ## API
@@ -37,35 +42,20 @@ const context = d8um.assemble(results)
 
 | Export | Description |
 |--------|-------------|
-| `d8um` | Singleton instance |
-| `d8umCreate()` | Factory for multiple instances |
-| `registerJobType()` | Register a built-in or integration job type |
-| `getJobType()` | Look up a registered job type |
-| `listJobTypes()` | List all registered job types |
-| `builtInJobTypes` | Array of built-in job definitions |
+| `d8umInit()` | Runtime factory — returns a ready-to-use instance |
+| `d8umDeploy()` | One-time DDL provisioning — creates tables/extensions |
 
 ### Engines
 
 | Export | Description |
 |--------|-------------|
 | `IndexEngine` | Chunk, embed, and store documents |
-| `assemble()` | Turn scored results into an LLM-ready context string |
 | `mergeAndRank()` | Combine and normalize results from multiple sources |
-| `searchWithContext()` | Contextual passage search with surrounding chunks |
 | `defaultChunker` | Built-in text chunker |
-
-### Built-in Jobs
-
-| Export | Description |
-|--------|-------------|
-| `urlScrapeJob` | Scrape and parse a single URL |
-| `domainCrawlJob` | BFS crawl an entire domain |
-| `fetchPage()` | Fetch and convert HTML to markdown |
-| `Crawler` | Configurable BFS crawler |
 
 ### Types
 
-`Bucket`, `Job`, `JobTypeDefinition`, `JobRunContext`, `JobRunResult`, `ApiClient`, `VectorStoreAdapter`, `EmbeddingProvider`, `RawDocument`, `Chunk`, `d8umDocument`, `Visibility`, `d8umIdentity`, `QueryOpts`, `QueryResponse`, `AssembleOpts`, `IndexOpts`, `IndexResult`
+`Bucket`, `VectorStoreAdapter`, `EmbeddingProvider`, `EmbeddingConfig`, `LLMConfig`, `RawDocument`, `Chunk`, `d8umDocument`, `Visibility`, `d8umIdentity`, `QueryOpts`, `QueryResponse`, `QuerySignals`, `IndexOpts`, `IndexResult`, `IndexConfig`, `GraphBridge`, `MemoryRecord`, `Job`, `Policy`
 
 ## Related
 

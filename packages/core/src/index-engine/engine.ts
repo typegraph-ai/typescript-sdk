@@ -1,5 +1,5 @@
 import type { IndexConfig } from '../types/bucket.js'
-import type { VectorStoreAdapter } from '../types/adapter.js'
+import type { VectorStoreAdapter, HashRecord } from '../types/adapter.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import type { IndexOpts, IndexResult } from '../types/index-types.js'
 import type { RawDocument, Chunk } from '../types/connector.js'
@@ -208,14 +208,31 @@ export class IndexEngine {
     }> = []
     const allTexts: string[] = []
 
-    for (const { doc, chunks } of items) {
-      const contentHash = sha256(doc.content)
-      const ikey = resolveIdempotencyKey(doc, deduplicateBy)
+    // Batch hash store lookup: check all idempotency keys in a single query
+    const docMeta = items.map(({ doc }) => ({
+      doc,
+      contentHash: sha256(doc.content),
+      ikey: resolveIdempotencyKey(doc, deduplicateBy),
+      storeKey: buildHashStoreKey(tenantId, bucketId, resolveIdempotencyKey(doc, deduplicateBy)),
+    }))
+
+    let hashMap: Map<string, HashRecord> | undefined
+    if (!dryRun) {
+      const allStoreKeys = docMeta.map(m => m.storeKey)
+      hashMap = this.adapter.hashStore.getMany
+        ? await this.adapter.hashStore.getMany(allStoreKeys)
+        : undefined
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const { chunks } = items[i]!
+      const { doc, contentHash, ikey, storeKey } = docMeta[i]!
 
       // Hash store dedup: skip docs whose content + model haven't changed
       if (!dryRun) {
-        const storeKey = buildHashStoreKey(tenantId, bucketId, ikey)
-        const stored = await this.adapter.hashStore.get(storeKey)
+        const stored = hashMap
+          ? hashMap.get(storeKey) ?? null
+          : await this.adapter.hashStore.get(storeKey)
         if (stored?.contentHash === contentHash && stored.embeddingModel === modelId) {
           const actualChunks = await this.adapter.countChunks(modelId, {
             bucketId,

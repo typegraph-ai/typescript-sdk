@@ -1,26 +1,30 @@
 import type { VectorStoreAdapter, UndeployResult } from './types/adapter.js'
-import type { Bucket, CreateBucketInput, BucketListFilter, EmbeddingInput, IndexConfig } from './types/bucket.js'
-import type { QueryOpts, QueryResponse, d8umResult, AssembleOpts } from './types/query.js'
+import type { Bucket, CreateBucketInput, BucketListFilter, EmbeddingConfig, IndexConfig } from './types/bucket.js'
+import type { QueryOpts, QueryResponse, d8umResult } from './types/query.js'
 import type { IndexOpts, IndexResult } from './types/index-types.js'
 import type { EmbeddingProvider } from './embedding/provider.js'
 import type { RawDocument, Chunk } from './types/connector.js'
-import type { d8umDocument, DocumentFilter } from './types/d8um-document.js'
+import type { d8umDocument, DocumentFilter, UpsertDocumentInput } from './types/d8um-document.js'
 import type { d8umHooks } from './types/hooks.js'
 import type { LLMProvider } from './types/llm-provider.js'
-import type { GraphBridge } from './types/graph-bridge.js'
+import type {
+  GraphBridge, EntityResult, EntityDetail, EdgeResult,
+  SubgraphOpts, SubgraphResult, GraphStats,
+} from './types/graph-bridge.js'
 import type { ExtractionConfig } from './types/extraction-config.js'
 import type { d8umIdentity } from './types/identity.js'
 import type { d8umEventSink, d8umEventType } from './types/events.js'
 import type { PolicyStoreAdapter, CreatePolicyInput, UpdatePolicyInput, Policy, PolicyType, PolicyAction } from './types/policy.js'
+import type { MemoryRecord, ConversationTurnResult, MemoryHealthReport } from './types/memory.js'
+import type { d8umLogger } from './types/logger.js'
+import type { Job, JobFilter } from './types/job.js'
+import type { PaginationOpts, PaginatedResult } from './types/pagination.js'
 import { PolicyEngine, PolicyViolationError } from './governance/policy-engine.js'
-import type { ContextSearchOpts, ContextSearchResponse } from './query/context-search.js'
 import type { AISDKLLMInput } from './llm/ai-sdk-adapter.js'
 import { aiSdkEmbeddingProvider, isAISDKEmbeddingInput } from './embedding/ai-sdk-adapter.js'
 import { aiSdkLlmProvider, isAISDKLLMInput } from './llm/ai-sdk-adapter.js'
 import { IndexEngine } from './index-engine/engine.js'
 import { TripleExtractor } from './index-engine/triple-extractor.js'
-import { searchWithContext as searchWithContextFn } from './query/context-search.js'
-import { assemble as assembleResults } from './query/assemble.js'
 import { NotFoundError, NotInitializedError, ConfigError } from './types/errors.js'
 import { generateId } from './utils/id.js'
 
@@ -31,7 +35,9 @@ export const DEFAULT_BUCKET_NAME = 'Default'
 export const DEFAULT_BUCKET_DESCRIPTION = 'System default bucket. All ingested documents without an explicit bucket assignment are stored here. Cannot be deleted.'
 
 /** Union type: pass a native LLMProvider or an AI SDK model wrapped as { model }. */
-export type LLMInput = LLMProvider | AISDKLLMInput
+export type LLMConfig = LLMProvider | AISDKLLMInput
+/** @deprecated Use LLMConfig instead. */
+export type LLMInput = LLMConfig
 
 export interface d8umConfig {
   // ── Cloud mode (mutually exclusive with vectorStore/embedding) ──
@@ -44,12 +50,12 @@ export interface d8umConfig {
 
   // ── Self-hosted mode ──
   vectorStore?: VectorStoreAdapter | undefined
-  embedding?: EmbeddingInput | undefined
+  embedding?: EmbeddingConfig | undefined
   tenantId?: string | undefined
   tokenizer?: ((text: string) => number) | undefined
   hooks?: d8umHooks | undefined
   /** Optional LLM provider for triple extraction, query classification, and memory operations. */
-  llm?: LLMInput | undefined
+  llm?: LLMConfig | undefined
   /** Optional graph bridge for memory operations and neural query mode. */
   graph?: GraphBridge | undefined
   /** Configure triple extraction behavior (single-pass vs two-pass, per-pass models). */
@@ -58,48 +64,90 @@ export interface d8umConfig {
   eventSink?: d8umEventSink | undefined
   /** Optional policy store for governance. When provided, actions are checked against active policies. */
   policyStore?: PolicyStoreAdapter | undefined
+  /** Optional logger for debugging. */
+  logger?: d8umLogger | undefined
 }
 
 function isEmbeddingProvider(
-  value: EmbeddingInput
+  value: EmbeddingConfig
 ): value is EmbeddingProvider {
   return 'embed' in value && 'embedBatch' in value && 'dimensions' in value
 }
 
-export function resolveEmbeddingProvider(config: EmbeddingInput): EmbeddingProvider {
+export function resolveEmbeddingProvider(config: EmbeddingConfig): EmbeddingProvider {
   if (isEmbeddingProvider(config)) return config
   if (isAISDKEmbeddingInput(config)) return aiSdkEmbeddingProvider(config)
 
-  throw new ConfigError('Invalid embedding configuration')
+  throw new ConfigError('Invalid embedding configuration. Pass an EmbeddingProvider ({ embed, embedBatch, dimensions, model }) or an AI SDK embedding model ({ model, dimensions }).')
 }
 
-function isLLMProvider(value: LLMInput): value is LLMProvider {
+function isLLMProvider(value: LLMConfig): value is LLMProvider {
   return 'generateText' in value && 'generateJSON' in value
 }
 
-export function resolveLLMProvider(config: LLMInput): LLMProvider {
+export function resolveLLMProvider(config: LLMConfig): LLMProvider {
   if (isLLMProvider(config)) return config
   if (isAISDKLLMInput(config)) return aiSdkLlmProvider(config)
 
-  throw new ConfigError('Invalid LLM configuration')
+  throw new ConfigError('Invalid LLM configuration. Pass an LLMProvider ({ generateText, generateJSON }) or an AI SDK language model ({ model }).')
 }
 
-// ── Buckets Sub-API ──
+/** Validate d8um configuration. Throws ConfigError for invalid configs. */
+function validateConfig(config: d8umConfig): void {
+  if (config.apiKey && (config.vectorStore || config.embedding)) {
+    throw new ConfigError('Both apiKey (cloud mode) and vectorStore/embedding (self-hosted mode) provided. Choose one.')
+  }
+  if (!config.apiKey) {
+    if (!config.vectorStore) {
+      throw new ConfigError('Self-hosted mode requires a vectorStore adapter. Pass vectorStore to d8umConfig.')
+    }
+    if (!config.embedding) {
+      throw new ConfigError('Self-hosted mode requires an embedding provider. Pass embedding to d8umConfig.')
+    }
+  }
+  if (config.graph && !config.llm) {
+    config.logger?.warn('Graph bridge configured without an LLM. Triple extraction during ingestion will be skipped. Pass llm to d8umConfig for full graph functionality.')
+  }
+}
+
+// ── Sub-API Interfaces ──
 
 export interface BucketsApi {
   create(input: CreateBucketInput): Promise<Bucket>
   get(bucketId: string): Promise<Bucket | undefined>
-  list(filter?: BucketListFilter): Promise<Bucket[]>
+  list(filter?: BucketListFilter, pagination?: PaginationOpts): Promise<Bucket[] | PaginatedResult<Bucket>>
   update(bucketId: string, input: Partial<Pick<Bucket, 'name' | 'description' | 'status' | 'indexDefaults'>>): Promise<Bucket>
   delete(bucketId: string): Promise<void>
 }
 
-// ── Documents Sub-API ──
-
 export interface DocumentsApi {
   get(id: string): Promise<d8umDocument | null>
-  list(filter?: DocumentFilter): Promise<d8umDocument[]>
+  list(filter?: DocumentFilter, pagination?: PaginationOpts): Promise<d8umDocument[] | PaginatedResult<d8umDocument>>
+  update(id: string, input: Partial<Pick<d8umDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<d8umDocument>
   delete(filter: DocumentFilter): Promise<number>
+}
+
+export interface JobsApi {
+  get(id: string): Promise<Job | null>
+  list(filter?: JobFilter): Promise<Job[]>
+}
+
+export interface GraphApi {
+  searchEntities(query: string, identity: d8umIdentity, opts?: {
+    limit?: number
+    entityType?: string
+    minConnections?: number
+  }): Promise<EntityResult[]>
+  getEntity(id: string): Promise<EntityDetail | null>
+  getEdges(entityId: string, opts?: {
+    direction?: 'in' | 'out' | 'both'
+    relation?: string
+    limit?: number
+  }): Promise<EdgeResult[]>
+  getSubgraph(opts: SubgraphOpts): Promise<SubgraphResult>
+  stats(identity: d8umIdentity): Promise<GraphStats>
+  getRelationTypes(identity: d8umIdentity): Promise<Array<{ relation: string; count: number }>>
+  getEntityTypes(identity: d8umIdentity): Promise<Array<{ entityType: string; count: number }>>
 }
 
 /** The d8um instance interface — all public methods. */
@@ -115,23 +163,23 @@ export interface d8umInstance {
 
   buckets: BucketsApi
   documents: DocumentsApi
+  jobs: JobsApi
+
+  /** Graph exploration API. Requires graph bridge. */
+  graph: GraphApi
 
   getEmbeddingForBucket(bucketId: string): EmbeddingProvider
   getDistinctEmbeddings(bucketIds?: string[]): Map<string, EmbeddingProvider>
   groupBucketsByModel(bucketIds?: string[]): Map<string, string[]>
 
-  /** Ingest documents directly into a bucket. All chunks are embedded in a single batch call. */
-  ingest(bucketId: string | undefined, docs: RawDocument[], indexConfig: IndexConfig, opts?: IndexOpts): Promise<IndexResult>
+  /** Ingest documents. Target bucket set via opts.bucketId (defaults to default bucket). */
   ingest(docs: RawDocument[], indexConfig: IndexConfig, opts?: IndexOpts): Promise<IndexResult>
 
-  /** Ingest a document with pre-chunked content. */
-  ingestWithChunks(bucketId: string | undefined, doc: RawDocument, chunks: Chunk[], opts?: IndexOpts): Promise<IndexResult>
-  ingestWithChunks(doc: RawDocument, chunks: Chunk[], opts?: IndexOpts): Promise<IndexResult>
+  /** Ingest a document with pre-chunked content. Target bucket set via opts.bucketId. */
+  ingestPreChunked(doc: RawDocument, chunks: Chunk[], opts?: IndexOpts): Promise<IndexResult>
 
-  /** Search across buckets. */
+  /** Search across buckets. Optionally format results via opts.format. */
   query(text: string, opts?: QueryOpts): Promise<QueryResponse>
-  searchWithContext(text: string, opts?: ContextSearchOpts): Promise<ContextSearchResponse>
-  assemble(results: d8umResult[], opts?: AssembleOpts): string
 
   // ── Memory operations (require graph bridge) ──
 
@@ -139,15 +187,15 @@ export interface d8umInstance {
   remember(content: string, identity: d8umIdentity, category?: string, opts?: {
     importance?: number
     metadata?: Record<string, unknown>
-  }): Promise<unknown>
-  /** Invalidate a memory and its associated graph edges. */
-  forget(id: string): Promise<void>
+  }): Promise<MemoryRecord>
+  /** Invalidate a memory and its associated graph edges. Identity must match the memory owner. */
+  forget(id: string, identity: d8umIdentity): Promise<void>
   /** Apply a natural language correction. */
   correct(correction: string, identity: d8umIdentity): Promise<{ invalidated: number; created: number; summary: string }>
   /** Search memories by semantic similarity. */
-  recall(query: string, identity: d8umIdentity, opts?: { limit?: number; types?: string[] }): Promise<unknown[]>
+  recall(query: string, identity: d8umIdentity, opts?: { limit?: number; types?: string[] }): Promise<MemoryRecord[]>
   /** Build a formatted memory context block for LLM system prompts. */
-  assembleContext(query: string, identity: d8umIdentity, opts?: {
+  buildMemoryContext(query: string, identity: d8umIdentity, opts?: {
     includeWorking?: boolean
     includeFacts?: boolean
     includeEpisodes?: boolean
@@ -156,13 +204,13 @@ export interface d8umInstance {
     format?: 'xml' | 'markdown' | 'plain'
   }): Promise<string>
   /** Check memory system health — returns stats about stored memories, entities, and edges. */
-  healthCheck(identity: d8umIdentity): Promise<unknown>
+  healthCheck(identity: d8umIdentity): Promise<MemoryHealthReport>
   /** Ingest a conversation turn with extraction. */
   addConversationTurn(
     messages: Array<{ role: string; content: string; timestamp?: Date }>,
     identity: d8umIdentity,
     conversationId?: string,
-  ): Promise<unknown>
+  ): Promise<ConversationTurnResult>
 
   // ── Policy operations (require policyStore) ──
 
@@ -187,6 +235,8 @@ class d8umImpl implements d8umInstance {
   private initialized = false
   private policyEngine?: PolicyEngine
 
+  private get logger() { return this.config?.logger }
+
   private emitEvent(eventType: d8umEventType, targetId?: string, payload: Record<string, unknown> = {}): void {
     if (!this.config?.eventSink) return
     this.config.eventSink.emit({
@@ -209,6 +259,7 @@ class d8umImpl implements d8umInstance {
         name: input.name,
         description: input.description,
         status: 'active',
+        embeddingModel: input.embeddingModel ?? this.defaultEmbedding.model,
         indexDefaults: input.indexDefaults,
         tenantId: input.tenantId ?? this.config.tenantId,
       }
@@ -229,7 +280,6 @@ class d8umImpl implements d8umInstance {
       if (this.adapter.getBucket) {
         const bucket = await this.adapter.getBucket(bucketId)
         if (bucket) {
-          // Hydrate in-memory maps so getEmbeddingForBucket() works
           this._buckets.set(bucket.id, bucket)
           if (!this.bucketEmbeddings.has(bucket.id)) {
             this.bucketEmbeddings.set(bucket.id, this.defaultEmbedding)
@@ -240,16 +290,17 @@ class d8umImpl implements d8umInstance {
       return this._buckets.get(bucketId)
     },
 
-    list: async (filter?: BucketListFilter): Promise<Bucket[]> => {
+    list: async (filter?: BucketListFilter, pagination?: PaginationOpts): Promise<Bucket[] | PaginatedResult<Bucket>> => {
       if (this.adapter.listBuckets) {
-        const buckets = await this.adapter.listBuckets(filter)
+        const result = await this.adapter.listBuckets(filter, pagination)
+        const buckets = Array.isArray(result) ? result : result.items
         for (const b of buckets) {
           this._buckets.set(b.id, b)
           if (!this.bucketEmbeddings.has(b.id)) {
             this.bucketEmbeddings.set(b.id, this.defaultEmbedding)
           }
         }
-        return buckets
+        return result
       }
       let all = [...this._buckets.values()]
       if (filter) {
@@ -258,6 +309,11 @@ class d8umImpl implements d8umInstance {
         if (filter.userId) all = all.filter(s => s.userId === filter.userId)
         if (filter.agentId) all = all.filter(s => s.agentId === filter.agentId)
         if (filter.conversationId) all = all.filter(s => s.conversationId === filter.conversationId)
+      }
+      if (pagination) {
+        const limit = pagination.limit ?? 100
+        const offset = pagination.offset ?? 0
+        return { items: all.slice(offset, offset + limit), total: all.length, limit, offset }
       }
       return all
     },
@@ -282,7 +338,7 @@ class d8umImpl implements d8umInstance {
 
     delete: async (bucketId: string): Promise<void> => {
       if (bucketId === DEFAULT_BUCKET_ID) {
-        throw new Error('Cannot delete the default bucket.')
+        throw new ConfigError('Cannot delete the default bucket.')
       }
       await this.enforcePolicy('bucket.delete', { tenantId: this.config.tenantId }, bucketId)
       if (this.adapter.deleteBucket) {
@@ -306,12 +362,22 @@ class d8umImpl implements d8umInstance {
       return this.adapter.getDocument(id)
     },
 
-    list: async (filter?: DocumentFilter): Promise<d8umDocument[]> => {
+    list: async (filter?: DocumentFilter, pagination?: PaginationOpts): Promise<d8umDocument[] | PaginatedResult<d8umDocument>> => {
       this.assertConfigured()
       if (!this.adapter.listDocuments) {
         throw new ConfigError('Adapter does not support document operations.')
       }
-      return this.adapter.listDocuments(filter ?? {})
+      return this.adapter.listDocuments(filter ?? {}, pagination)
+    },
+
+    update: async (id: string, input: Partial<Pick<d8umDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<d8umDocument> => {
+      this.assertConfigured()
+      if (!this.adapter.updateDocument) {
+        throw new ConfigError('Adapter does not support document update operations.')
+      }
+      const updated = await this.adapter.updateDocument(id, input)
+      this.emitEvent('document.update', id, { fields: Object.keys(input) })
+      return updated
     },
 
     delete: async (filter: DocumentFilter): Promise<number> => {
@@ -328,6 +394,81 @@ class d8umImpl implements d8umInstance {
     },
   }
 
+  // ── Jobs ──
+
+  jobs: JobsApi = {
+    get: async (_id: string): Promise<Job | null> => {
+      this.assertConfigured()
+      // Jobs are primarily a cloud-mode feature. Self-hosted returns null.
+      return null
+    },
+    list: async (_filter?: JobFilter): Promise<Job[]> => {
+      this.assertConfigured()
+      return []
+    },
+  }
+
+  // ── Graph Exploration ──
+
+  graph: GraphApi = {
+    searchEntities: async (query: string, identity: d8umIdentity, opts?: {
+      limit?: number
+      entityType?: string
+      minConnections?: number
+    }): Promise<EntityResult[]> => {
+      const graph = this.requireGraph()
+      if (!graph.searchEntities) throw new ConfigError('Graph bridge does not support entity search.')
+      const results = await graph.searchEntities(query, identity, opts?.limit)
+      // The bridge returns a simpler format; enrich it
+      return results.map(r => ({
+        ...r,
+        aliases: [],
+        edgeCount: 0,
+        ...r,
+      }))
+    },
+
+    getEntity: async (id: string): Promise<EntityDetail | null> => {
+      const graph = this.requireGraph()
+      if (!graph.getEntity) throw new ConfigError('Graph bridge does not support entity lookup.')
+      return graph.getEntity(id)
+    },
+
+    getEdges: async (entityId: string, opts?: {
+      direction?: 'in' | 'out' | 'both'
+      relation?: string
+      limit?: number
+    }): Promise<EdgeResult[]> => {
+      const graph = this.requireGraph()
+      if (!graph.getEdges) throw new ConfigError('Graph bridge does not support edge queries.')
+      return graph.getEdges(entityId, opts)
+    },
+
+    getSubgraph: async (opts: SubgraphOpts): Promise<SubgraphResult> => {
+      const graph = this.requireGraph()
+      if (!graph.getSubgraph) throw new ConfigError('Graph bridge does not support subgraph extraction.')
+      return graph.getSubgraph(opts)
+    },
+
+    stats: async (identity: d8umIdentity): Promise<GraphStats> => {
+      const graph = this.requireGraph()
+      if (!graph.getGraphStats) throw new ConfigError('Graph bridge does not support stats.')
+      return graph.getGraphStats(identity)
+    },
+
+    getRelationTypes: async (identity: d8umIdentity): Promise<Array<{ relation: string; count: number }>> => {
+      const graph = this.requireGraph()
+      if (!graph.getRelationTypes) throw new ConfigError('Graph bridge does not support relation type queries.')
+      return graph.getRelationTypes(identity)
+    },
+
+    getEntityTypes: async (identity: d8umIdentity): Promise<Array<{ entityType: string; count: number }>> => {
+      const graph = this.requireGraph()
+      if (!graph.getEntityTypes) throw new ConfigError('Graph bridge does not support entity type queries.')
+      return graph.getEntityTypes(identity)
+    },
+  }
+
   // ── Core Methods ──
 
   private applyConfig(config: d8umConfig): void {
@@ -337,72 +478,61 @@ class d8umImpl implements d8umInstance {
   }
 
   async deploy(config: d8umConfig): Promise<this> {
+    validateConfig(config)
     this.applyConfig(config)
     await this.adapter.deploy()
-    // Deploy memory/graph tables when graph bridge is configured
     if (config.graph?.deploy) {
       await config.graph.deploy()
     }
-    // Initialize policy engine when policyStore is configured
     if (config.policyStore) {
       this.policyEngine = new PolicyEngine(config.policyStore, config.eventSink)
     }
     this.configured = true
 
     // Create the default protected bucket (idempotent via upsert)
+    const defaultBucket: Bucket = {
+      id: DEFAULT_BUCKET_ID,
+      name: DEFAULT_BUCKET_NAME,
+      description: DEFAULT_BUCKET_DESCRIPTION,
+      status: 'active',
+      embeddingModel: this.defaultEmbedding.model,
+      tenantId: config.tenantId,
+    }
     if (this.adapter.upsertBucket) {
-      const defaultBucket: Bucket = {
-        id: DEFAULT_BUCKET_ID,
-        name: DEFAULT_BUCKET_NAME,
-        description: DEFAULT_BUCKET_DESCRIPTION,
-        status: 'active',
-        tenantId: config.tenantId,
-      }
       const persisted = await this.adapter.upsertBucket(defaultBucket)
       this._buckets.set(persisted.id, persisted)
-      this.bucketEmbeddings.set(persisted.id, this.defaultEmbedding)
     } else {
-      // In-memory only: register default bucket
-      const defaultBucket: Bucket = {
-        id: DEFAULT_BUCKET_ID,
-        name: DEFAULT_BUCKET_NAME,
-        description: DEFAULT_BUCKET_DESCRIPTION,
-        status: 'active',
-        tenantId: config.tenantId,
-      }
       this._buckets.set(defaultBucket.id, defaultBucket)
-      this.bucketEmbeddings.set(defaultBucket.id, this.defaultEmbedding)
     }
+    this.bucketEmbeddings.set(DEFAULT_BUCKET_ID, this.defaultEmbedding)
 
     return this
   }
 
   async initialize(config: d8umConfig): Promise<this> {
+    validateConfig(config)
     this.applyConfig(config)
 
-    // Lightweight connect — load model registrations, no DDL
     await this.adapter.connect()
 
-    // Ensure default embedding model table exists even in query-only mode
-    // (ensureModel is normally called during ingest, but query-only skips ingest)
     if (this.adapter.ensureModel) {
       await this.adapter.ensureModel(this.defaultEmbedding.model, this.defaultEmbedding.dimensions)
     }
 
-    // Hydrate in-memory state from persistent storage (for adapters that support it)
     if (this.adapter.listBuckets) {
-      const allBuckets = await this.adapter.listBuckets()
+      const result = await this.adapter.listBuckets()
+      const allBuckets = Array.isArray(result) ? result : result.items
       for (const s of allBuckets) {
         this._buckets.set(s.id, s)
         this.bucketEmbeddings.set(s.id, this.defaultEmbedding)
       }
     }
-    // Initialize policy engine when policyStore is configured
     if (config.policyStore) {
       this.policyEngine = new PolicyEngine(config.policyStore, config.eventSink)
     }
     this.configured = true
     this.initialized = true
+    this.logger?.info('d8um initialized', { tenantId: config.tenantId, bucketCount: this._buckets.size })
     return this
   }
 
@@ -427,18 +557,11 @@ class d8umImpl implements d8umInstance {
     return embedding
   }
 
-  /**
-   * Resolves the embedding for a bucket, falling back to a DB lookup if the
-   * in-memory cache is stale. Callers in async contexts should prefer this
-   * over the synchronous getEmbeddingForBucket().
-   */
   private async resolveEmbeddingForBucket(bucketId: string): Promise<EmbeddingProvider> {
     const cached = this.bucketEmbeddings.get(bucketId)
     if (cached) return cached
-    // Cache miss — try loading from DB before giving up
     const bucket = await this.buckets.get(bucketId)
     if (!bucket) throw new NotFoundError('Bucket', bucketId)
-    // buckets.get() hydrates the maps, so this should now succeed
     return this.bucketEmbeddings.get(bucketId) ?? this.defaultEmbedding
   }
 
@@ -448,6 +571,8 @@ class d8umImpl implements d8umInstance {
     if (!defaults) return config
     return {
       ...config,
+      chunkSize: config.chunkSize ?? defaults.chunkSize ?? config.chunkSize,
+      chunkOverlap: config.chunkOverlap ?? defaults.chunkOverlap ?? config.chunkOverlap,
       deduplicateBy: config.deduplicateBy ?? defaults.deduplicateBy,
       visibility: config.visibility ?? defaults.visibility,
       stripMarkdownForEmbedding: config.stripMarkdownForEmbedding ?? defaults.stripMarkdownForEmbedding,
@@ -478,85 +603,38 @@ class d8umImpl implements d8umInstance {
     return groups
   }
 
-  async ingest(
-    bucketIdOrDocs: string | undefined | RawDocument[],
-    docsOrConfig: RawDocument[] | IndexConfig,
-    indexConfigOrOpts?: IndexConfig | IndexOpts,
-    opts?: IndexOpts
-  ): Promise<IndexResult> {
-    // Support both: ingest(bucketId, docs, config, opts?) and ingest(docs, config, opts?)
-    let bucketId: string | undefined
-    let docs: RawDocument[]
-    let indexConfig: IndexConfig
-    let resolvedOpts: IndexOpts | undefined
-
-    if (Array.isArray(bucketIdOrDocs)) {
-      // ingest(docs, config, opts?)
-      bucketId = undefined
-      docs = bucketIdOrDocs
-      indexConfig = docsOrConfig as IndexConfig
-      resolvedOpts = indexConfigOrOpts as IndexOpts | undefined
-    } else {
-      // ingest(bucketId, docs, config, opts?)
-      bucketId = bucketIdOrDocs
-      docs = docsOrConfig as RawDocument[]
-      indexConfig = indexConfigOrOpts as IndexConfig
-      resolvedOpts = opts
-    }
-
+  async ingest(docs: RawDocument[], indexConfig: IndexConfig, opts: IndexOpts = {}): Promise<IndexResult> {
     await this.ensureInitialized()
-    const resolvedBucketId = bucketId || DEFAULT_BUCKET_ID
+    const resolvedBucketId = opts.bucketId || DEFAULT_BUCKET_ID
     await this.enforcePolicy('index', { tenantId: this.config.tenantId }, resolvedBucketId)
     const bucket = await this.buckets.get(resolvedBucketId)
     if (!bucket) throw new NotFoundError('Bucket', resolvedBucketId)
-    // Merge bucket-level index defaults with per-call config (per-call wins)
     const merged = this.mergeIndexConfig(indexConfig, bucket)
     const { defaultChunker: chunker } = await import('./index-engine/chunker.js')
     const items = docs.map(doc => ({ doc, chunks: chunker(doc, merged) }))
     const embedding = await this.resolveEmbeddingForBucket(resolvedBucketId)
     const engine = this.createIndexEngine(embedding)
-    await this.config.hooks?.onIndexStart?.(resolvedBucketId, resolvedOpts ?? {})
-    const result = await engine.ingestBatch(resolvedBucketId, items, resolvedOpts, merged)
+    this.logger?.info('Ingesting documents', { bucketId: resolvedBucketId, count: docs.length })
+    await this.config.hooks?.onIndexStart?.(resolvedBucketId, opts)
+    const result = await engine.ingestBatch(resolvedBucketId, items, opts, merged)
+    result.status = 'complete'
     await this.config.hooks?.onIndexComplete?.(resolvedBucketId, result)
+    this.logger?.info('Ingestion complete', { bucketId: resolvedBucketId, inserted: result.inserted, skipped: result.skipped, durationMs: result.durationMs })
     return result
   }
 
-  async ingestWithChunks(
-    bucketIdOrDoc: string | undefined | RawDocument,
-    docOrChunks: RawDocument | Chunk[],
-    chunksOrOpts?: Chunk[] | IndexOpts,
-    opts?: IndexOpts
-  ): Promise<IndexResult> {
-    // Support both: ingestWithChunks(bucketId, doc, chunks, opts?) and ingestWithChunks(doc, chunks, opts?)
-    let bucketId: string | undefined
-    let doc: RawDocument
-    let chunks: Chunk[]
-    let resolvedOpts: IndexOpts | undefined
-
-    if (typeof bucketIdOrDoc === 'string' || bucketIdOrDoc === undefined || bucketIdOrDoc === null) {
-      // ingestWithChunks(bucketId, doc, chunks, opts?)
-      bucketId = bucketIdOrDoc as string | undefined
-      doc = docOrChunks as RawDocument
-      chunks = chunksOrOpts as Chunk[]
-      resolvedOpts = opts
-    } else {
-      // ingestWithChunks(doc, chunks, opts?)
-      bucketId = undefined
-      doc = bucketIdOrDoc as RawDocument
-      chunks = docOrChunks as Chunk[]
-      resolvedOpts = chunksOrOpts as IndexOpts | undefined
-    }
-
+  async ingestPreChunked(doc: RawDocument, chunks: Chunk[], opts: IndexOpts = {}): Promise<IndexResult> {
     await this.ensureInitialized()
-    const resolvedBucketId = bucketId || DEFAULT_BUCKET_ID
+    const resolvedBucketId = opts.bucketId || DEFAULT_BUCKET_ID
     await this.enforcePolicy('index', { tenantId: this.config.tenantId }, resolvedBucketId)
     const bucket = await this.buckets.get(resolvedBucketId)
     if (!bucket) throw new NotFoundError('Bucket', resolvedBucketId)
     const embedding = await this.resolveEmbeddingForBucket(resolvedBucketId)
     const engine = this.createIndexEngine(embedding)
 
-    await this.config.hooks?.onIndexStart?.(resolvedBucketId, resolvedOpts ?? {})
-    const result = await engine.ingestWithChunks(resolvedBucketId, doc, chunks, resolvedOpts)
+    await this.config.hooks?.onIndexStart?.(resolvedBucketId, opts)
+    const result = await engine.ingestWithChunks(resolvedBucketId, doc, chunks, opts)
+    result.status = 'complete'
     await this.config.hooks?.onIndexComplete?.(resolvedBucketId, result)
     return result
   }
@@ -571,37 +649,33 @@ class d8umImpl implements d8umInstance {
       this.bucketEmbeddings,
       this.config.graph,
       this.config.eventSink,
+      this.logger,
     )
     const response = await planner.execute(text, {
       ...opts,
       tenantId: opts?.tenantId ?? this.config.tenantId,
     })
+
+    // Format results if requested
+    if (opts?.format) {
+      const { assemble } = await import('./query/assemble.js')
+      const resultsToFormat = opts.maxTokens
+        ? trimToTokenBudget(response.results, opts.maxTokens, this.config.tokenizer)
+        : response.results
+      response.context = typeof opts.format === 'function'
+        ? opts.format(resultsToFormat)
+        : assemble(resultsToFormat, { format: opts.format })
+    }
+
     await this.config.hooks?.onQueryResults?.(text, response.results)
     return response
-  }
-
-  async searchWithContext(text: string, opts: ContextSearchOpts = {}): Promise<ContextSearchResponse> {
-    await this.ensureInitialized()
-    const response = await searchWithContextFn(
-      this.adapter,
-      [...this._buckets.keys()],
-      this.bucketEmbeddings,
-      text,
-      { ...opts, tenantId: opts.tenantId ?? this.config.tenantId }
-    )
-    await this.config.hooks?.onQueryResults?.(text, response.rawResults)
-    return response
-  }
-
-  assemble(results: d8umResult[], opts?: AssembleOpts): string {
-    return assembleResults(results, opts)
   }
 
   // ── Memory operations ──
 
   private requireGraph(): GraphBridge {
     if (!this.config.graph) {
-      throw new ConfigError('Graph not configured. Pass a graph bridge to d8umConfig to enable memory operations.')
+      throw new ConfigError('Graph not configured. Pass a graph bridge to d8umConfig to enable memory and graph operations.')
     }
     return this.config.graph
   }
@@ -609,26 +683,26 @@ class d8umImpl implements d8umInstance {
   async remember(content: string, identity: d8umIdentity, category?: string, opts?: {
     importance?: number
     metadata?: Record<string, unknown>
-  }): Promise<unknown> {
+  }): Promise<MemoryRecord> {
     await this.enforcePolicy('memory.write', identity)
     return this.requireGraph().remember(content, identity, category, opts)
   }
 
-  async forget(id: string): Promise<void> {
-    await this.enforcePolicy('memory.delete', { tenantId: this.config.tenantId }, id)
-    return this.requireGraph().forget(id)
+  async forget(id: string, identity: d8umIdentity): Promise<void> {
+    await this.enforcePolicy('memory.delete', identity, id)
+    return this.requireGraph().forget(id, identity)
   }
 
   async correct(correction: string, identity: d8umIdentity): Promise<{ invalidated: number; created: number; summary: string }> {
     return this.requireGraph().correct(correction, identity)
   }
 
-  async recall(query: string, identity: d8umIdentity, opts?: { limit?: number; types?: string[] }): Promise<unknown[]> {
+  async recall(query: string, identity: d8umIdentity, opts?: { limit?: number; types?: string[] }): Promise<MemoryRecord[]> {
     await this.enforcePolicy('memory.read', identity)
     return this.requireGraph().recall(query, identity, opts)
   }
 
-  async assembleContext(query: string, identity: d8umIdentity, opts?: {
+  async buildMemoryContext(query: string, identity: d8umIdentity, opts?: {
     includeWorking?: boolean
     includeFacts?: boolean
     includeEpisodes?: boolean
@@ -637,13 +711,13 @@ class d8umImpl implements d8umInstance {
     format?: 'xml' | 'markdown' | 'plain'
   }): Promise<string> {
     const graph = this.requireGraph()
-    if (!graph.assembleContext) throw new Error('assembleContext not supported by this graph bridge')
-    return graph.assembleContext(query, identity, opts)
+    if (!graph.buildMemoryContext) throw new ConfigError('buildMemoryContext not supported by this graph bridge.')
+    return graph.buildMemoryContext(query, identity, opts)
   }
 
-  async healthCheck(identity: d8umIdentity): Promise<unknown> {
+  async healthCheck(identity: d8umIdentity): Promise<MemoryHealthReport> {
     const graph = this.requireGraph()
-    if (!graph.healthCheck) throw new Error('healthCheck not supported by this graph bridge')
+    if (!graph.healthCheck) throw new ConfigError('healthCheck not supported by this graph bridge.')
     return graph.healthCheck(identity)
   }
 
@@ -651,7 +725,7 @@ class d8umImpl implements d8umInstance {
     messages: Array<{ role: string; content: string; timestamp?: Date }>,
     identity: d8umIdentity,
     conversationId?: string,
-  ): Promise<unknown> {
+  ): Promise<ConversationTurnResult> {
     return this.requireGraph().addConversationTurn(messages, identity, conversationId)
   }
 
@@ -737,13 +811,30 @@ class d8umImpl implements d8umInstance {
   }
 }
 
+/** Trim results to fit within a token budget, keeping highest-scored results first. */
+function trimToTokenBudget(
+  results: d8umResult[],
+  maxTokens: number,
+  tokenizer?: (text: string) => number
+): d8umResult[] {
+  const countTokens = tokenizer ?? ((text: string) => Math.ceil(text.split(/\s+/).length * 1.3))
+  const trimmed: d8umResult[] = []
+  let budget = maxTokens
+  for (const r of results) {
+    const tokens = countTokens(r.content)
+    if (budget - tokens < 0 && trimmed.length > 0) break
+    trimmed.push(r)
+    budget -= tokens
+  }
+  return trimmed
+}
+
 /**
- * Create a d8um instance.
- *
+ * Runtime initialization. No DDL. Returns a ready-to-use instance.
  * - **Cloud mode**: pass `{ apiKey }` — everything runs server-side.
- * - **Self-hosted mode**: pass `{ vectorStore, embedding }` — deploys infrastructure then initializes.
+ * - **Self-hosted mode**: pass `{ vectorStore, embedding }`.
  */
-export async function d8umCreate(config: d8umConfig): Promise<d8umInstance> {
+export async function d8umInit(config: d8umConfig): Promise<d8umInstance> {
   if (config.apiKey) {
     const { createCloudInstance } = await import('./cloud/cloud-instance.js')
     return createCloudInstance({
@@ -754,19 +845,12 @@ export async function d8umCreate(config: d8umConfig): Promise<d8umInstance> {
     })
   }
 
-  if (!config.vectorStore || !config.embedding) {
-    throw new ConfigError('d8umCreate requires either apiKey (cloud mode) or vectorStore + embedding (self-hosted mode).')
-  }
-
   const instance = new d8umImpl()
-  await instance.deploy(config)
   return instance.initialize(config)
 }
 
-/** Deploy infrastructure only. Returns an instance that is NOT initialized for runtime use. */
+/** One-time infrastructure provisioning. Creates all tables/extensions. Idempotent.
+ *  Returns an instance that is NOT initialized for runtime use. Call initialize() after. */
 export async function d8umDeploy(config: d8umConfig): Promise<d8umInstance> {
   return new d8umImpl().deploy(config)
 }
-
-/** Global singleton d8um instance. Call await d8um.deploy() then d8um.initialize() before use. */
-export const d8um: d8umInstance = new d8umImpl()

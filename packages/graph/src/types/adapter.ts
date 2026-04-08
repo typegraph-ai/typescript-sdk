@@ -70,6 +70,11 @@ export interface MemoryStoreAdapter {
   /** Semantic search over memory records using vector similarity */
   search(embedding: number[], opts: MemorySearchOpts): Promise<MemoryRecord[]>
 
+  /** Hybrid search combining vector similarity and BM25 keyword matching.
+   *  When available, uses RRF to fuse vector and keyword ranked lists.
+   *  Falls back to vector-only search if not implemented. */
+  hybridSearch?(embedding: number[], query: string, opts: MemorySearchOpts): Promise<MemoryRecord[]>
+
   // ── Access Tracking ──
 
   /** Increment access count and update lastAccessedAt for a record */
@@ -90,7 +95,7 @@ export interface MemoryStoreAdapter {
   findEdges?(sourceId: string, targetId: string, relation?: string): Promise<SemanticEdge[]>
   invalidateEdge?(id: string, invalidAt?: Date): Promise<void>
 
-  // ── Counts (optional - used for health checks) ──
+  // ── Counts & Aggregates (optional - used for health checks and graph exploration) ──
 
   /** Count memory records matching an optional filter. */
   countMemories?(filter?: MemoryFilter): Promise<number>
@@ -98,4 +103,11 @@ export interface MemoryStoreAdapter {
   countEntities?(): Promise<number>
   /** Count total semantic edges. */
   countEdges?(): Promise<number>
+
+  /** Get all relation types with their occurrence counts. */
+  getRelationTypes?(): Promise<Array<{ relation: string; count: number }>>
+  /** Get all entity types with their occurrence counts. */
+  getEntityTypes?(): Promise<Array<{ entityType: string; count: number }>>
+  /** Get degree distribution (how many entities have N edges). */
+  getDegreeDistribution?(): Promise<Array<{ degree: number; count: number }>>
 }

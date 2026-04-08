@@ -56,7 +56,7 @@ describe('MockAdapter', () => {
 
     const results = await adapter.search('model', [1, 0, 0, 0], { count: 10 })
     expect(results[0]!.content).toBe('A')
-    expect(results[0]!.scores.vector).toBeCloseTo(1)
+    expect(results[0]!.scores.semantic).toBeCloseTo(1)
   })
 
   it('search sorts by cosine similarity', async () => {

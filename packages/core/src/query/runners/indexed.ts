@@ -23,7 +23,8 @@ export class IndexedRunner {
     documentFilter?: DocumentFilter,
     vectorOnly?: boolean,
     traceId?: string,
-    spanId?: string
+    spanId?: string,
+    temporalAt?: Date,
   ): Promise<NormalizedResult[]> {
     const allResults: NormalizedResult[] = []
     const fetchCount = count * 3
@@ -47,6 +48,7 @@ export class IndexedRunner {
           count: fetchCount,
           filter,
           documentFilter,
+          temporalAt,
         })
 
         for (const chunk of chunks) {
@@ -59,11 +61,11 @@ export class IndexedRunner {
             bucketId: chunk.bucketId,
             documentId: chunk.documentId,
             rawScores: {
-              vector: chunk.scores.vector,
+              semantic: chunk.scores.semantic,
               keyword: chunk.scores.keyword,
               rrf: chunk.scores.rrf,
             },
-            normalizedScore: chunk.scores.rrf ?? chunk.scores.vector ?? 0,
+            normalizedScore: chunk.scores.rrf ?? chunk.scores.semantic ?? 0,
             mode: 'indexed',
             metadata: chunk.metadata,
             chunk: {
@@ -87,10 +89,10 @@ export class IndexedRunner {
           })
         }
       } else {
-        // Fall back to standard hybrid/vector search (or vector-only in fast mode)
+        // Fall back to standard hybrid/semantic search (or semantic-only in fast mode)
         const chunks = (!vectorOnly && this.adapter.hybridSearch)
-          ? await this.adapter.hybridSearch(modelId, queryEmbedding, text, { count: fetchCount, filter })
-          : await this.adapter.search(modelId, queryEmbedding, { count: fetchCount, filter })
+          ? await this.adapter.hybridSearch(modelId, queryEmbedding, text, { count: fetchCount, filter, temporalAt })
+          : await this.adapter.search(modelId, queryEmbedding, { count: fetchCount, filter, temporalAt })
 
         for (const chunk of chunks) {
           if (group.bucketIds.length > 1 && !group.bucketIds.includes(chunk.bucketId)) {
@@ -102,11 +104,11 @@ export class IndexedRunner {
             bucketId: chunk.bucketId,
             documentId: chunk.documentId,
             rawScores: {
-              vector: chunk.scores.vector,
+              semantic: chunk.scores.semantic,
               keyword: chunk.scores.keyword,
               rrf: chunk.scores.rrf,
             },
-            normalizedScore: chunk.scores.rrf ?? chunk.scores.vector ?? 0,
+            normalizedScore: chunk.scores.rrf ?? chunk.scores.semantic ?? 0,
             mode: 'indexed',
             metadata: chunk.metadata,
             chunk: {

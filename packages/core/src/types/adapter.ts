@@ -1,12 +1,15 @@
 import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from './document.js'
 import type { d8umDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from './d8um-document.js'
 import type { Bucket, BucketListFilter } from './bucket.js'
+import type { PaginationOpts, PaginatedResult } from './pagination.js'
 
 export interface SearchOpts {
   count: number
   filter?: ChunkFilter | undefined
   approximate?: boolean | undefined
   iterativeScan?: boolean | undefined
+  /** Only return chunks indexed before this date. Used for point-in-time queries. */
+  temporalAt?: Date | undefined
 }
 
 export interface HashRecord {
@@ -22,6 +25,8 @@ export interface HashRecord {
 export interface HashStoreAdapter {
   initialize(): Promise<void>
   get(key: string): Promise<HashRecord | null>
+  /** Batch get: returns a Map of key → HashRecord for all found keys. */
+  getMany?(keys: string[]): Promise<Map<string, HashRecord>>
   set(key: string, record: HashRecord): Promise<void>
   delete(key: string): Promise<void>
   listByBucket(bucketId: string, tenantId?: string | undefined): Promise<HashRecord[]>
@@ -70,12 +75,14 @@ export interface VectorStoreAdapter {
   upsertDocumentRecord?(input: UpsertDocumentInput): Promise<d8umDocument>
   /** Get a document by UUID. */
   getDocument?(id: string): Promise<d8umDocument | null>
-  /** List documents matching a filter. */
-  listDocuments?(filter: DocumentFilter): Promise<d8umDocument[]>
+  /** List documents matching a filter. Supports optional pagination. */
+  listDocuments?(filter: DocumentFilter, pagination?: PaginationOpts): Promise<d8umDocument[] | PaginatedResult<d8umDocument>>
   /** Delete documents matching a filter. Returns count deleted. */
   deleteDocuments?(filter: DocumentFilter): Promise<number>
   /** Update a document's status and optionally its chunk count. */
   updateDocumentStatus?(id: string, status: DocumentStatus, chunkCount?: number): Promise<void>
+  /** Update document metadata fields (title, url, visibility, etc.). Returns updated document. */
+  updateDocument?(id: string, input: Partial<Pick<d8umDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<d8umDocument>
 
   /** Hybrid search with document-level filtering via JOIN to d8um_documents. */
   searchWithDocuments?(
@@ -99,8 +106,8 @@ export interface VectorStoreAdapter {
   upsertBucket?(bucket: Bucket): Promise<Bucket>
   /** Get a bucket by ID. */
   getBucket?(id: string): Promise<Bucket | null>
-  /** List buckets, optionally filtered by identity fields. */
-  listBuckets?(filter?: BucketListFilter): Promise<Bucket[]>
+  /** List buckets, optionally filtered by identity fields. Supports optional pagination. */
+  listBuckets?(filter?: BucketListFilter, pagination?: PaginationOpts): Promise<Bucket[] | PaginatedResult<Bucket>>
   /** Delete a bucket by ID. */
   deleteBucket?(id: string): Promise<void>
 

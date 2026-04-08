@@ -1,4 +1,4 @@
-import type { d8umDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from '@d8um-ai/core'
+import type { d8umDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput, PaginationOpts, PaginatedResult } from '@d8um-ai/core'
 import type { SqlExecutor } from './adapter.js'
 
 function mapDocRow(row: Record<string, unknown>): d8umDocument {
@@ -86,9 +86,25 @@ export class PgDocumentStore {
     return mapDocRow(rows[0]!)
   }
 
-  async list(filter: DocumentFilter): Promise<d8umDocument[]> {
+  async list(filter: DocumentFilter, pagination?: PaginationOpts): Promise<d8umDocument[] | PaginatedResult<d8umDocument>> {
     const { where, params } = buildDocWhere(filter)
     const filterClause = where ? `WHERE ${where}` : ''
+
+    if (pagination) {
+      const limit = pagination.limit ?? 100
+      const offset = pagination.offset ?? 0
+      const countRows = await this.sql(
+        `SELECT COUNT(*)::int AS total FROM ${this.tableName} ${filterClause}`,
+        params
+      )
+      const total = (countRows[0]?.total as number) ?? 0
+      const rows = await this.sql(
+        `SELECT * FROM ${this.tableName} ${filterClause} ORDER BY updated_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit, offset]
+      )
+      return { items: rows.map(mapDocRow), total, limit, offset }
+    }
+
     const rows = await this.sql(
       `SELECT * FROM ${this.tableName} ${filterClause} ORDER BY updated_at DESC`,
       params

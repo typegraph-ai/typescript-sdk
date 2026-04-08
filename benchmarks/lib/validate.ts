@@ -71,7 +71,7 @@ export async function runValidation(
       propagateMetadata: ['metadata.corpusId'],
     }
     const indexOpts = opts?.concurrency ? { concurrency: opts.concurrency } : undefined
-    const result = await d.ingest(bucket.id, docs, ingestOpts, indexOpts)
+    const result = await d.ingest(docs, ingestOpts, { ...indexOpts, bucketId: bucket.id })
     console.log(`    Ingested: ${result.inserted} chunks, ${result.skipped} skipped`)
 
     if (result.inserted === 0) {
@@ -81,7 +81,7 @@ export async function runValidation(
     // Step 3: Run 5 queries
     const queryCount = Math.min(VALIDATE_COUNT, testQueries.length)
     console.log(`  [3/4] Running ${queryCount} queries...`)
-    const signals = config.signals[0] ?? { vector: true }
+    const signals = config.signals[0] ?? { semantic: true }
     let totalResults = 0
     let totalMs = 0
 

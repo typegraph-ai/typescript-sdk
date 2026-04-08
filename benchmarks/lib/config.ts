@@ -22,16 +22,16 @@ export const BATCH_SIZE = 30
 
 /** Which retrieval signals to activate. Mirrors @d8um-ai/core QuerySignals. */
 export interface BenchSignals {
-  vector?: boolean
+  semantic?: boolean
   keyword?: boolean
   graph?: boolean
   memory?: boolean
 }
 
-/** Human-readable label from active signals (e.g. "vector+keyword"). */
+/** Human-readable label from active signals (e.g. "semantic+keyword"). */
 export function signalLabel(signals: BenchSignals): string {
   const active: string[] = []
-  if (signals.vector) active.push('vector')
+  if (signals.semantic) active.push('semantic')
   if (signals.keyword) active.push('keyword')
   if (signals.graph) active.push('graph')
   if (signals.memory) active.push('memory')
@@ -40,9 +40,9 @@ export function signalLabel(signals: BenchSignals): string {
 
 /** Common signal presets */
 export const SIGNALS = {
-  vector: { vector: true } as BenchSignals,
-  vectorKeyword: { vector: true, keyword: true } as BenchSignals,
-  neural: { vector: true, keyword: true, graph: true, memory: true } as BenchSignals,
+  semantic: { semantic: true } as BenchSignals,
+  semanticKeyword: { semantic: true, keyword: true } as BenchSignals,
+  neural: { semantic: true, keyword: true, graph: true, memory: true } as BenchSignals,
 } as const
 
 export interface BenchmarkConfig {
@@ -87,7 +87,7 @@ export const BENCHMARK_CONFIGS: Record<string, BenchmarkConfig> = {
     blobPrefix: 'datasets/beir',
     loader: 'beir',
     scorer: 'standard',
-    signals: [SIGNALS.vector, SIGNALS.vectorKeyword],
+    signals: [SIGNALS.semantic, SIGNALS.semanticKeyword],
     variant: 'core',
     supportsAnswerEval: false,
   },
@@ -113,7 +113,7 @@ export const BENCHMARK_CONFIGS: Record<string, BenchmarkConfig> = {
     blobPrefix: 'datasets/isaacus',
     loader: 'beir',
     scorer: 'standard',
-    signals: [SIGNALS.vector, SIGNALS.vectorKeyword],
+    signals: [SIGNALS.semantic, SIGNALS.semanticKeyword],
     variant: 'core',
     supportsAnswerEval: false,
   },
@@ -139,7 +139,7 @@ export const BENCHMARK_CONFIGS: Record<string, BenchmarkConfig> = {
     blobPrefix: 'datasets/isaacus',
     loader: 'beir',
     scorer: 'standard',
-    signals: [SIGNALS.vector, SIGNALS.vectorKeyword],
+    signals: [SIGNALS.semantic, SIGNALS.semanticKeyword],
     variant: 'core',
     supportsAnswerEval: false,
   },
@@ -165,7 +165,7 @@ export const BENCHMARK_CONFIGS: Record<string, BenchmarkConfig> = {
     blobPrefix: 'datasets/isaacus',
     loader: 'beir',
     scorer: 'standard',
-    signals: [SIGNALS.vector, SIGNALS.vectorKeyword],
+    signals: [SIGNALS.semantic, SIGNALS.semanticKeyword],
     variant: 'core',
     supportsAnswerEval: false,
   },
@@ -191,7 +191,7 @@ export const BENCHMARK_CONFIGS: Record<string, BenchmarkConfig> = {
     blobPrefix: 'datasets/isaacus',
     loader: 'beir',
     scorer: 'standard',
-    signals: [SIGNALS.vector, SIGNALS.vectorKeyword],
+    signals: [SIGNALS.semantic, SIGNALS.semanticKeyword],
     variant: 'core',
     supportsAnswerEval: false,
   },
@@ -217,7 +217,7 @@ export const BENCHMARK_CONFIGS: Record<string, BenchmarkConfig> = {
     blobPrefix: '',  // custom loader, not blob-based
     loader: 'legal-rag',
     scorer: 'standard',
-    signals: [SIGNALS.vector, SIGNALS.vectorKeyword],
+    signals: [SIGNALS.semantic, SIGNALS.semanticKeyword],
     variant: 'core',
     supportsAnswerEval: false,
   },
@@ -244,7 +244,7 @@ export const BENCHMARK_CONFIGS: Record<string, BenchmarkConfig> = {
     blobPrefix: 'datasets',
     loader: 'beir',
     scorer: 'extended',
-    signals: [SIGNALS.vector, SIGNALS.vectorKeyword],
+    signals: [SIGNALS.semantic, SIGNALS.semanticKeyword],
     variant: 'core',
     supportsAnswerEval: true,
     chunkSize: 256,
@@ -273,7 +273,7 @@ export const BENCHMARK_CONFIGS: Record<string, BenchmarkConfig> = {
     blobPrefix: 'datasets/graphrag-bench/novel',
     loader: 'graphrag-bench',
     scorer: 'standard',  // retrieval metrics have no qrels; answer-gen eval is primary
-    signals: [SIGNALS.vector, SIGNALS.vectorKeyword],
+    signals: [SIGNALS.semantic, SIGNALS.semanticKeyword],
     variant: 'core',
     supportsAnswerEval: true,
     chunkSize: 1200,
@@ -303,7 +303,7 @@ export const BENCHMARK_CONFIGS: Record<string, BenchmarkConfig> = {
     blobPrefix: 'datasets/graphrag-bench/medical',
     loader: 'graphrag-bench',
     scorer: 'standard',
-    signals: [SIGNALS.vector, SIGNALS.vectorKeyword],
+    signals: [SIGNALS.semantic, SIGNALS.semanticKeyword],
     variant: 'core',
     supportsAnswerEval: true,
     chunkSize: 1200,

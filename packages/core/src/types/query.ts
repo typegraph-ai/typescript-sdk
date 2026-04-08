@@ -1,20 +1,13 @@
-/** Which retrieval signals to activate. All fields default to false except `vector` which defaults to true. */
+/** Which retrieval signals to activate. All fields default to false except `semantic` which defaults to true. */
 export interface QuerySignals {
-  /** ANN vector search against chunk embeddings. Default: true */
-  vector?: boolean | undefined
+  /** Semantic embedding search against chunk embeddings. Default: true */
+  semantic?: boolean | undefined
   /** BM25 keyword search (requires adapter.hybridSearch). Default: false */
   keyword?: boolean | undefined
   /** PPR graph traversal via entity embeddings. Requires graph bridge. Default: false */
   graph?: boolean | undefined
   /** Cognitive memory recall. Requires graph bridge. Default: false */
   memory?: boolean | undefined
-}
-
-export interface d8umQuery {
-  text: string
-  buckets?: string[] | undefined
-  count?: number | undefined
-  filters?: Record<string, unknown> | undefined
 }
 
 /** Raw algorithm-level scores — mixed ranges, not normalized */
@@ -24,6 +17,10 @@ export interface RawScores {
   rrf?: number | undefined
   ppr?: number | undefined
   importance?: number | undefined
+  /** Memory sub-signals — exposed for observability when memory signal is active */
+  memorySimilarity?: number | undefined
+  memoryImportance?: number | undefined
+  memoryRecency?: number | undefined
 }
 
 /** Normalized capability-level scores — all 0-1, cross-query comparable */
@@ -45,12 +42,12 @@ export interface d8umResult {
     raw: RawScores
     normalized: NormalizedScores
   }
-  /** Which retrieval systems contributed to this result (e.g. ["indexed"], ["indexed", "graph"]) */
+  /** Which retrieval systems contributed to this result (e.g. ["semantic"], ["semantic", "graph"]) */
   sources: string[]
 
-  bucket: {
+  document: {
     id: string
-    documentId: string
+    bucketId: string
     title: string
     url?: string | undefined
     updatedAt: Date
@@ -76,11 +73,10 @@ export interface d8umResult {
 }
 
 export interface QueryOpts {
-  /** Which retrieval signals to activate. Default: { vector: true } (vector-only search). */
+  /** Which retrieval signals to activate. Default: { semantic: true } (semantic-only search). */
   signals?: QuerySignals | undefined
   buckets?: string[] | undefined
   count?: number | undefined
-  filters?: Record<string, unknown> | undefined
 
   // Identity fields (per-call scoping)
   tenantId?: string | undefined
@@ -95,24 +91,43 @@ export interface QueryOpts {
    *  When omitted, defaults are derived from active signals. */
   scoreWeights?: Partial<Record<'rrf' | 'semantic' | 'keyword' | 'graph' | 'memory', number>> | undefined
 
+  /** When true, automatically adjust score weights based on query type classification.
+   *  Uses pure heuristics (no LLM call) to detect factual-lookup, entity-centric,
+   *  relational, temporal, or exploratory queries and applies optimized weight profiles.
+   *  User-provided `scoreWeights` always override. Default: false. */
+  autoWeights?: boolean | undefined
+
   /** Controls how graph results interact with indexed results.
    *  - 'only': keep graph results only if they also appear in indexed results (default)
    *  - 'prefer': boost matching results, but keep novel graph results at lower weight
    *  - 'off': include all graph results as-is */
   graphReinforcement?: 'only' | 'prefer' | 'off' | undefined
 
+  /** Timeouts per retrieval signal (milliseconds). */
   timeouts?: {
+    /** Timeout for semantic/keyword indexed search. Default: 30000. */
     indexed?: number | undefined
-    live?: number | undefined
-    cached?: number | undefined
+    /** Timeout for graph PPR traversal. Default: 30000. */
+    graph?: number | undefined
+    /** Timeout for memory recall. Default: 10000. */
+    memory?: number | undefined
   } | undefined
 
+  /** How to handle errors from individual buckets.
+   *  - 'throw': abort query on any bucket error (default)
+   *  - 'warn': continue with other buckets, add warning
+   *  - 'omit': silently skip failed buckets */
   onBucketError?: 'omit' | 'warn' | 'throw' | undefined
 
-  /** Point-in-time query: only return results valid at this timestamp */
+  /** Point-in-time query: only return results indexed before this timestamp. */
   temporalAt?: Date | undefined
-  /** Include invalidated/expired results. Default: false */
+  /** Include invalidated/expired results (memories, graph edges). Default: false. */
   includeInvalidated?: boolean | undefined
+
+  /** Format results into an LLM-ready context string. When set, response includes `context`. */
+  format?: 'xml' | 'markdown' | 'plain' | ((results: d8umResult[]) => string) | undefined
+  /** Token budget for formatted context. Trims lowest-scored results to fit. */
+  maxTokens?: number | undefined
 
   /** OpenTelemetry trace ID for distributed tracing correlation. */
   traceId?: string | undefined
@@ -135,13 +150,7 @@ export interface QueryResponse {
     durationMs: number
     mergeStrategy: string
   }
+  /** Formatted context string. Present when `format` is specified in query opts. */
+  context?: string | undefined
   warnings?: string[] | undefined
-}
-
-export interface AssembleOpts {
-  format?: 'xml' | 'markdown' | 'plain' | ((results: d8umResult[]) => string) | undefined
-  maxTokens?: number | undefined
-  citeBuckets?: boolean | undefined
-  groupByBucket?: boolean | undefined
-  neighborJoining?: boolean | undefined
 }

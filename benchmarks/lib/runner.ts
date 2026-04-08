@@ -5,7 +5,7 @@
  * Each runner still has its own main() — these are helpers, not a framework.
  */
 
-import { d8umCreate, aiSdkLlmProvider } from '@d8um-ai/core'
+import { d8umInit, aiSdkLlmProvider } from '@d8um-ai/core'
 import { createGraphBridge, PgMemoryStoreAdapter } from '@d8um-ai/graph'
 import { gateway } from '@ai-sdk/gateway'
 import { neon } from '@neondatabase/serverless'
@@ -57,7 +57,7 @@ export function parseCliArgs(): CliArgs {
 // ── Initialization ──
 
 export interface CoreInit {
-  d: Awaited<ReturnType<typeof d8umCreate>>
+  d: Awaited<ReturnType<typeof d8umInit>>
   adapter: ReturnType<typeof createBenchmarkAdapter>
 }
 
@@ -66,7 +66,7 @@ export async function initCore(config: BenchmarkConfig): Promise<CoreInit> {
   const embModel = resolveEmbeddingModel(config)
   const embDims = resolveEmbeddingDims(config)
 
-  const d = await d8umCreate({
+  const d = await d8umInit({
     vectorStore: adapter,
     embedding: {
       model: gateway.embeddingModel(embModel),
@@ -130,7 +130,7 @@ export async function initNeural(config: BenchmarkConfig): Promise<NeuralInit> {
     scope: { agentId: `${config.dataset}-benchmark` },
   })
 
-  const d = await d8umCreate({
+  const d = await d8umInit({
     vectorStore: adapter,
     embedding: { model: embeddingModel, dimensions: embDims },
     llm,
@@ -328,7 +328,7 @@ export async function runIngestion(
       }
       const indexOpts = opts?.concurrency ? { concurrency: opts.concurrency } : undefined
 
-      const result = await d.ingest(bucketId, docs, ingestOpts, indexOpts)
+      const result = await d.ingest(docs, ingestOpts, { ...indexOpts, bucketId })
       totalChunks += result.inserted
 
       ingested += batch.length

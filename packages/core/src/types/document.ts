@@ -33,7 +33,7 @@ export interface ChunkFilter {
 
 export interface ScoredChunk extends EmbeddedChunk {
   scores: {
-    vector?: number | undefined
+    semantic?: number | undefined
     keyword?: number | undefined
     rrf?: number | undefined
   }

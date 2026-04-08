@@ -32,6 +32,19 @@ export class PgHashStore implements HashStoreAdapter {
     return mapRow(rows[0]!)
   }
 
+  async getMany(keys: string[]): Promise<Map<string, HashRecord>> {
+    if (keys.length === 0) return new Map()
+    const rows = await this.sql(
+      `SELECT * FROM ${this.tableName} WHERE store_key = ANY($1::text[])`,
+      [keys]
+    )
+    const map = new Map<string, HashRecord>()
+    for (const row of rows) {
+      map.set(row.store_key as string, mapRow(row))
+    }
+    return map
+  }
+
   async set(key: string, record: HashRecord): Promise<void> {
     await this.sql(
       `INSERT INTO ${this.tableName}

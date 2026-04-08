@@ -6,7 +6,7 @@ function makeResult(overrides: Partial<NormalizedResult> = {}): NormalizedResult
     content: 'Test content',
     bucketId: 'src-1',
     documentId: 'doc-1',
-    rawScores: { vector: 0.9 },
+    rawScores: { semantic: 0.9 },
     normalizedScore: 0.9,
     mode: 'indexed',
     metadata: {},
@@ -131,33 +131,33 @@ describe('normalizePPR', () => {
 describe('mergeAndRank', () => {
   it('ranks by composite score', () => {
     const group1 = [
-      makeResult({ content: 'A', normalizedScore: 0.9, rawScores: { vector: 0.9 } }),
-      makeResult({ content: 'B', normalizedScore: 0.5, rawScores: { vector: 0.5 } }),
+      makeResult({ content: 'A', normalizedScore: 0.9, rawScores: { semantic: 0.9 } }),
+      makeResult({ content: 'B', normalizedScore: 0.5, rawScores: { semantic: 0.5 } }),
     ]
     const merged = mergeAndRank([group1], 10)
     expect(merged[0]!.content).toBe('A')
   })
 
   it('deduplicates by content', () => {
-    const group1 = [makeResult({ content: 'same content', normalizedScore: 0.9, mode: 'indexed', rawScores: { vector: 0.8 } })]
+    const group1 = [makeResult({ content: 'same content', normalizedScore: 0.9, mode: 'indexed', rawScores: { semantic: 0.8 } })]
     const group2 = [makeResult({ content: 'same content', normalizedScore: 0.8, mode: 'graph', documentId: 'graph-0', rawScores: { graph: 0.7 } })]
     const merged = mergeAndRank([group1, group2], 10)
     expect(merged).toHaveLength(1)
   })
 
   it('aggregates rawScores across runners', () => {
-    const indexed = [makeResult({ content: 'shared', normalizedScore: 0.9, mode: 'indexed', rawScores: { vector: 0.8, keyword: 0.3 } })]
+    const indexed = [makeResult({ content: 'shared', normalizedScore: 0.9, mode: 'indexed', rawScores: { semantic: 0.8, keyword: 0.3 } })]
     const graph = [makeResult({ content: 'shared', normalizedScore: 0.7, mode: 'graph', documentId: 'graph-0', rawScores: { graph: 0.6 } })]
     const merged = mergeAndRank([indexed, graph], 10)
     expect(merged).toHaveLength(1)
     const result = merged[0]!
-    expect(result.rawScores.vector).toBe(0.8)
+    expect(result.rawScores.semantic).toBe(0.8)
     expect(result.rawScores.keyword).toBe(0.3)
     expect(result.rawScores.graph).toBe(0.6)
   })
 
   it('tracks modes from contributing runners', () => {
-    const indexed = [makeResult({ content: 'shared', mode: 'indexed', rawScores: { vector: 0.8 } })]
+    const indexed = [makeResult({ content: 'shared', mode: 'indexed', rawScores: { semantic: 0.8 } })]
     const graph = [makeResult({ content: 'shared', mode: 'graph', documentId: 'graph-0', rawScores: { graph: 0.6 } })]
     const merged = mergeAndRank([indexed, graph], 10)
     const result = merged[0] as any
@@ -166,7 +166,7 @@ describe('mergeAndRank', () => {
   })
 
   it('produces compositeScore in 0-1 range', () => {
-    const group1 = [makeResult({ content: 'A', normalizedScore: 0.9, rawScores: { vector: 0.9 } })]
+    const group1 = [makeResult({ content: 'A', normalizedScore: 0.9, rawScores: { semantic: 0.9 } })]
     const merged = mergeAndRank([group1], 10)
     const result = merged[0] as any
     expect(result.compositeScore).toBeGreaterThanOrEqual(0)
@@ -184,9 +184,9 @@ describe('mergeAndRank', () => {
 
   it('memory results influence ranking when merged with indexed', () => {
     // Two results: one with high memory, one without
-    const highMemory = [makeResult({ content: 'remembered', mode: 'indexed', normalizedScore: 0.5, rawScores: { vector: 0.5 } })]
+    const highMemory = [makeResult({ content: 'remembered', mode: 'indexed', normalizedScore: 0.5, rawScores: { semantic: 0.5 } })]
     const memoryRunner = [makeResult({ content: 'remembered', mode: 'memory', normalizedScore: 0.95, rawScores: { memory: 0.95 } })]
-    const noMemory = [makeResult({ content: 'forgotten', mode: 'indexed', normalizedScore: 0.5, rawScores: { vector: 0.5 } })]
+    const noMemory = [makeResult({ content: 'forgotten', mode: 'indexed', normalizedScore: 0.5, rawScores: { semantic: 0.5 } })]
 
     const merged = mergeAndRank([highMemory, memoryRunner, noMemory], 10)
     const rememberedResult = merged.find(r => r.content === 'remembered') as any
@@ -198,22 +198,22 @@ describe('mergeAndRank', () => {
 
   it('respects count', () => {
     const results = Array.from({ length: 20 }, (_, i) =>
-      makeResult({ content: `content-${i}`, normalizedScore: i / 20, rawScores: { vector: i / 20 } })
+      makeResult({ content: `content-${i}`, normalizedScore: i / 20, rawScores: { semantic: i / 20 } })
     )
     const merged = mergeAndRank([results], 5)
     expect(merged).toHaveLength(5)
   })
 
   it('applies mode weights', () => {
-    const indexed = [makeResult({ content: 'a', mode: 'indexed', normalizedScore: 0.5, rawScores: { vector: 0.5 } })]
-    const live = [makeResult({ content: 'b', mode: 'live', normalizedScore: 0.5, rawScores: { vector: 0.5 } })]
+    const indexed = [makeResult({ content: 'a', mode: 'indexed', normalizedScore: 0.5, rawScores: { semantic: 0.5 } })]
+    const live = [makeResult({ content: 'b', mode: 'live', normalizedScore: 0.5, rawScores: { semantic: 0.5 } })]
     const merged = mergeAndRank([indexed, live], 10)
     expect(merged[0]!.content).toBe('a')
   })
 
   it('accepts custom weights', () => {
-    const indexed = [makeResult({ content: 'a', mode: 'indexed', normalizedScore: 0.5, rawScores: { vector: 0.5 } })]
-    const live = [makeResult({ content: 'b', mode: 'live', normalizedScore: 0.5, rawScores: { vector: 0.5 } })]
+    const indexed = [makeResult({ content: 'a', mode: 'indexed', normalizedScore: 0.5, rawScores: { semantic: 0.5 } })]
+    const live = [makeResult({ content: 'b', mode: 'live', normalizedScore: 0.5, rawScores: { semantic: 0.5 } })]
     const merged = mergeAndRank([indexed, live], 10, { indexed: 0.1, live: 0.9 })
     expect(merged[0]!.content).toBe('b')
   })
@@ -224,9 +224,9 @@ describe('mergeAndRank', () => {
   })
 
   it('merges multiple runner groups', () => {
-    const group1 = [makeResult({ content: 'a', normalizedScore: 0.9, rawScores: { vector: 0.9 } })]
-    const group2 = [makeResult({ content: 'b', normalizedScore: 0.8, rawScores: { vector: 0.8 } })]
-    const group3 = [makeResult({ content: 'c', normalizedScore: 0.7, rawScores: { vector: 0.7 } })]
+    const group1 = [makeResult({ content: 'a', normalizedScore: 0.9, rawScores: { semantic: 0.9 } })]
+    const group2 = [makeResult({ content: 'b', normalizedScore: 0.8, rawScores: { semantic: 0.8 } })]
+    const group3 = [makeResult({ content: 'c', normalizedScore: 0.7, rawScores: { semantic: 0.7 } })]
     const merged = mergeAndRank([group1, group2, group3], 10)
     expect(merged).toHaveLength(3)
   })
@@ -237,7 +237,7 @@ describe('mergeAndRank', () => {
       documentId: 'doc-123',
       mode: 'indexed',
       normalizedScore: 0.8,
-      rawScores: { vector: 0.75, keyword: 0.4 },
+      rawScores: { semantic: 0.75, keyword: 0.4 },
       chunk: { index: 0, total: 1, isNeighbor: false },
     })]
     const graph = [makeResult({
@@ -250,7 +250,7 @@ describe('mergeAndRank', () => {
     const merged = mergeAndRank([indexed, graph], 10)
     expect(merged).toHaveLength(1)
     const result = merged[0]!
-    expect(result.rawScores.vector).toBe(0.75)
+    expect(result.rawScores.semantic).toBe(0.75)
     expect(result.rawScores.keyword).toBe(0.4)
     expect(result.rawScores.graph).toBe(0.15)
   })

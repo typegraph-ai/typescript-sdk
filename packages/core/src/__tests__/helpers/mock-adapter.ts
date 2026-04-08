@@ -167,10 +167,10 @@ export function createMockAdapter(): VectorStoreAdapter & {
         .map(c => ({
           ...c,
           scores: {
-            vector: cosineSimilarity(embedding, c.embedding),
+            semantic: cosineSimilarity(embedding, c.embedding),
           },
         }))
-        .sort((a, b) => (b.scores.vector ?? 0) - (a.scores.vector ?? 0))
+        .sort((a, b) => (b.scores.semantic ?? 0) - (a.scores.semantic ?? 0))
         .slice(0, opts.count)
     },
 
@@ -196,7 +196,7 @@ export function createMockAdapter(): VectorStoreAdapter & {
           return {
             ...c,
             scores: {
-              vector: vectorScore,
+              semantic: vectorScore,
               keyword: keywordScore,
               rrf,
             },
@@ -298,7 +298,7 @@ export function createMockAdapter(): VectorStoreAdapter & {
       const store = chunks.get(model) ?? []
       return store
         .filter(c => c.documentId === documentId && c.chunkIndex >= fromIndex && c.chunkIndex <= toIndex)
-        .map(c => ({ ...c, scores: { vector: 0 } }))
+        .map(c => ({ ...c, scores: { semantic: 0 } }))
         .sort((a, b) => a.chunkIndex - b.chunkIndex)
     },
   }

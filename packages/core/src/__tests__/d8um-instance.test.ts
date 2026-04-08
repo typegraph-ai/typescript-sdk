@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { d8umCreate, d8umDeploy } from '../d8um.js'
+import { d8umInit, d8umDeploy } from '../d8um.js'
 import { createMockAdapter } from './helpers/mock-adapter.js'
 import { createMockEmbedding } from './helpers/mock-embedding.js'
 import { createMockBucket } from './helpers/mock-source.js'
@@ -15,7 +15,7 @@ function registerTestBucket(instance: d8umInstance, bucket: Bucket, embedding: E
   impl.bucketEmbeddings.set(bucket.id, embedding)
 }
 
-describe('d8umCreate', () => {
+describe('d8umInit', () => {
   let adapter: ReturnType<typeof createMockAdapter>
   let embedding: ReturnType<typeof createMockEmbedding>
   let instance: d8umInstance
@@ -23,7 +23,7 @@ describe('d8umCreate', () => {
   beforeEach(async () => {
     adapter = createMockAdapter()
     embedding = createMockEmbedding()
-    instance = await d8umCreate({ vectorStore: adapter, embedding })
+    instance = await d8umInit({ vectorStore: adapter, embedding })
   })
 
   describe('buckets.create', () => {
@@ -101,7 +101,7 @@ describe('d8umCreate', () => {
       const { bucket, indexConfig } = createMockBucket({ documents: [] })
       registerTestBucket(instance, bucket, embedding)
       const doc = createTestDocument({ content: 'Some content to ingest' })
-      const result = await instance.ingest(bucket.id, [doc], indexConfig)
+      const result = await instance.ingest([doc], indexConfig, { bucketId: bucket.id })
       expect(result.inserted).toBe(1)
     })
 
@@ -109,7 +109,7 @@ describe('d8umCreate', () => {
       const { bucket, indexConfig } = createMockBucket({ documents: [] })
       registerTestBucket(instance, bucket, embedding)
       const docs = createTestDocuments(3)
-      const result = await instance.ingest(bucket.id, docs, indexConfig)
+      const result = await instance.ingest(docs, indexConfig, { bucketId: bucket.id })
       expect(result.total).toBe(3)
       expect(result.inserted).toBe(3)
     })
@@ -119,25 +119,24 @@ describe('d8umCreate', () => {
       registerTestBucket(instance, bucket, embedding)
       const docs = createTestDocuments(3)
       const spy = vi.spyOn(embedding, 'embedBatch')
-      await instance.ingest(bucket.id, docs, indexConfig)
+      await instance.ingest(docs, indexConfig, { bucketId: bucket.id })
       expect(spy).toHaveBeenCalledOnce()
     })
 
     it('returns zero-count result for empty array', async () => {
       const { bucket, indexConfig } = createMockBucket({ documents: [] })
       registerTestBucket(instance, bucket, embedding)
-      const result = await instance.ingest(bucket.id, [], indexConfig)
+      const result = await instance.ingest([], indexConfig, { bucketId: bucket.id })
       expect(result.total).toBe(0)
       expect(result.inserted).toBe(0)
     })
 
     it('throws for unknown bucket', async () => {
       const { indexConfig } = createMockBucket({ documents: [] })
-      await expect(instance.ingest('unknown', [], indexConfig)).rejects.toThrow('not found')
+      await expect(instance.ingest([], indexConfig, { bucketId: 'unknown' })).rejects.toThrow('not found')
     })
 
-    it('calls adapter.deploy and adapter.connect during d8umCreate', async () => {
-      expect(adapter.calls.filter(c => c.method === 'deploy')).toHaveLength(1)
+    it('calls adapter.connect during d8umInit', async () => {
       expect(adapter.calls.filter(c => c.method === 'connect')).toHaveLength(1)
     })
   })
@@ -146,47 +145,44 @@ describe('d8umCreate', () => {
     it('returns results', async () => {
       const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(3) })
       registerTestBucket(instance, bucket, embedding)
-      await instance.ingest(bucket.id, documents, indexConfig)
+      await instance.ingest(documents, indexConfig, { bucketId: bucket.id })
       const response = await instance.query('Document 1')
       expect(response.results.length).toBeGreaterThan(0)
     })
 
     it('passes tenantId from config', async () => {
-      const inst = await d8umCreate({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
+      const inst = await d8umInit({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
       const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(1) })
       registerTestBucket(inst, bucket, embedding)
-      await inst.ingest(bucket.id, documents, indexConfig)
+      await inst.ingest(documents, indexConfig, { bucketId: bucket.id })
       const response = await inst.query('test')
       expect(response.query.tenantId).toBe('config-tenant')
     })
 
     it('per-query tenantId overrides config', async () => {
-      const inst = await d8umCreate({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
+      const inst = await d8umInit({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
       const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(1) })
       registerTestBucket(inst, bucket, embedding)
-      await inst.ingest(bucket.id, documents, indexConfig)
+      await inst.ingest(documents, indexConfig, { bucketId: bucket.id })
       const response = await inst.query('test', { tenantId: 'query-tenant' })
       expect(response.query.tenantId).toBe('query-tenant')
     })
-  })
 
-  describe('assemble', () => {
-    it('assembles XML by default', async () => {
+    it('supports format option for XML context', async () => {
       const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(1) })
       registerTestBucket(instance, bucket, embedding)
-      await instance.ingest(bucket.id, documents, indexConfig)
-      const response = await instance.query('test')
-      const xml = instance.assemble(response.results)
-      expect(xml).toContain('<context>')
+      await instance.ingest(documents, indexConfig, { bucketId: bucket.id })
+      const response = await instance.query('test', { format: 'xml' })
+      expect(response.context).toContain('<context>')
     })
 
-    it('assembles plain text', async () => {
+    it('supports format option for plain text context', async () => {
       const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(1) })
       registerTestBucket(instance, bucket, embedding)
-      await instance.ingest(bucket.id, documents, indexConfig)
-      const response = await instance.query('test')
-      const plain = instance.assemble(response.results, { format: 'plain' })
-      expect(plain).not.toContain('<context>')
+      await instance.ingest(documents, indexConfig, { bucketId: bucket.id })
+      const response = await instance.query('test', { format: 'plain' })
+      expect(response.context).toBeDefined()
+      expect(response.context).not.toContain('<context>')
     })
   })
 
@@ -194,28 +190,28 @@ describe('d8umCreate', () => {
     it('fires onIndexStart and onIndexComplete', async () => {
       const onIndexStart = vi.fn()
       const onIndexComplete = vi.fn()
-      const inst = await d8umCreate({
+      const inst = await d8umInit({
         vectorStore: adapter,
         embedding,
         hooks: { onIndexStart, onIndexComplete },
       })
       const { bucket, documents, indexConfig } = createMockBucket({ documents: [createTestDocument()] })
       registerTestBucket(inst, bucket, embedding)
-      await inst.ingest(bucket.id, documents, indexConfig)
+      await inst.ingest(documents, indexConfig, { bucketId: bucket.id })
       expect(onIndexStart).toHaveBeenCalledOnce()
       expect(onIndexComplete).toHaveBeenCalledOnce()
     })
 
     it('fires onQueryResults', async () => {
       const onQueryResults = vi.fn()
-      const inst = await d8umCreate({
+      const inst = await d8umInit({
         vectorStore: adapter,
         embedding,
         hooks: { onQueryResults },
       })
       const { bucket, documents, indexConfig } = createMockBucket({ documents: [createTestDocument()] })
       registerTestBucket(inst, bucket, embedding)
-      await inst.ingest(bucket.id, documents, indexConfig)
+      await inst.ingest(documents, indexConfig, { bucketId: bucket.id })
       await inst.query('test')
       expect(onQueryResults).toHaveBeenCalledOnce()
     })
@@ -237,10 +233,9 @@ describe('d8umCreate', () => {
       await expect(inst.query('test')).rejects.toThrow()
     })
 
-    it('d8umCreate calls both deploy() and connect()', async () => {
+    it('d8umInit calls connect()', async () => {
       const a = createMockAdapter()
-      await d8umCreate({ vectorStore: a, embedding })
-      expect(a.calls.filter((c: { method: string }) => c.method === 'deploy')).toHaveLength(1)
+      await d8umInit({ vectorStore: a, embedding })
       expect(a.calls.filter((c: { method: string }) => c.method === 'connect')).toHaveLength(1)
     })
 
@@ -253,7 +248,7 @@ describe('d8umCreate', () => {
     it('undeploy() returns failure when adapter lacks undeploy', async () => {
       const a = createMockAdapter()
       delete (a as any).undeploy
-      const inst = await d8umCreate({ vectorStore: a, embedding })
+      const inst = await d8umInit({ vectorStore: a, embedding })
       const result = await inst.undeploy()
       expect(result.success).toBe(false)
       expect(result.message).toContain('does not support')

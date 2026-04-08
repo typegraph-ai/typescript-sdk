@@ -1,4 +1,6 @@
 import type { d8umIdentity } from './identity.js'
+import type { MemoryRecord, ConversationTurnResult, MemoryHealthReport } from './memory.js'
+import type { PaginationOpts } from './pagination.js'
 
 /**
  * Structural interface for the graph/memory bridge.
@@ -13,10 +15,10 @@ export interface GraphBridge {
   remember(content: string, identity: d8umIdentity, category?: string, opts?: {
     importance?: number
     metadata?: Record<string, unknown>
-  }): Promise<unknown>
+  }): Promise<MemoryRecord>
 
-  /** Invalidate a memory and its associated graph edges. */
-  forget(id: string): Promise<void>
+  /** Invalidate a memory and its associated graph edges. Caller must prove ownership via identity. */
+  forget(id: string, identity: d8umIdentity): Promise<void>
 
   /** Apply a natural language correction (e.g., "Actually, Alice works at Beta Inc now"). */
   correct(correction: string, identity: d8umIdentity): Promise<{ invalidated: number; created: number; summary: string }>
@@ -26,13 +28,30 @@ export interface GraphBridge {
     messages: Array<{ role: string; content: string; timestamp?: Date }>,
     identity: d8umIdentity,
     conversationId?: string
-  ): Promise<unknown>
+  ): Promise<ConversationTurnResult>
 
   /** Recall memories by semantic similarity. */
-  recall(query: string, identity: d8umIdentity, opts?: { limit?: number; types?: string[] }): Promise<unknown[]>
+  recall(query: string, identity: d8umIdentity, opts?: {
+    limit?: number
+    types?: string[]
+    /** Only return memories valid at this timestamp. */
+    temporalAt?: Date
+    /** Include invalidated/expired memories. Default: false. */
+    includeInvalidated?: boolean
+  }): Promise<MemoryRecord[]>
+
+  /** Recall memories using hybrid search (vector + BM25 keyword).
+   *  When the memory store supports it, uses RRF to fuse vector and keyword results.
+   *  Falls back to vector-only recall if not implemented. */
+  recallHybrid?(query: string, identity: d8umIdentity, opts?: {
+    limit?: number
+    types?: string[]
+    temporalAt?: Date
+    includeInvalidated?: boolean
+  }): Promise<MemoryRecord[]>
 
   /** Build an LLM-ready context string from memories. */
-  assembleContext?(query: string, identity: d8umIdentity, opts?: {
+  buildMemoryContext?(query: string, identity: d8umIdentity, opts?: {
     includeWorking?: boolean
     includeFacts?: boolean
     includeEpisodes?: boolean
@@ -42,7 +61,7 @@ export interface GraphBridge {
   }): Promise<string>
 
   /** Get memory system health statistics. */
-  healthCheck?(identity: d8umIdentity): Promise<unknown>
+  healthCheck?(identity: d8umIdentity): Promise<MemoryHealthReport>
 
   /** Check if the memory store has any active memories. Used to skip memory runner when empty. */
   hasMemories?(): Promise<boolean>
@@ -74,4 +93,109 @@ export interface GraphBridge {
 
   /** Get chunk content associated with entities. */
   getChunksForEntities?(entityIds: string[], limit?: number, pprScores?: Map<string, number>): Promise<Array<{ content: string; bucketId: string; score: number; documentId?: string; chunkIndex?: number; metadata?: Record<string, unknown> }>>
+
+  // ── Graph exploration methods ──
+
+  /** Get a single entity by ID. */
+  getEntity?(id: string): Promise<EntityDetail | null>
+
+  /** Get edges for an entity. */
+  getEdges?(entityId: string, opts?: {
+    direction?: 'in' | 'out' | 'both'
+    relation?: string
+    limit?: number
+  }): Promise<EdgeResult[]>
+
+  /** Extract a subgraph around seed entities or a query. */
+  getSubgraph?(opts: SubgraphOpts): Promise<SubgraphResult>
+
+  /** Get graph-level statistics. */
+  getGraphStats?(identity: d8umIdentity): Promise<GraphStats>
+
+  /** Get all relation types in the graph with counts. */
+  getRelationTypes?(identity: d8umIdentity): Promise<Array<{ relation: string; count: number }>>
+
+  /** Get all entity types in the graph with counts. */
+  getEntityTypes?(identity: d8umIdentity): Promise<Array<{ entityType: string; count: number }>>
+}
+
+// ── Graph exploration types ──
+
+export interface EntityResult {
+  id: string
+  name: string
+  entityType: string
+  aliases: string[]
+  /** Present when searched by query. */
+  similarity?: number | undefined
+  /** Number of edges (degree centrality). */
+  edgeCount: number
+  properties?: Record<string, unknown> | undefined
+}
+
+export interface EntityDetail extends EntityResult {
+  description?: string | undefined
+  createdAt: Date
+  validAt?: Date | undefined
+  invalidAt?: Date | undefined
+  /** Top edges by weight. */
+  topEdges: EdgeResult[]
+}
+
+export interface EdgeResult {
+  id: string
+  sourceEntityId: string
+  sourceEntityName: string
+  targetEntityId: string
+  targetEntityName: string
+  relation: string
+  weight: number
+  bucketId?: string | undefined
+  documentId?: string | undefined
+  properties?: Record<string, unknown> | undefined
+}
+
+export interface SubgraphOpts {
+  /** Seed entities to expand from. */
+  entityIds?: string[] | undefined
+  /** Or search by text to find seed entities. */
+  query?: string | undefined
+  identity: d8umIdentity
+  /** Expansion hops from seeds. Default: 1, max: 3. */
+  depth?: number | undefined
+  /** Max total entities. Default: 100. */
+  limit?: number | undefined
+  /** Filter weak edges. Default: 0. */
+  minWeight?: number | undefined
+  /** Filter by entity type. */
+  entityTypes?: string[] | undefined
+  /** Filter by relation type. */
+  relations?: string[] | undefined
+}
+
+export interface SubgraphResult {
+  entities: Array<EntityResult & {
+    /** Visual size based on degree centrality. */
+    size: number
+  }>
+  edges: Array<EdgeResult & {
+    /** Visual thickness based on weight. */
+    thickness: number
+  }>
+  stats: {
+    entityCount: number
+    edgeCount: number
+    avgDegree: number
+    /** Number of connected components. */
+    components: number
+  }
+}
+
+export interface GraphStats {
+  totalEntities: number
+  totalEdges: number
+  avgEdgesPerEntity: number
+  topEntityTypes: Array<{ entityType: string; count: number }>
+  topRelations: Array<{ relation: string; count: number }>
+  degreeDistribution: Array<{ degree: number; count: number }>
 }

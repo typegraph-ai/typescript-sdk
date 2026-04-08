@@ -1,5 +1,5 @@
-import type { EmbeddingProvider, d8umIdentity, LLMProvider, d8umEventSink } from '@d8um-ai/core'
-import type { GraphBridge } from '@d8um-ai/core'
+import type { EmbeddingProvider, d8umIdentity, LLMProvider, d8umEventSink, MemoryRecord, ConversationTurnResult, MemoryHealthReport } from '@d8um-ai/core'
+import type { GraphBridge, EntityDetail, EdgeResult, SubgraphOpts, SubgraphResult, GraphStats } from '@d8um-ai/core'
 import type { MemoryStoreAdapter } from './types/adapter.js'
 import type { SemanticEdge } from './types/memory.js'
 import type { ConversationMessage } from './extraction/extractor.js'
@@ -56,12 +56,15 @@ export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge 
   async function remember(content: string, identity: d8umIdentity, category?: string, opts?: {
     importance?: number
     metadata?: Record<string, unknown>
-  }): Promise<unknown> {
+  }): Promise<MemoryRecord> {
     const mem = getMemory(identity)
-    return mem.remember(content, (category as 'episodic' | 'semantic' | 'procedural') ?? 'semantic', opts)
+    // The graph package's internal MemoryRecord has extra fields (scope, embedding, etc.)
+    // that are a superset of core's public MemoryRecord — cast through unknown.
+    return mem.remember(content, (category as 'episodic' | 'semantic' | 'procedural') ?? 'semantic', opts) as unknown as Promise<MemoryRecord>
   }
 
-  async function forget(id: string): Promise<void> {
+  async function forget(id: string, _identity: d8umIdentity): Promise<void> {
+    // TODO: verify memory belongs to identity before invalidating
     await memoryStore.invalidate(id)
   }
 
@@ -74,22 +77,44 @@ export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge 
     messages: Array<{ role: string; content: string; timestamp?: Date }>,
     identity: d8umIdentity,
     conversationId?: string,
-  ): Promise<unknown> {
+  ): Promise<ConversationTurnResult> {
     const mem = getMemory(identity)
-    return mem.addConversationTurn(messages as ConversationMessage[], conversationId)
+    return mem.addConversationTurn(messages as ConversationMessage[], conversationId) as unknown as Promise<ConversationTurnResult>
   }
 
-  async function recall(query: string, identity: d8umIdentity, opts?: { limit?: number; types?: string[] }): Promise<unknown[]> {
+  async function recall(query: string, identity: d8umIdentity, opts?: {
+    limit?: number
+    types?: string[]
+    temporalAt?: Date
+    includeInvalidated?: boolean
+  }): Promise<MemoryRecord[]> {
     const mem = getMemory(identity)
-    return mem.recall(query, {
+    const results = await mem.recall(query, {
       limit: opts?.limit,
       types: opts?.types as ('episodic' | 'semantic' | 'procedural')[] | undefined,
+      asOf: opts?.temporalAt,
     })
+    return results as unknown as MemoryRecord[]
+  }
+
+  async function recallHybrid(query: string, identity: d8umIdentity, opts?: {
+    limit?: number
+    types?: string[]
+    temporalAt?: Date
+    includeInvalidated?: boolean
+  }): Promise<MemoryRecord[]> {
+    const mem = getMemory(identity)
+    const results = await mem.recallHybrid(query, {
+      limit: opts?.limit,
+      types: opts?.types as ('episodic' | 'semantic' | 'procedural')[] | undefined,
+      asOf: opts?.temporalAt,
+    })
+    return results as unknown as MemoryRecord[]
   }
 
   // ── Assemble context & health ──
 
-  async function assembleContext(query: string, identity: d8umIdentity, opts?: {
+  async function buildMemoryContext(query: string, identity: d8umIdentity, opts?: {
     includeWorking?: boolean
     includeFacts?: boolean
     includeEpisodes?: boolean
@@ -101,9 +126,9 @@ export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge 
     return mem.assembleContext(query, opts)
   }
 
-  async function healthCheck(identity: d8umIdentity): Promise<unknown> {
+  async function healthCheck(identity: d8umIdentity): Promise<MemoryHealthReport> {
     const mem = getMemory(identity)
-    return mem.healthCheck()
+    return mem.healthCheck() as unknown as Promise<MemoryHealthReport>
   }
 
   // ── Memory check (cached) ──
@@ -400,6 +425,211 @@ export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge 
     return chunks.slice(0, limit)
   }
 
+  // ── Graph Exploration ──
+
+  async function getEntity(id: string): Promise<EntityDetail | null> {
+    const entity = await graph.getEntity(id)
+    if (!entity) return null
+
+    const edges = await graph.getEdges(id, 'both')
+    // Build a name lookup for edge source/target
+    const neighborIds = new Set<string>()
+    for (const e of edges) {
+      neighborIds.add(e.sourceEntityId)
+      neighborIds.add(e.targetEntityId)
+    }
+    neighborIds.delete(id)
+    const nameMap = new Map<string, string>([[id, entity.name]])
+    for (const nid of neighborIds) {
+      const n = await graph.getEntity(nid)
+      if (n) nameMap.set(nid, n.name)
+    }
+
+    const topEdges: EdgeResult[] = edges
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 20)
+      .map(e => ({
+        id: e.id,
+        sourceEntityId: e.sourceEntityId,
+        sourceEntityName: nameMap.get(e.sourceEntityId) ?? e.sourceEntityId,
+        targetEntityId: e.targetEntityId,
+        targetEntityName: nameMap.get(e.targetEntityId) ?? e.targetEntityId,
+        relation: e.relation,
+        weight: e.weight,
+        bucketId: e.properties.bucketId as string | undefined,
+        documentId: e.properties.documentId as string | undefined,
+        properties: e.properties,
+      }))
+
+    return {
+      id: entity.id,
+      name: entity.name,
+      entityType: entity.entityType,
+      aliases: entity.aliases,
+      edgeCount: edges.length,
+      properties: entity.properties,
+      description: entity.properties.description as string | undefined,
+      createdAt: entity.temporal.createdAt,
+      validAt: entity.temporal.validAt,
+      invalidAt: entity.temporal.invalidAt,
+      topEdges,
+    }
+  }
+
+  async function getEdges(entityId: string, opts?: {
+    direction?: 'in' | 'out' | 'both'
+    relation?: string
+    limit?: number
+  }): Promise<EdgeResult[]> {
+    let edges = await graph.getEdges(entityId, opts?.direction ?? 'both')
+    if (opts?.relation) {
+      edges = edges.filter(e => e.relation === opts.relation)
+    }
+
+    // Build name lookup
+    const entityIds = new Set<string>()
+    for (const e of edges) {
+      entityIds.add(e.sourceEntityId)
+      entityIds.add(e.targetEntityId)
+    }
+    const nameMap = new Map<string, string>()
+    for (const eid of entityIds) {
+      const ent = await graph.getEntity(eid)
+      if (ent) nameMap.set(eid, ent.name)
+    }
+
+    const limit = opts?.limit ?? 50
+    return edges.slice(0, limit).map(e => ({
+      id: e.id,
+      sourceEntityId: e.sourceEntityId,
+      sourceEntityName: nameMap.get(e.sourceEntityId) ?? e.sourceEntityId,
+      targetEntityId: e.targetEntityId,
+      targetEntityName: nameMap.get(e.targetEntityId) ?? e.targetEntityId,
+      relation: e.relation,
+      weight: e.weight,
+      bucketId: e.properties.bucketId as string | undefined,
+      documentId: e.properties.documentId as string | undefined,
+      properties: e.properties,
+    }))
+  }
+
+  async function getSubgraph(opts: SubgraphOpts): Promise<SubgraphResult> {
+    let seedIds = opts.entityIds ?? []
+    if (opts.query && memoryStore.searchEntities) {
+      const queryEmb = await embedding.embed(opts.query)
+      const found = await memoryStore.searchEntities(queryEmb, opts.identity, opts.limit ?? 10)
+      seedIds = [...seedIds, ...found.map(e => e.id)]
+    }
+    if (seedIds.length === 0) {
+      return { entities: [], edges: [], stats: { entityCount: 0, edgeCount: 0, avgDegree: 0, components: 0 } }
+    }
+
+    const depth = Math.min(opts.depth ?? 1, 3)
+    const sub = await graph.getSubgraph(seedIds, depth)
+
+    // Apply filters
+    let entities = sub.entities
+    let edges = sub.edges
+    if (opts.entityTypes?.length) {
+      const types = new Set(opts.entityTypes)
+      entities = entities.filter(e => types.has(e.entityType))
+    }
+    if (opts.relations?.length) {
+      const rels = new Set(opts.relations)
+      edges = edges.filter(e => rels.has(e.relation))
+    }
+    if (opts.minWeight) {
+      edges = edges.filter(e => e.weight >= opts.minWeight!)
+    }
+
+    // Limit entities
+    const entityLimit = opts.limit ?? 100
+    entities = entities.slice(0, entityLimit)
+    const entitySet = new Set(entities.map(e => e.id))
+    edges = edges.filter(e => entitySet.has(e.sourceEntityId) && entitySet.has(e.targetEntityId))
+
+    // Compute degree per entity
+    const degree = new Map<string, number>()
+    for (const e of edges) {
+      degree.set(e.sourceEntityId, (degree.get(e.sourceEntityId) ?? 0) + 1)
+      degree.set(e.targetEntityId, (degree.get(e.targetEntityId) ?? 0) + 1)
+    }
+    const maxDegree = Math.max(1, ...degree.values())
+    const maxWeight = Math.max(1, ...edges.map(e => e.weight))
+
+    // Build name lookup
+    const nameMap = new Map<string, string>()
+    for (const e of entities) nameMap.set(e.id, e.name)
+
+    // Count connected components via union-find
+    const parent = new Map<string, string>()
+    function find(x: string): string {
+      if (!parent.has(x)) parent.set(x, x)
+      if (parent.get(x) !== x) parent.set(x, find(parent.get(x)!))
+      return parent.get(x)!
+    }
+    function union(a: string, b: string) { parent.set(find(a), find(b)) }
+    for (const e of entities) parent.set(e.id, e.id)
+    for (const e of edges) union(e.sourceEntityId, e.targetEntityId)
+    const components = new Set([...entitySet].map(id => find(id))).size
+
+    return {
+      entities: entities.map(e => ({
+        id: e.id,
+        name: e.name,
+        entityType: e.entityType,
+        aliases: e.aliases,
+        edgeCount: degree.get(e.id) ?? 0,
+        properties: e.properties,
+        size: Math.max(1, Math.round(((degree.get(e.id) ?? 0) / maxDegree) * 10)),
+      })),
+      edges: edges.map(e => ({
+        id: e.id,
+        sourceEntityId: e.sourceEntityId,
+        sourceEntityName: nameMap.get(e.sourceEntityId) ?? e.sourceEntityId,
+        targetEntityId: e.targetEntityId,
+        targetEntityName: nameMap.get(e.targetEntityId) ?? e.targetEntityId,
+        relation: e.relation,
+        weight: e.weight,
+        bucketId: e.properties.bucketId as string | undefined,
+        documentId: e.properties.documentId as string | undefined,
+        properties: e.properties,
+        thickness: Math.max(1, Math.round((e.weight / maxWeight) * 5)),
+      })),
+      stats: {
+        entityCount: entities.length,
+        edgeCount: edges.length,
+        avgDegree: entities.length > 0 ? (edges.length * 2) / entities.length : 0,
+        components,
+      },
+    }
+  }
+
+  async function getGraphStats(_identity: d8umIdentity): Promise<GraphStats> {
+    const totalEntities = memoryStore.countEntities ? await memoryStore.countEntities() : 0
+    const totalEdges = memoryStore.countEdges ? await memoryStore.countEdges() : 0
+    const topRelations = memoryStore.getRelationTypes ? await memoryStore.getRelationTypes() : []
+    const topEntityTypes = memoryStore.getEntityTypes ? await memoryStore.getEntityTypes() : []
+    const degreeDistribution = memoryStore.getDegreeDistribution ? await memoryStore.getDegreeDistribution() : []
+
+    return {
+      totalEntities,
+      totalEdges,
+      avgEdgesPerEntity: totalEntities > 0 ? totalEdges / totalEntities : 0,
+      topEntityTypes,
+      topRelations,
+      degreeDistribution,
+    }
+  }
+
+  async function getRelationTypes(_identity: d8umIdentity): Promise<Array<{ relation: string; count: number }>> {
+    return memoryStore.getRelationTypes ? memoryStore.getRelationTypes() : []
+  }
+
+  async function getEntityTypes(_identity: d8umIdentity): Promise<Array<{ entityType: string; count: number }>> {
+    return memoryStore.getEntityTypes ? memoryStore.getEntityTypes() : []
+  }
+
   // ── Deploy (create tables) ──
 
   async function deploy(): Promise<void> {
@@ -415,12 +645,20 @@ export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge 
     correct,
     addConversationTurn,
     recall,
-    assembleContext,
+    recallHybrid,
+    buildMemoryContext,
     healthCheck,
     hasMemories,
     addTriple,
     searchEntities,
     getAdjacencyList,
     getChunksForEntities,
+    // Graph exploration
+    getEntity,
+    getEdges,
+    getSubgraph,
+    getGraphStats,
+    getRelationTypes,
+    getEntityTypes,
   }
 }

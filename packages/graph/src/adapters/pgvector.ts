@@ -108,6 +108,11 @@ const MEMORIES_DDL = (t: string) => {
   CREATE INDEX IF NOT EXISTS ${idx('agent_idx')} ON ${t} (agent_id);
   CREATE INDEX IF NOT EXISTS ${idx('conversation_idx')} ON ${t} (conversation_id);
   CREATE INDEX IF NOT EXISTS ${idx('visibility_idx')} ON ${t} (visibility);
+
+  -- Full-text search for BM25/keyword search against memories
+  ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS search_vector TSVECTOR
+    GENERATED ALWAYS AS (to_tsvector('english', content)) STORED;
+  CREATE INDEX IF NOT EXISTS ${idx('search_vector_idx')} ON ${t} USING gin (search_vector);
 `
 }
 
@@ -436,6 +441,77 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     return rows.map(mapRowToMemory)
   }
 
+  async hybridSearch(embedding: number[], query: string, opts: MemorySearchOpts): Promise<MemoryRecord[]> {
+    const vectorStr = `[${embedding.join(',')}]`
+    const conditions: string[] = ['embedding IS NOT NULL']
+    const params: unknown[] = []
+
+    if (!opts.includeExpired) {
+      conditions.push(`status NOT IN ('invalidated', 'expired')`)
+    }
+    if (opts.temporalAt) {
+      params.push(opts.temporalAt.toISOString())
+      conditions.push(`valid_at <= $${params.length}`)
+      conditions.push(`(invalid_at IS NULL OR invalid_at > $${params.length})`)
+    }
+    if (opts.filter) {
+      const { where: filterWhere, params: filterParams } = buildMemoryWhere(opts.filter, params.length)
+      if (filterWhere) {
+        conditions.push(filterWhere)
+        params.push(...filterParams)
+      }
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+    const vecParamIdx = params.length + 1
+    params.push(vectorStr)
+    const queryParamIdx = params.length + 1
+    params.push(query)
+    const limitParamIdx = params.length + 1
+    params.push(opts.count)
+
+    // RRF fusion of vector and keyword ranked lists.
+    // Vector gets 0.7 weight, keyword gets 0.3 — semantic matching is more reliable
+    // for typically short memory content. Keyword rank of 1000 for non-matches
+    // ensures they aren't overly penalized.
+    const sql = `
+      WITH vector_ranked AS (
+        SELECT *, 1 - (embedding <=> $${vecParamIdx}::vector) AS similarity,
+               ROW_NUMBER() OVER (ORDER BY embedding <=> $${vecParamIdx}::vector) AS vrank
+        FROM ${this.memoriesTable}
+        ${whereClause}
+        ORDER BY embedding <=> $${vecParamIdx}::vector
+        LIMIT $${limitParamIdx} * 3
+      ),
+      keyword_ranked AS (
+        SELECT id, ts_rank_cd(search_vector, websearch_to_tsquery('english', $${queryParamIdx})) AS kw_score,
+               ROW_NUMBER() OVER (ORDER BY ts_rank_cd(search_vector, websearch_to_tsquery('english', $${queryParamIdx})) DESC) AS krank
+        FROM ${this.memoriesTable}
+        ${whereClause}
+        AND search_vector @@ websearch_to_tsquery('english', $${queryParamIdx})
+        ORDER BY ts_rank_cd(search_vector, websearch_to_tsquery('english', $${queryParamIdx})) DESC
+        LIMIT $${limitParamIdx} * 3
+      )
+      SELECT v.*,
+             k.kw_score AS keyword_score,
+             (0.7 / (60 + v.vrank) + 0.3 / (60 + COALESCE(k.krank, 1000)))::double precision AS rrf_score
+      FROM vector_ranked v
+      LEFT JOIN keyword_ranked k ON v.id = k.id
+      ORDER BY (0.7 / (60 + v.vrank) + 0.3 / (60 + COALESCE(k.krank, 1000))) DESC
+      LIMIT $${limitParamIdx}
+    `
+
+    const rows = await this.sql(sql, params)
+    return rows.map(row => {
+      const mem = mapRowToMemory(row)
+      // Stash keyword score for memory runner composite scoring
+      if (row.keyword_score != null) {
+        mem.metadata._keywordScore = row.keyword_score as number
+      }
+      return mem
+    })
+  }
+
   // ── Access Tracking ──
 
   async recordAccess(id: string): Promise<void> {
@@ -648,6 +724,36 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     )
     return (rows[0]?.['n'] as number) ?? 0
   }
+
+  async getRelationTypes(): Promise<Array<{ relation: string; count: number }>> {
+    const rows = await this.sql(
+      `SELECT relation, COUNT(*)::integer AS count FROM ${this.edgesTable}
+       WHERE invalid_at IS NULL
+       GROUP BY relation ORDER BY count DESC`
+    )
+    return rows.map(r => ({ relation: r.relation as string, count: r.count as number }))
+  }
+
+  async getEntityTypes(): Promise<Array<{ entityType: string; count: number }>> {
+    const rows = await this.sql(
+      `SELECT entity_type, COUNT(*)::integer AS count FROM ${this.entitiesTable}
+       WHERE invalid_at IS NULL
+       GROUP BY entity_type ORDER BY count DESC`
+    )
+    return rows.map(r => ({ entityType: r.entity_type as string, count: r.count as number }))
+  }
+
+  async getDegreeDistribution(): Promise<Array<{ degree: number; count: number }>> {
+    const rows = await this.sql(
+      `SELECT degree, COUNT(*)::integer AS count FROM (
+         SELECT source_entity_id AS eid, COUNT(*)::integer AS degree FROM ${this.edgesTable} WHERE invalid_at IS NULL GROUP BY source_entity_id
+         UNION ALL
+         SELECT target_entity_id AS eid, COUNT(*)::integer AS degree FROM ${this.edgesTable} WHERE invalid_at IS NULL GROUP BY target_entity_id
+       ) sub
+       GROUP BY degree ORDER BY degree`
+    )
+    return rows.map(r => ({ degree: r.degree as number, count: r.count as number }))
+  }
 }
 
 // ── Row Mappers ──
@@ -655,6 +761,19 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
 function mapRowToMemory(row: Record<string, unknown>): MemoryRecord {
   // Build scope from explicit identity columns (preferred) with JSONB fallback
   const scope = rowToIdentity(row)
+  const metadata = parseJson(row.metadata)
+  // Stash vector similarity score from search queries so callers can use it
+  // without re-embedding. Only present when the row came from a search() call.
+  if (row.similarity != null) {
+    metadata._similarity = row.similarity as number
+  }
+  // Stash temporal fields for composite memory scoring (similarity + importance + recency)
+  if (row.last_accessed_at != null) {
+    metadata._lastAccessedAt = new Date(row.last_accessed_at as string).toISOString()
+  }
+  if (row.created_at != null) {
+    metadata._createdAt = new Date(row.created_at as string).toISOString()
+  }
   const base: MemoryRecord = {
     id: row.id as string,
     category: row.category as MemoryRecord['category'],
@@ -664,7 +783,7 @@ function mapRowToMemory(row: Record<string, unknown>): MemoryRecord {
     importance: row.importance as number,
     accessCount: row.access_count as number,
     lastAccessedAt: new Date(row.last_accessed_at as string),
-    metadata: parseJson(row.metadata),
+    metadata,
     scope,
     visibility: (row.visibility as MemoryRecord['visibility']) ?? 'user',
     validAt: new Date(row.valid_at as string),

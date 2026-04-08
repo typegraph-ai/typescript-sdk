@@ -4,99 +4,116 @@ import type { VectorStoreAdapter } from '../types/adapter.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import type { GraphBridge } from '../types/graph-bridge.js'
 import type { d8umEvent, d8umEventSink } from '../types/events.js'
+import type { d8umLogger } from '../types/logger.js'
 import { IndexedRunner } from './runners/indexed.js'
 import { MemoryRunner } from './runners/memory-runner.js'
 import { GraphRunner } from './runners/graph-runner.js'
 import { mergeAndRank, normalizeRRF, normalizePPR, type NormalizedResult } from './merger.js'
-// classifyQuery is available for users who want auto-classification
-// import { classifyQuery } from './classifier.js'
+import { classifyQuery } from './classifier.js'
 
 /** Resolve user-provided signals (or defaults) into a fully-specified signal set. */
 export function resolveSignals(opts: QueryOpts): Required<QuerySignals> {
   const s = opts.signals ?? {}
   return {
-    vector: s.vector ?? true,
+    semantic: s.semantic ?? true,
     keyword: s.keyword ?? false,
     graph: s.graph ?? false,
     memory: s.memory ?? false,
   }
 }
 
-/** Human-readable label from active signals (e.g. "vector+keyword", "graph+memory"). */
+/** Human-readable label from active signals (e.g. "semantic+keyword", "graph+memory"). */
 export function signalLabel(signals: QuerySignals): string {
   const active: string[] = []
-  if (signals.vector) active.push('vector')
+  if (signals.semantic) active.push('semantic')
   if (signals.keyword) active.push('keyword')
   if (signals.graph) active.push('graph')
   if (signals.memory) active.push('memory')
   return active.join('+') || 'none'
 }
 
-/** Compute weighted score, redistributing weight from zero-valued components
- *  to non-zero components proportionally. This ensures activating additional
- *  signals can never hurt a result's score — it either helps (signal fires)
- *  or is neutral (signal returns 0). */
-function weightedScoreWithRedistribution(components: [number, number][]): number {
-  const nonZero = components.filter(([, v]) => v > 0)
-  if (nonZero.length === 0) return 0
-  const zeroWeight = components
-    .filter(([, v]) => v === 0)
-    .reduce((s, [w]) => s + w, 0)
-  const totalNonZeroWeight = nonZero.reduce((s, [w]) => s + w, 0)
-  return nonZero.reduce((score, [w, v]) => {
-    const adjusted = w + zeroWeight * (w / totalNonZeroWeight)
-    return score + adjusted * v
+/** Compute composite score with eligible/ineligible distinction.
+ *  - `undefined` value = ineligible (result can't have this score, e.g. bucket doc has no memory score).
+ *    Weight is redistributed proportionally to eligible categories.
+ *  - `0` value = eligible but scored poorly. Full penalty proportional to category weight.
+ *  This ensures bucket documents aren't penalized for lacking a memory score,
+ *  while memories that score 0 in keyword search are properly penalized. */
+function compositeScore(
+  components: Array<{ weight: number; value: number | undefined }>
+): number {
+  const eligible = components.filter(c => c.value !== undefined)
+  if (eligible.length === 0) return 0
+
+  const ineligibleWeight = components
+    .filter(c => c.value === undefined)
+    .reduce((s, c) => s + c.weight, 0)
+  const eligibleTotalWeight = eligible.reduce((s, c) => s + c.weight, 0)
+
+  return eligible.reduce((score, c) => {
+    const adjusted = c.weight + ineligibleWeight * (c.weight / eligibleTotalWeight)
+    return score + adjusted * c.value!
   }, 0)
+}
+
+/** Default weight profiles per signal combination.
+ *  RRF is excluded — it's a rank-fusion technique for merging lists,
+ *  not a relevance signal. It's used during merge-time ranking only. */
+function getDefaultWeights(signals: Required<QuerySignals>): Record<string, number> {
+  const s = signals.semantic
+  const k = signals.keyword
+  const g = signals.graph
+  const m = signals.memory
+
+  if (s && !k && !g && !m) return { semantic: 1.0 }
+  if (s && k && !g && !m) return { semantic: 0.85, keyword: 0.15 }
+  if (s && !k && g && !m) return { semantic: 0.55, graph: 0.45 }
+  if (s && !k && !g && m) return { semantic: 0.55, memory: 0.45 }
+  if (s && k && g && !m) return { semantic: 0.45, keyword: 0.10, graph: 0.45 }
+  if (s && k && !g && m) return { semantic: 0.45, keyword: 0.10, memory: 0.45 }
+  if (s && k && g && m) return { semantic: 0.35, keyword: 0.05, graph: 0.30, memory: 0.30 }
+  if (s && !k && g && m) return { semantic: 0.35, graph: 0.35, memory: 0.30 }
+  // Non-semantic combinations (graph-only, memory-only, etc.)
+  if (!s && g && m) return { graph: 0.50, memory: 0.50 }
+  if (!s && g && !m) return { graph: 1.0 }
+  if (!s && !g && m) return { memory: 1.0 }
+  if (!s && k && g) return { keyword: 0.20, graph: 0.80 }
+  if (!s && k && m) return { keyword: 0.20, memory: 0.80 }
+  // Fallback
+  return { semantic: 1.0 }
 }
 
 /** Compute composite score from normalized signal scores and weights.
  *  When no explicit weights are provided, derives defaults from which signals are active.
- *  Zero-valued signals have their weight redistributed to non-zero signals so that
- *  activating additional retrieval systems never penalizes a result. */
+ *  Distinguishes ineligible (undefined → redistribute weight) from scored-0 (penalize). */
 export function computeCompositeScore(
   normalizedScores: NormalizedScores,
   signals: Required<QuerySignals>,
   userWeights?: Partial<Record<'rrf' | 'semantic' | 'keyword' | 'graph' | 'memory', number>>
 ): number {
-  if (userWeights && Object.keys(userWeights).length > 0) {
-    // User-provided weights — use directly (no redistribution)
-    let score = 0
-    score += (userWeights.rrf ?? 0) * (normalizedScores.rrf ?? 0)
-    score += (userWeights.semantic ?? 0) * (normalizedScores.semantic ?? 0)
-    score += (userWeights.keyword ?? 0) * (normalizedScores.keyword ?? 0)
-    score += (userWeights.graph ?? 0) * (normalizedScores.graph ?? 0)
-    score += (userWeights.memory ?? 0) * (normalizedScores.memory ?? 0)
-    return score
-  }
+  const weights = (userWeights && Object.keys(userWeights).length > 0)
+    ? userWeights
+    : getDefaultWeights(signals)
 
-  // Auto-derive defaults based on active signals
-  const hasKeyword = signals.keyword
-  const hasGraph = signals.graph
-  const hasMemory = signals.memory
+  const components: Array<{ weight: number; value: number | undefined }> = []
 
-  if (!hasKeyword && !hasGraph && !hasMemory) {
-    // Vector-only (fast)
-    return normalizedScores.semantic ?? 0
-  }
+  if (weights.semantic) components.push({ weight: weights.semantic, value: normalizedScores.semantic })
+  if (weights.keyword) components.push({ weight: weights.keyword, value: normalizedScores.keyword })
+  if (weights.graph) components.push({ weight: weights.graph, value: normalizedScores.graph })
+  if (weights.memory) components.push({ weight: weights.memory, value: normalizedScores.memory })
+  // Allow user to include RRF in explicit weights if they want
+  if (weights.rrf) components.push({ weight: weights.rrf, value: normalizedScores.rrf })
 
-  // Build weighted components from active signals
-  const components: [number, number][] = []
+  return compositeScore(components)
+}
 
-  if (hasKeyword && !hasGraph && !hasMemory) {
-    // Vector + keyword (hybrid)
-    components.push([0.4, normalizedScores.rrf ?? 0])
-    components.push([0.5, normalizedScores.semantic ?? 0])
-    components.push([0.1, normalizedScores.keyword ?? 0])
-  } else {
-    // Multi-signal (any combination with graph/memory)
-    components.push([0.25, normalizedScores.rrf ?? 0])
-    components.push([0.35, normalizedScores.semantic ?? 0])
-    if (hasKeyword) components.push([0.1, normalizedScores.keyword ?? 0])
-    if (hasGraph) components.push([0.15, normalizedScores.graph ?? 0])
-    if (hasMemory) components.push([0.15, normalizedScores.memory ?? 0])
-  }
-
-  return weightedScoreWithRedistribution(components)
+/** Race a promise against a timeout. Returns the result or fallback on timeout. */
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    promise,
+    new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback), ms) }),
+  ]).then(r => { clearTimeout(timer); return r })
+    .catch(() => { clearTimeout(timer); return fallback })
 }
 
 export class QueryPlanner {
@@ -105,7 +122,8 @@ export class QueryPlanner {
     private bucketIds: string[],
     private bucketEmbeddings: Map<string, EmbeddingProvider>,
     private graph?: GraphBridge,
-    private eventSink?: d8umEventSink
+    private eventSink?: d8umEventSink,
+    private logger?: d8umLogger,
   ) {}
 
   async execute(text: string, opts: QueryOpts = {}): Promise<QueryResponse> {
@@ -113,6 +131,18 @@ export class QueryPlanner {
     const count = opts.count ?? 10
     const tenantId = opts.tenantId
     const signals = resolveSignals(opts)
+    const onBucketError = opts.onBucketError ?? 'throw'
+
+    // Auto-weights: classify query type and use optimized weight profile.
+    // User-provided scoreWeights always override.
+    let effectiveScoreWeights = opts.scoreWeights
+    if (opts.autoWeights && !effectiveScoreWeights) {
+      const classification = classifyQuery(text)
+      effectiveScoreWeights = classification.weights as Partial<Record<'rrf' | 'semantic' | 'keyword' | 'graph' | 'memory', number>>
+      this.logger?.debug('Auto-weights', { queryType: classification.type, confidence: classification.confidence, weights: classification.weights })
+    }
+
+    this.logger?.debug('Query start', { text: text.slice(0, 100), signals, count })
 
     // Filter to requested sources or use all
     const activeBucketIds = opts.buckets
@@ -137,10 +167,17 @@ export class QueryPlanner {
       }
     }
 
-    const needsIndexedSearch = signals.vector || signals.keyword
+    const needsIndexedSearch = signals.semantic || signals.keyword
     const needsGraph = signals.graph && !!this.graph
     const needsMemory = signals.memory && !!this.graph
     const identity = { tenantId: opts.tenantId, groupId: opts.groupId, userId: opts.userId, agentId: opts.agentId, conversationId: opts.conversationId }
+
+    // Timeouts (user-configurable or defaults)
+    const timeouts = {
+      indexed: opts.timeouts?.indexed ?? 30_000,
+      graph: opts.timeouts?.graph ?? 30_000,
+      memory: opts.timeouts?.memory ?? 10_000,
+    }
 
     // Memory-only or graph-only (no indexed search)
     if (!needsIndexedSearch && (needsMemory || needsGraph)) {
@@ -158,21 +195,27 @@ export class QueryPlanner {
       // Memory runner
       if (needsMemory) {
         const memoryRunner = new MemoryRunner(this.graph)
-        const memResults = await memoryRunner.run(text, identity, count)
+        const memResults = await withTimeout(
+          memoryRunner.run(text, identity, count, { useKeyword: signals.keyword }),
+          timeouts.memory,
+          [] as NormalizedResult[]
+        )
         if (memResults.length > 0) runnerArrays.push(memResults)
       }
 
       // Graph runner
       if (needsGraph) {
         const graphRunner = new GraphRunner(this.graph)
-        try {
-          const graphResults = await graphRunner.run(text, identity, count)
-          if (graphResults.length > 0) runnerArrays.push(graphResults)
-        } catch { /* graph runner failure — continue with memory results */ }
+        const graphResults = await withTimeout(
+          graphRunner.run(text, identity, count),
+          timeouts.graph,
+          [] as NormalizedResult[]
+        )
+        if (graphResults.length > 0) runnerArrays.push(graphResults)
       }
 
       const allResults = runnerArrays.length > 1
-        ? mergeAndRank(runnerArrays, count, undefined, signals, opts.scoreWeights)
+        ? mergeAndRank(runnerArrays, count, undefined, signals, effectiveScoreWeights)
         : (runnerArrays[0] ?? []).slice(0, count)
 
       const results: d8umResult[] = allResults.map(r => {
@@ -181,25 +224,43 @@ export class QueryPlanner {
         const rawScores: RawScores = {}
         const normalizedScores: NormalizedScores = {}
 
-        if (agg.graph != null) {
+        const modes: string[] = merged.modes ?? [r.mode]
+        const isFromMemory = modes.includes('memory')
+        const isFromGraph = modes.includes('graph')
+
+        if (signals.graph) {
           rawScores.ppr = agg.graph
-          normalizedScores.graph = normalizePPR(agg.graph)
+          normalizedScores.graph = (isFromGraph || agg.graph != null)
+            ? normalizePPR(agg.graph ?? 0)
+            : undefined
         }
-        if (agg.memory != null) {
+        if (signals.memory) {
           rawScores.importance = agg.memory
-          normalizedScores.memory = agg.memory
+          rawScores.memorySimilarity = agg.memorySimilarity
+          rawScores.memoryImportance = agg.memoryImportance
+          rawScores.memoryRecency = agg.memoryRecency
+          normalizedScores.memory = isFromMemory
+            ? Math.min(Math.max(agg.memory ?? 0, 0), 1)
+            : undefined
+        }
+        // Memory results have semantic similarity from embedding search
+        if (signals.semantic && isFromMemory && agg.memorySimilarity != null) {
+          rawScores.cosineSimilarity = agg.memorySimilarity
+          normalizedScores.semantic = agg.memorySimilarity
         }
 
-        const topScore = merged.compositeScore ?? computeCompositeScore(normalizedScores, signals, opts.scoreWeights)
+        const topScore = computeCompositeScore(normalizedScores, signals, effectiveScoreWeights)
+
+        const sources = modes.map(modeToSource)
 
         return {
           content: r.content,
           score: topScore,
           scores: { raw: rawScores, normalized: normalizedScores },
-          sources: merged.modes ?? [r.mode],
-          bucket: {
-            id: r.bucketId,
-            documentId: r.documentId,
+          sources,
+          document: {
+            id: r.documentId,
+            bucketId: r.bucketId,
             title: r.title ?? '',
             url: r.url,
             updatedAt: r.updatedAt ?? new Date(),
@@ -213,6 +274,8 @@ export class QueryPlanner {
       const bucketTimings: QueryResponse['buckets'] = {}
       if (needsMemory) bucketTimings['__memory__'] = { mode: 'cached', resultCount: results.length, durationMs: Date.now() - startMs, status: 'ok' }
       if (needsGraph) bucketTimings['__graph__'] = { mode: 'cached', resultCount: results.length, durationMs: Date.now() - startMs, status: 'ok' }
+
+      this.logger?.debug('Query complete', { durationMs: Date.now() - startMs, resultCount: results.length })
 
       return {
         results,
@@ -229,20 +292,47 @@ export class QueryPlanner {
       const runnerStart = Date.now()
       const runner = new IndexedRunner(this.adapter, this.eventSink)
       const vectorOnly = !signals.keyword
-      const results = await runner.run(text, modelGroups, count, identity, opts.documentFilter, vectorOnly, opts.traceId, opts.spanId)
-      const runnerDuration = Date.now() - runnerStart
 
-      for (const bucketId of activeBucketIds) {
-        const sourceResults = results.filter(r => r.bucketId === bucketId)
-        bucketTimings[bucketId] = {
-          mode: 'indexed',
-          resultCount: sourceResults.length,
-          durationMs: runnerDuration,
-          status: 'ok',
+      try {
+        const results = await withTimeout(
+          runner.run(text, modelGroups, count, identity, opts.documentFilter, vectorOnly, opts.traceId, opts.spanId, opts.temporalAt),
+          timeouts.indexed,
+          [] as NormalizedResult[]
+        )
+        const runnerDuration = Date.now() - runnerStart
+
+        if (results.length === 0 && runnerDuration >= timeouts.indexed) {
+          const msg = `Indexed search timed out after ${timeouts.indexed}ms`
+          warnings.push(msg)
+          this.logger?.warn(msg)
+          for (const bucketId of activeBucketIds) {
+            bucketTimings[bucketId] = { mode: 'indexed', resultCount: 0, durationMs: runnerDuration, status: 'timeout' }
+          }
+        } else {
+          for (const bucketId of activeBucketIds) {
+            const sourceResults = results.filter(r => r.bucketId === bucketId)
+            bucketTimings[bucketId] = {
+              mode: 'indexed',
+              resultCount: sourceResults.length,
+              durationMs: runnerDuration,
+              status: 'ok',
+            }
+          }
+        }
+
+        allResults = results
+      } catch (err) {
+        const runnerDuration = Date.now() - runnerStart
+        if (onBucketError === 'throw') throw err
+        if (onBucketError === 'warn') {
+          const msg = `Indexed search failed: ${err instanceof Error ? err.message : String(err)}`
+          warnings.push(msg)
+          this.logger?.warn(msg)
+        }
+        for (const bucketId of activeBucketIds) {
+          bucketTimings[bucketId] = { mode: 'indexed', resultCount: 0, durationMs: runnerDuration, status: 'error', error: err instanceof Error ? err : new Error(String(err)) }
         }
       }
-
-      allResults = results
     }
 
     // Run graph + memory runners in parallel if signals request them
@@ -252,18 +342,23 @@ export class QueryPlanner {
       const skipMemory = !needsMemory || (this.graph.hasMemories ? !(await this.graph.hasMemories()) : false)
       const memoryPromise = skipMemory
         ? Promise.resolve([] as NormalizedResult[])
-        : new MemoryRunner(this.graph).run(text, identity, count).catch(() => [] as NormalizedResult[])
+        : withTimeout(
+            new MemoryRunner(this.graph).run(text, identity, count, {
+              ...(opts.temporalAt ? { temporalAt: opts.temporalAt } : {}),
+              ...(opts.includeInvalidated != null ? { includeInvalidated: opts.includeInvalidated } : {}),
+              useKeyword: signals.keyword,
+            }).catch(() => [] as NormalizedResult[]),
+            timeouts.memory,
+            [] as NormalizedResult[]
+          )
 
-      // 30s timeout on graph runner: if a DB call hangs (e.g., Neon connection stall),
-      // fall back to empty results so the query proceeds with indexed results only.
-      let graphTimer: ReturnType<typeof setTimeout> | undefined
       const graphPromise = !needsGraph
         ? Promise.resolve([] as NormalizedResult[])
-        : Promise.race([
+        : withTimeout(
             new GraphRunner(this.graph).run(text, identity, count),
-            new Promise<NormalizedResult[]>(resolve => { graphTimer = setTimeout(() => resolve([]), 30_000) }),
-          ]).then(r => { clearTimeout(graphTimer); return r })
-            .catch(() => { clearTimeout(graphTimer); return [] as NormalizedResult[] })
+            timeouts.graph,
+            [] as NormalizedResult[]
+          )
 
       const [memResults, graphResults] = await Promise.all([
         memoryPromise,
@@ -271,22 +366,9 @@ export class QueryPlanner {
       ])
 
       if (memResults.length > 0) {
-        // Score memories with vector similarity so they compete on the same
-        // dimensions as documents (semantic, rrf) instead of only importance.
-        const firstEmb = [...this.bucketEmbeddings.values()][0]
-        if (firstEmb) {
-          try {
-            const queryEmbedding = await firstEmb.embed(text)
-            for (const mem of memResults) {
-              const memEmbedding = await firstEmb.embed(mem.content)
-              const similarity = dotProduct(queryEmbedding, memEmbedding)
-              mem.rawScores.vector = similarity
-              mem.normalizedScore = similarity
-            }
-          } catch {
-            // Embedding failed — memories still compete via importance + RRF
-          }
-        }
+        // Memory results already carry semantic similarity scores from the memory
+        // store's embedding search (via metadata._similarity → rawScores.semantic).
+        // No need to re-embed here — the MemoryRunner handles this.
         runnerArrays.push(memResults)
         bucketTimings['__memory__'] = { mode: 'cached', resultCount: memResults.length, durationMs: Date.now() - startMs, status: 'ok' }
       }
@@ -327,7 +409,7 @@ export class QueryPlanner {
     // Merge and rank
     const needsMerge = runnerArrays.length > 1 || modelGroups.size > 1
     const mergedResults = needsMerge
-      ? mergeAndRank(runnerArrays, count, undefined, signals, opts.scoreWeights)
+      ? mergeAndRank(runnerArrays, count, undefined, signals, effectiveScoreWeights)
       : allResults.slice(0, count)
 
     // Map NormalizedResult → d8umResult with raw/normalized score structure
@@ -343,59 +425,72 @@ export class QueryPlanner {
       // Build normalized scores (capability-level, all 0-1)
       const normalizedScores: NormalizedScores = {}
 
-      // Always populate vector score if we ran vector search
-      if (signals.vector || signals.keyword) {
-        rawScores.cosineSimilarity = agg.vector
-        normalizedScores.semantic = agg.vector ?? 0
+      // Determine result origin for eligible/ineligible scoring
+      const modes: string[] = merged.modes ?? [r.mode]
+      const isFromMemory = modes.includes('memory')
+      const isFromGraph = modes.includes('graph')
+      const isFromIndexed = modes.includes('indexed')
+
+      // Semantic: eligible for ALL results that were embedding-searched.
+      // Both indexed chunks and memories use cosine similarity — same algorithm, same 0-1 range.
+      // Memory results carry their similarity via rawScores.memorySimilarity.
+      if (signals.semantic || signals.keyword) {
+        // For indexed/graph results, use the indexed embedding similarity
+        // For memory results, use the memory embedding similarity (same cosine algorithm)
+        const semanticScore = agg.semantic ?? (isFromMemory ? agg.memorySimilarity : undefined)
+        rawScores.cosineSimilarity = semanticScore
+        normalizedScores.semantic = semanticScore ?? 0
       }
 
+      // Keyword: eligible if keyword signal is on AND the result could have been keyword-searched
       if (signals.keyword) {
         rawScores.bm25 = agg.keyword
         rawScores.rrf = rawRrf
-        normalizedScores.keyword = agg.keyword ?? 0
+        normalizedScores.keyword = agg.keyword ?? 0 // All results are eligible when keyword is active
         const numListsForRRF = merged.compositeScore != null ? runnerArrays.length : 2
         const baseRRF = normalizeRRF(rawRrf, numListsForRRF)
-        // Attenuate RRF for results that only matched one retrieval list.
-        // RRF is rank-based and doesn't know relevance — a result ranked #1 in
-        // vector search gets high RRF even with near-zero cosine similarity.
-        // When keyword signal is active but a result has no keyword match,
-        // penalize its RRF to prevent rank inflation from dominating the score.
         const matchedBothLists = (agg.keyword ?? 0) > 0
         normalizedScores.rrf = matchedBothLists ? baseRRF : baseRRF * 0.5
-      } else if (signals.vector && (needsGraph || needsMemory) && merged.compositeScore != null) {
-        // Vector + graph/memory without keyword: still have RRF from multi-runner merge
+      } else if (signals.semantic && (needsGraph || needsMemory) && merged.compositeScore != null) {
         rawScores.rrf = rawRrf
         normalizedScores.rrf = normalizeRRF(rawRrf, runnerArrays.length)
       }
 
+      // Graph: eligible for results that came through graph runner, ineligible otherwise
       if (signals.graph) {
         rawScores.ppr = agg.graph
-        normalizedScores.graph = normalizePPR(agg.graph ?? 0)
+        normalizedScores.graph = (isFromGraph || agg.graph != null)
+          ? normalizePPR(agg.graph ?? 0)
+          : undefined // Non-graph results are ineligible
       }
+
+      // Memory: eligible for memory results, ineligible for bucket documents
       if (signals.memory) {
         rawScores.importance = agg.memory
-        normalizedScores.memory = agg.memory ?? 0
+        rawScores.memorySimilarity = agg.memorySimilarity
+        rawScores.memoryImportance = agg.memoryImportance
+        rawScores.memoryRecency = agg.memoryRecency
+        normalizedScores.memory = isFromMemory
+          ? Math.min(Math.max(agg.memory ?? 0, 0), 1)
+          : undefined // Bucket documents are ineligible for memory scoring
       }
 
-      // Compute top-level composite score (always 0-1)
-      let topScore: number
-      if (merged.compositeScore != null) {
-        topScore = merged.compositeScore
-      } else {
-        topScore = computeCompositeScore(normalizedScores, signals, opts.scoreWeights)
-      }
+      // Composite score: always recomputed with eligible/ineligible awareness.
+      // The merger's compositeScore used the old redistribution logic,
+      // so we recompute here with the correct undefined/0 distinction.
+      const topScore = computeCompositeScore(normalizedScores, signals, effectiveScoreWeights)
 
-      // Sources: which retrieval systems contributed
-      const sources: string[] = merged.modes ?? [r.mode]
+      // Sources: which retrieval systems contributed (user-facing labels)
+      const sources = modes.map(modeToSource)
 
       return {
         content: r.content,
         score: topScore,
         scores: { raw: rawScores, normalized: normalizedScores },
         sources,
-        bucket: {
-          id: r.bucketId,
-          documentId: r.documentId,
+        document: {
+          id: r.documentId,
+          bucketId: r.bucketId,
           title: r.title ?? '',
           url: r.url,
           updatedAt: r.updatedAt ?? new Date(),
@@ -436,6 +531,8 @@ export class QueryPlanner {
       void this.eventSink.emit(event)
     }
 
+    this.logger?.debug('Query complete', { durationMs, resultCount: results.length, signals })
+
     return {
       results,
       buckets: bucketTimings,
@@ -450,10 +547,17 @@ export class QueryPlanner {
   }
 }
 
+/** Map internal runner mode names to user-facing source labels. */
+function modeToSource(mode: string): string {
+  switch (mode) {
+    case 'indexed': return 'semantic'
+    case 'graph': return 'graph'
+    case 'memory': return 'memory'
+    case 'cached': return 'memory'
+    case 'live': return 'semantic'
+    default: return mode
+  }
+}
+
 /** Dot product of two vectors — equivalent to cosine similarity when vectors are L2-normalized
  *  (which embedding models typically return). */
-function dotProduct(a: number[], b: number[]): number {
-  let sum = 0
-  for (let i = 0; i < a.length; i++) sum += a[i]! * b[i]!
-  return sum
-}

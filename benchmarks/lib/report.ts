@@ -18,7 +18,7 @@ export interface BenchmarkMetrics {
 export interface BenchmarkResult {
   benchmark: string
   dataset: string
-  /** Active signal label (e.g. "vector", "vector+keyword", "vector+keyword+graph+memory") */
+  /** Active signal label (e.g. "semantic", "semantic+keyword", "semantic+keyword+graph+memory") */
   signals: string
   variant: string
   corpus: number

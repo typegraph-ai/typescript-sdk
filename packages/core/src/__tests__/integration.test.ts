@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { d8umCreate } from '../d8um.js'
+import { d8umInit } from '../d8um.js'
 import { createMockAdapter } from './helpers/mock-adapter.js'
 import { createMockEmbedding } from './helpers/mock-embedding.js'
 import { createMockBucket } from './helpers/mock-source.js'
@@ -16,36 +16,34 @@ function registerTestBucket(instance: d8umInstance, bucket: Bucket, embedding: E
 }
 
 describe('integration', () => {
-  it('add bucket → ingest → query → assemble xml', async () => {
+  it('add bucket → ingest → query → format xml', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umInit({ vectorStore: adapter, embedding })
 
     const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(3) })
     registerTestBucket(instance, bucket, embedding)
-    await instance.ingest(bucket.id, documents, indexConfig)
+    await instance.ingest(documents, indexConfig, { bucketId: bucket.id })
 
-    const response = await instance.query('Document 1')
+    const response = await instance.query('Document 1', { format: 'xml' })
     expect(response.results.length).toBeGreaterThan(0)
-
-    const xml = instance.assemble(response.results)
-    expect(xml).toContain('<context>')
-    expect(xml).toContain('<source')
-    expect(xml).toContain('<passage')
+    expect(response.context).toContain('<context>')
+    expect(response.context).toContain('<source')
+    expect(response.context).toContain('<passage')
   })
 
   it('ingest → re-ingest with changes → query shows updated content', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umInit({ vectorStore: adapter, embedding })
 
     const docs = [createTestDocument({ id: 'doc-1', content: 'Original content for testing' })]
     const { bucket, indexConfig } = createMockBucket({ documents: docs })
     registerTestBucket(instance, bucket, embedding)
-    await instance.ingest(bucket.id, docs, indexConfig)
+    await instance.ingest(docs, indexConfig, { bucketId: bucket.id })
 
     const updatedDocs = [createTestDocument({ id: 'doc-1', content: 'Updated content with new information' })]
-    await instance.ingest(bucket.id, updatedDocs, indexConfig)
+    await instance.ingest(updatedDocs, indexConfig, { bucketId: bucket.id })
 
     const response = await instance.query('Updated content')
     expect(response.results.length).toBeGreaterThan(0)
@@ -55,19 +53,19 @@ describe('integration', () => {
   it('multi-bucket → merged query results', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umInit({ vectorStore: adapter, embedding })
 
     const { bucket: source1, documents: docs1, indexConfig: indexConfig1 } = createMockBucket({ id: 'src-1', documents: createTestDocuments(2, 'Alpha') })
     const { bucket: source2, documents: docs2, indexConfig: indexConfig2 } = createMockBucket({ id: 'src-2', documents: createTestDocuments(2, 'Beta') })
     registerTestBucket(instance, source1, embedding)
     registerTestBucket(instance, source2, embedding)
 
-    await instance.ingest('src-1', docs1, indexConfig1)
-    await instance.ingest('src-2', docs2, indexConfig2)
+    await instance.ingest(docs1, indexConfig1, { bucketId: 'src-1' })
+    await instance.ingest(docs2, indexConfig2, { bucketId: 'src-2' })
 
     const response = await instance.query('content')
     expect(response.results.length).toBeGreaterThan(0)
-    const bucketIds = new Set(response.results.map(r => r.bucket.id))
+    const bucketIds = new Set(response.results.map(r => r.document.bucketId))
     expect(bucketIds.size).toBeGreaterThanOrEqual(1)
   })
 
@@ -75,15 +73,15 @@ describe('integration', () => {
     const adapter = createMockAdapter()
     const embeddingA = createMockEmbedding({ model: 'model-a', dimensions: 4 })
     const embeddingB = createMockEmbedding({ model: 'model-b', dimensions: 4 })
-    const instance = await d8umCreate({ vectorStore: adapter, embedding: embeddingA })
+    const instance = await d8umInit({ vectorStore: adapter, embedding: embeddingA })
 
     const { bucket: source1, documents: docs1, indexConfig: indexConfig1 } = createMockBucket({ id: 'src-1', documents: createTestDocuments(2, 'Alpha') })
     const { bucket: source2, documents: docs2, indexConfig: indexConfig2 } = createMockBucket({ id: 'src-2', documents: createTestDocuments(2, 'Beta') })
     registerTestBucket(instance, source1, embeddingA)
     registerTestBucket(instance, source2, embeddingB)
 
-    await instance.ingest('src-1', docs1, indexConfig1)
-    await instance.ingest('src-2', docs2, indexConfig2)
+    await instance.ingest(docs1, indexConfig1, { bucketId: 'src-1' })
+    await instance.ingest(docs2, indexConfig2, { bucketId: 'src-2' })
 
     expect(adapter._chunks.has('model-a')).toBe(true)
     expect(adapter._chunks.has('model-b')).toBe(true)
@@ -92,13 +90,13 @@ describe('integration', () => {
   it('idempotency (repeated ingestion is no-op)', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umInit({ vectorStore: adapter, embedding })
 
     const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(2) })
     registerTestBucket(instance, bucket, embedding)
 
-    const result1 = await instance.ingest(bucket.id, documents, indexConfig)
-    const result2 = await instance.ingest(bucket.id, documents, indexConfig)
+    const result1 = await instance.ingest(documents, indexConfig, { bucketId: bucket.id })
+    const result2 = await instance.ingest(documents, indexConfig, { bucketId: bucket.id })
 
     expect(result1.inserted).toBe(2)
     expect(result2.skipped).toBe(2)
@@ -108,13 +106,13 @@ describe('integration', () => {
   it('tenant isolation', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umInit({ vectorStore: adapter, embedding })
 
     const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(2) })
     registerTestBucket(instance, bucket, embedding)
 
-    await instance.ingest(bucket.id, documents, indexConfig, { tenantId: 'tenant-a' })
-    await instance.ingest(bucket.id, documents, indexConfig, { tenantId: 'tenant-b' })
+    await instance.ingest(documents, indexConfig, { bucketId: bucket.id, tenantId: 'tenant-a' })
+    await instance.ingest(documents, indexConfig, { bucketId: bucket.id, tenantId: 'tenant-b' })
 
     const responseA = await instance.query('Document', { tenantId: 'tenant-a' })
     const responseB = await instance.query('Document', { tenantId: 'tenant-b' })
@@ -123,10 +121,10 @@ describe('integration', () => {
     expect(responseB.query.tenantId).toBe('tenant-b')
   })
 
-  it('ingestWithChunks → query', async () => {
+  it('ingestPreChunked → query', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umInit({ vectorStore: adapter, embedding })
 
     const { bucket } = createMockBucket({ documents: [] })
     registerTestBucket(instance, bucket, embedding)
@@ -136,33 +134,30 @@ describe('integration', () => {
       { content: 'Chunk zero text', chunkIndex: 0 },
       { content: 'Chunk one text', chunkIndex: 1 },
     ]
-    await instance.ingestWithChunks(bucket.id, doc, chunks)
+    await instance.ingestPreChunked(doc, chunks, { bucketId: bucket.id })
 
     const response = await instance.query('Chunk zero text')
     expect(response.results.length).toBeGreaterThan(0)
   })
 
-  it('assemble format pipeline (same results → xml/md/plain/custom)', async () => {
+  it('query format pipeline (same results → xml/md/plain/custom)', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umCreate({ vectorStore: adapter, embedding })
+    const instance = await d8umInit({ vectorStore: adapter, embedding })
 
     const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(2) })
     registerTestBucket(instance, bucket, embedding)
-    await instance.ingest(bucket.id, documents, indexConfig)
+    await instance.ingest(documents, indexConfig, { bucketId: bucket.id })
 
-    const response = await instance.query('Document')
-    const results = response.results
+    const xmlResponse = await instance.query('Document', { format: 'xml' })
+    const mdResponse = await instance.query('Document', { format: 'markdown' })
+    const plainResponse = await instance.query('Document', { format: 'plain' })
+    const customResponse = await instance.query('Document', { format: (r) => `Count: ${r.length}` })
 
-    const xml = instance.assemble(results, { format: 'xml' })
-    const md = instance.assemble(results, { format: 'markdown' })
-    const plain = instance.assemble(results, { format: 'plain' })
-    const custom = instance.assemble(results, { format: (r) => `Count: ${r.length}` })
-
-    expect(xml).toContain('<context>')
-    expect(md).toContain('---')
-    expect(plain).not.toContain('<')
-    expect(custom).toMatch(/Count: \d+/)
+    expect(xmlResponse.context).toContain('<context>')
+    expect(mdResponse.context).toContain('---')
+    expect(plainResponse.context).not.toContain('<')
+    expect(customResponse.context).toMatch(/Count: \d+/)
   })
 
   it('hooks observability (full lifecycle)', async () => {
@@ -172,7 +167,7 @@ describe('integration', () => {
 
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umCreate({
+    const instance = await d8umInit({
       vectorStore: adapter,
       embedding,
       hooks: { onIndexStart, onIndexComplete, onQueryResults },
@@ -181,7 +176,7 @@ describe('integration', () => {
     const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(2) })
     registerTestBucket(instance, bucket, embedding)
 
-    await instance.ingest(bucket.id, documents, indexConfig)
+    await instance.ingest(documents, indexConfig, { bucketId: bucket.id })
     expect(onIndexStart).toHaveBeenCalled()
     expect(onIndexComplete).toHaveBeenCalled()
 

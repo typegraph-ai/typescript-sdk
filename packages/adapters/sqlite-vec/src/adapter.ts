@@ -24,6 +24,17 @@ export interface SqliteVecAdapterConfig {
   bucketsTable?: string | undefined
 }
 
+/**
+ * SQLite + sqlite-vec adapter for development and testing.
+ *
+ * **Limitations vs PostgreSQL:**
+ * - No hybrid search (BM25 keyword search unavailable)
+ * - No document management (list, update, delete documents)
+ * - No context passages (searchWithDocuments)
+ * - No policy enforcement
+ *
+ * Use PostgreSQL (PgVectorAdapter) for production deployments.
+ */
 export class SqliteVecAdapter implements VectorStoreAdapter {
   readonly hashStore: SqliteHashStore
 
@@ -32,6 +43,7 @@ export class SqliteVecAdapter implements VectorStoreAdapter {
   private hashesTable: string
   private registryTable: string
   private bucketsTable: string
+  private warned = new Set<string>()
 
   /** model key → { chunksTable, vecTable } */
   private modelTables = new Map<string, { chunksTable: string; vecTable: string }>()
@@ -46,6 +58,12 @@ export class SqliteVecAdapter implements VectorStoreAdapter {
     this.bucketsTable = config.bucketsTable ?? 'd8um_buckets'
     this.registryTable = `${this.tablePrefix}_registry`
     this.hashStore = new SqliteHashStore(this.db, this.hashesTable)
+  }
+
+  private warnOnce(feature: string, message: string): void {
+    if (this.warned.has(feature)) return
+    this.warned.add(feature)
+    console.warn(`[d8um/sqlite] ${message} Use PostgreSQL (PgVectorAdapter) for full feature support.`)
   }
 
   async deploy(): Promise<void> {
@@ -384,7 +402,7 @@ function mapRowToScoredChunk(row: Record<string, unknown>): ScoredChunk {
     metadata: JSON.parse(row.metadata as string) as Record<string, unknown>,
     indexedAt: new Date(row.indexed_at as string),
     scores: {
-      vector: similarity,
+      semantic: similarity,
     },
   }
 }

@@ -10,6 +10,7 @@ export type {
   BucketListFilter,
   IndexDefaults,
   IndexConfig,
+  EmbeddingConfig,
   EmbeddingInput,
 } from './bucket.js'
 
@@ -30,13 +31,11 @@ export type {
 
 export type {
   QuerySignals,
-  d8umQuery,
   d8umResult,
   RawScores,
   NormalizedScores,
   QueryOpts,
   QueryResponse,
-  AssembleOpts,
 } from './query.js'
 
 export type {
@@ -61,7 +60,15 @@ export type { LLMProvider, LLMGenerateOptions } from './llm-provider.js'
 
 export type { d8umIdentity } from './identity.js'
 
-export type { GraphBridge } from './graph-bridge.js'
+export type {
+  GraphBridge,
+  EntityResult,
+  EntityDetail,
+  EdgeResult,
+  SubgraphOpts,
+  SubgraphResult,
+  GraphStats,
+} from './graph-bridge.js'
 
 export type { ExtractionConfig } from './extraction-config.js'
 
@@ -86,3 +93,23 @@ export type {
   PolicyViolation,
   PolicyStoreAdapter,
 } from './policy.js'
+
+export type {
+  MemoryRecord,
+  ConversationTurnResult,
+  MemoryHealthReport,
+} from './memory.js'
+
+export type { d8umLogger } from './logger.js'
+
+export type {
+  PaginationOpts,
+  PaginatedResult,
+} from './pagination.js'
+
+export type {
+  Job,
+  JobType,
+  JobStatus,
+  JobFilter,
+} from './job.js'

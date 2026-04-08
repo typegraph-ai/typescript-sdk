@@ -239,6 +239,42 @@ Respond with JSON: {"targetContent": "...", "newContent": "...", "subject": "...
     return results
   }
 
+  async recallHybrid(query: string, opts?: {
+    types?: MemoryCategory[] | undefined
+    limit?: number | undefined
+    asOf?: Date | undefined
+  }): Promise<MemoryRecord[]> {
+    const embedding = await this.embedding.embed(query)
+    const searchOpts = {
+      count: opts?.limit ?? 10,
+      filter: {
+        scope: this.scope,
+        category: opts?.types,
+      } as import('./types/adapter.js').MemoryFilter,
+      temporalAt: opts?.asOf,
+    }
+
+    // Use hybrid search if adapter supports it, otherwise fall back to vector-only
+    const results = this.store.hybridSearch
+      ? await this.store.hybridSearch(embedding, query, searchOpts)
+      : await this.store.search(embedding, searchOpts)
+
+    // Track access
+    for (const record of results) {
+      if (this.store.recordAccess) {
+        await this.store.recordAccess(record.id)
+      }
+    }
+
+    this.emit('memory.read', undefined, {
+      query: query.slice(0, 100),
+      resultCount: results.length,
+      types: opts?.types,
+      hybrid: true,
+    })
+    return results
+  }
+
   /**
    * Recall only semantic facts.
    */

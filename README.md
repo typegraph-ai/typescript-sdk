@@ -71,7 +71,7 @@ await d8um.ingest(faq.id, [{
   metadata: {},
 }], { chunkSize: 512, chunkOverlap: 64, deduplicateBy: ['content'] })
 
-// Query - vector search by default, composable signals for more retrieval systems
+// Query - semantic search by default, composable signals for more retrieval systems
 // Identity fields (tenantId, groupId, userId, agentId, conversationId) filter results
 const { results } = await d8um.query('how do I configure SSO?')
 
@@ -148,24 +148,24 @@ d8um uses **composable query signals** - the caller chooses which retrieval syst
 
 | Signal    | What It Does                                   | Default |
 | --------- | ---------------------------------------------- | ------- |
-| `vector`  | ANN vector search against chunk embeddings     | **On**  |
-| `keyword` | BM25 keyword search, fused with vector via RRF | Off     |
+| `semantic` | Semantic embedding search against chunk embeddings | **On**  |
+| `keyword`  | BM25 keyword search, fused with semantic via RRF  | Off     |
 | `graph`   | PPR graph traversal via entity embeddings      | Off     |
 | `memory`  | Cognitive memory recall (facts, episodes)      | Off     |
 
 
-Signals compose freely - any combination works. The default (`{ vector: true }`) gives fast vector-only search (~10-30ms). Add signals for richer retrieval:
+Signals compose freely - any combination works. The default (`{ semantic: true }`) gives fast semantic-only search (~10-30ms). Add signals for richer retrieval:
 
 ```ts
-// Default: fast vector search
+// Default: fast semantic search
 d.query('sso')
 
-// Vector + keyword (hybrid)
-d.query('how do I configure SSO?', { signals: { vector: true, keyword: true } })
+// Semantic + keyword (hybrid)
+d.query('how do I configure SSO?', { signals: { semantic: true, keyword: true } })
 
-// All signals: vector + keyword + graph + memory
+// All signals: semantic + keyword + graph + memory
 d.query('what did Alice say about the SSO migration?', {
-  signals: { vector: true, keyword: true, graph: true, memory: true },
+  signals: { semantic: true, keyword: true, graph: true, memory: true },
   userId: 'alice',
   tenantId: 'org1',
 })
@@ -195,7 +195,7 @@ d8um is evaluated on published academic benchmarks using the exact methodology (
 
 ### Retrieval (Core)
 
-Standard information retrieval benchmarks using vector + keyword signals (BM25 with RRF fusion). Metrics are BEIR-standard at cutoff 10.
+Standard information retrieval benchmarks using semantic + keyword signals (BM25 with RRF fusion). Metrics are BEIR-standard at cutoff 10.
 
 
 | Dataset                 | nDCG@10    | Baseline | Delta       | Source           |

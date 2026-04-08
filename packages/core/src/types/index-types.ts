@@ -1,4 +1,6 @@
 export interface IndexOpts {
+  /** Target bucket. Defaults to the system default bucket. */
+  bucketId?: string | undefined
   mode?: 'upsert' | 'replace' | undefined
   tenantId?: string | undefined
   groupId?: string | undefined
@@ -35,6 +37,8 @@ export interface IndexProgressEvent {
 }
 
 export interface IndexResult {
+  /** Job ID for tracking async operations (present in cloud mode). */
+  jobId?: string | undefined
   bucketId: string
   tenantId?: string | undefined
   mode: 'upsert' | 'replace'
@@ -49,6 +53,8 @@ export interface IndexResult {
     error: Error
   } | undefined
   durationMs: number
+  /** 'accepted' in cloud mode (async), 'complete' in self-hosted mode (sync). */
+  status?: 'accepted' | 'complete' | undefined
 }
 
 export class IndexError extends Error {

@@ -1,15 +1,18 @@
-import type { d8umInstance, d8umConfig, BucketsApi, DocumentsApi } from '../d8um.js'
-import type { Bucket, CreateBucketInput, BucketListFilter, IndexConfig } from '../types/bucket.js'
-import type { QueryOpts, QueryResponse, d8umResult, AssembleOpts } from '../types/query.js'
+import type { d8umInstance, d8umConfig, BucketsApi, DocumentsApi, JobsApi, GraphApi } from '../d8um.js'
+import type { Bucket, CreateBucketInput, BucketListFilter } from '../types/bucket.js'
+import type { QueryOpts, QueryResponse } from '../types/query.js'
 import type { IndexOpts, IndexResult } from '../types/index-types.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import type { RawDocument, Chunk } from '../types/connector.js'
 import type { d8umDocument, DocumentFilter } from '../types/d8um-document.js'
 import type { d8umIdentity } from '../types/identity.js'
 import type { CreatePolicyInput, UpdatePolicyInput, Policy, PolicyType } from '../types/policy.js'
-import type { ContextSearchOpts, ContextSearchResponse } from '../query/context-search.js'
 import type { UndeployResult } from '../types/adapter.js'
-import { assemble as assembleResults } from '../query/assemble.js'
+import type { PaginationOpts, PaginatedResult } from '../types/pagination.js'
+import type { IndexConfig } from '../types/bucket.js'
+import type { MemoryRecord, ConversationTurnResult, MemoryHealthReport } from '../types/memory.js'
+import type { Job, JobFilter } from '../types/job.js'
+import type { EntityResult, EntityDetail, EdgeResult, SubgraphOpts, SubgraphResult, GraphStats } from '../types/graph-bridge.js'
 import { DEFAULT_BUCKET_ID } from '../d8um.js'
 import { HttpClient } from './http-client.js'
 import type { CloudConfig } from './http-client.js'
@@ -40,14 +43,19 @@ export function createCloudInstance(config: CloudConfig): d8umCloudInstance {
     async get(bucketId: string): Promise<Bucket | undefined> {
       return client.get<Bucket>(`/v1/buckets/${e(bucketId)}`)
     },
-    async list(filter?: BucketListFilter): Promise<Bucket[]> {
+    async list(filter?: BucketListFilter, pagination?: PaginationOpts): Promise<Bucket[] | PaginatedResult<Bucket>> {
       const searchParams = new URLSearchParams()
       if (filter?.tenantId) searchParams.set('tenantId', filter.tenantId)
       if (filter?.groupId) searchParams.set('groupId', filter.groupId)
       if (filter?.userId) searchParams.set('userId', filter.userId)
       if (filter?.agentId) searchParams.set('agentId', filter.agentId)
       if (filter?.conversationId) searchParams.set('conversationId', filter.conversationId)
+      if (pagination?.limit != null) searchParams.set('limit', String(pagination.limit))
+      if (pagination?.offset != null) searchParams.set('offset', String(pagination.offset))
       const qs = searchParams.toString()
+      if (pagination) {
+        return client.get<PaginatedResult<Bucket>>(`/v1/buckets${qs ? `?${qs}` : ''}`)
+      }
       return client.get<Bucket[]>(`/v1/buckets${qs ? `?${qs}` : ''}`)
     },
     async update(bucketId: string, input): Promise<Bucket> {
@@ -55,6 +63,65 @@ export function createCloudInstance(config: CloudConfig): d8umCloudInstance {
     },
     async delete(bucketId: string): Promise<void> {
       await client.delete(`/v1/buckets/${e(bucketId)}`)
+    },
+  }
+
+  const documents: DocumentsApi = {
+    async get(id: string): Promise<d8umDocument | null> {
+      return client.get<d8umDocument | null>(`/v1/documents/${e(id)}`)
+    },
+    async list(filter?: DocumentFilter, pagination?: PaginationOpts): Promise<d8umDocument[] | PaginatedResult<d8umDocument>> {
+      if (pagination) {
+        return client.post<PaginatedResult<d8umDocument>>('/v1/documents/list', { ...filter, ...pagination })
+      }
+      return client.post<d8umDocument[]>('/v1/documents/list', filter)
+    },
+    async update(id: string, input): Promise<d8umDocument> {
+      return client.patch<d8umDocument>(`/v1/documents/${e(id)}`, input)
+    },
+    async delete(filter: DocumentFilter): Promise<number> {
+      return client.delete<number>('/v1/documents', filter)
+    },
+  }
+
+  const jobs: JobsApi = {
+    async get(id: string): Promise<Job | null> {
+      return client.get<Job | null>(`/v1/jobs/${e(id)}`)
+    },
+    async list(filter?: JobFilter): Promise<Job[]> {
+      return client.post<Job[]>('/v1/jobs/list', filter)
+    },
+  }
+
+  const graph: GraphApi = {
+    async searchEntities(query: string, identity: d8umIdentity, opts?: {
+      limit?: number
+      entityType?: string
+      minConnections?: number
+    }): Promise<EntityResult[]> {
+      return client.post<EntityResult[]>('/v1/graph/entities/search', { query, identity, ...opts })
+    },
+    async getEntity(id: string): Promise<EntityDetail | null> {
+      return client.get<EntityDetail | null>(`/v1/graph/entities/${e(id)}`)
+    },
+    async getEdges(entityId: string, opts?: {
+      direction?: 'in' | 'out' | 'both'
+      relation?: string
+      limit?: number
+    }): Promise<EdgeResult[]> {
+      return client.post<EdgeResult[]>(`/v1/graph/entities/${e(entityId)}/edges`, opts)
+    },
+    async getSubgraph(opts: SubgraphOpts): Promise<SubgraphResult> {
+      return client.post<SubgraphResult>('/v1/graph/subgraph', opts)
+    },
+    async stats(identity: d8umIdentity): Promise<GraphStats> {
+      return client.post<GraphStats>('/v1/graph/stats', { identity })
+    },
+    async getRelationTypes(identity: d8umIdentity): Promise<Array<{ relation: string; count: number }>> {
+      return client.post('/v1/graph/relation-types', { identity })
+    },
+    async getEntityTypes(identity: d8umIdentity): Promise<Array<{ entityType: string; count: number }>> {
+      return client.post('/v1/graph/entity-types', { identity })
     },
   }
 
@@ -72,18 +139,9 @@ export function createCloudInstance(config: CloudConfig): d8umCloudInstance {
     },
 
     buckets,
-
-    documents: {
-      async get(id: string): Promise<d8umDocument | null> {
-        return client.get<d8umDocument | null>(`/v1/documents/${e(id)}`)
-      },
-      async list(filter?: DocumentFilter): Promise<d8umDocument[]> {
-        return client.post<d8umDocument[]>('/v1/documents/list', filter)
-      },
-      async delete(filter: DocumentFilter): Promise<number> {
-        return client.delete<number>('/v1/documents', filter)
-      },
-    } satisfies DocumentsApi,
+    documents,
+    jobs,
+    graph,
 
     policies: {
       async create(input: CreatePolicyInput): Promise<Policy> {
@@ -119,73 +177,36 @@ export function createCloudInstance(config: CloudConfig): d8umCloudInstance {
       return client.post<QueryResponse>('/v1/query', { text, ...opts })
     },
 
-    async searchWithContext(text: string, opts?: ContextSearchOpts): Promise<ContextSearchResponse> {
-      return client.post<ContextSearchResponse>('/v1/search-with-context', { text, ...opts })
+    async ingest(docs: RawDocument[], indexConfig: IndexConfig, opts?: IndexOpts): Promise<IndexResult> {
+      const bucketId = opts?.bucketId || DEFAULT_BUCKET_ID
+      return client.post<IndexResult>(`/v1/buckets/${e(bucketId)}/ingest`, { docs, indexConfig, ...opts })
     },
 
-    async ingest(
-      bucketIdOrDocs: string | undefined | RawDocument[],
-      docsOrConfig?: RawDocument[] | IndexConfig,
-      indexConfigOrOpts?: IndexConfig | IndexOpts,
-      opts?: IndexOpts,
-    ): Promise<IndexResult> {
-      let resolved: string
-      let docs: RawDocument[]
-      if (Array.isArray(bucketIdOrDocs)) {
-        resolved = DEFAULT_BUCKET_ID
-        docs = bucketIdOrDocs
-      } else {
-        resolved = bucketIdOrDocs || DEFAULT_BUCKET_ID
-        docs = docsOrConfig as RawDocument[]
-      }
-      return client.post<IndexResult>(`/v1/buckets/${e(resolved)}/ingest`, { docs, ...opts })
-    },
-
-    async ingestWithChunks(
-      bucketIdOrDoc: string | undefined | RawDocument,
-      docOrChunks?: RawDocument | Chunk[],
-      chunksOrOpts?: Chunk[] | IndexOpts,
-      opts?: IndexOpts,
-    ): Promise<IndexResult> {
-      let resolved: string
-      let doc: RawDocument
-      let chunks: Chunk[]
-      if (typeof bucketIdOrDoc === 'string' || bucketIdOrDoc === undefined || bucketIdOrDoc === null) {
-        resolved = (bucketIdOrDoc as string) || DEFAULT_BUCKET_ID
-        doc = docOrChunks as RawDocument
-        chunks = chunksOrOpts as Chunk[]
-      } else {
-        resolved = DEFAULT_BUCKET_ID
-        doc = bucketIdOrDoc as RawDocument
-        chunks = docOrChunks as Chunk[]
-      }
-      return client.post<IndexResult>(`/v1/buckets/${e(resolved)}/ingest`, { doc, chunks, ...opts })
-    },
-
-    assemble(results: d8umResult[], opts?: AssembleOpts): string {
-      return assembleResults(results, opts)
+    async ingestPreChunked(doc: RawDocument, chunks: Chunk[], opts?: IndexOpts): Promise<IndexResult> {
+      const bucketId = opts?.bucketId || DEFAULT_BUCKET_ID
+      return client.post<IndexResult>(`/v1/buckets/${e(bucketId)}/ingest`, { doc, chunks, ...opts })
     },
 
     async remember(content: string, identity: d8umIdentity, category?: string, opts?: {
       importance?: number
       metadata?: Record<string, unknown>
-    }): Promise<unknown> {
-      return client.post('/v1/memory/remember', { content, identity, category, ...opts })
+    }): Promise<MemoryRecord> {
+      return client.post<MemoryRecord>('/v1/memory/remember', { content, identity, category, ...opts })
     },
 
-    async forget(id: string): Promise<void> {
-      await client.post('/v1/memory/forget', { id })
+    async forget(id: string, identity: d8umIdentity): Promise<void> {
+      await client.post('/v1/memory/forget', { id, identity })
     },
 
     async correct(correction: string, identity: d8umIdentity): Promise<{ invalidated: number; created: number; summary: string }> {
       return client.post('/v1/memory/correct', { correction, identity })
     },
 
-    async recall(query: string, identity: d8umIdentity, opts?: { limit?: number; types?: string[] }): Promise<unknown[]> {
-      return client.post<unknown[]>('/v1/memory/recall', { query, identity, ...opts })
+    async recall(query: string, identity: d8umIdentity, opts?: { limit?: number; types?: string[] }): Promise<MemoryRecord[]> {
+      return client.post<MemoryRecord[]>('/v1/memory/recall', { query, identity, ...opts })
     },
 
-    async assembleContext(query: string, identity: d8umIdentity, opts?: {
+    async buildMemoryContext(query: string, identity: d8umIdentity, opts?: {
       includeWorking?: boolean
       includeFacts?: boolean
       includeEpisodes?: boolean
@@ -193,19 +214,19 @@ export function createCloudInstance(config: CloudConfig): d8umCloudInstance {
       maxMemoryTokens?: number
       format?: 'xml' | 'markdown' | 'plain'
     }): Promise<string> {
-      return client.post<string>('/v1/memory/assemble-context', { query, identity, ...opts })
+      return client.post<string>('/v1/memory/context', { query, identity, ...opts })
     },
 
-    async healthCheck(identity: d8umIdentity): Promise<unknown> {
-      return client.post('/v1/memory/health', { identity })
+    async healthCheck(identity: d8umIdentity): Promise<MemoryHealthReport> {
+      return client.post<MemoryHealthReport>('/v1/memory/health', { identity })
     },
 
     async addConversationTurn(
       messages: Array<{ role: string; content: string; timestamp?: Date }>,
       identity: d8umIdentity,
       conversationId?: string,
-    ): Promise<unknown> {
-      return client.post('/v1/memory/conversation', { messages, identity, conversationId })
+    ): Promise<ConversationTurnResult> {
+      return client.post<ConversationTurnResult>('/v1/memory/conversation', { messages, identity, conversationId })
     },
 
     async destroy(): Promise<void> {

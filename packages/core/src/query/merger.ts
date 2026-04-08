@@ -6,7 +6,7 @@ export interface NormalizedResult {
   content: string
   bucketId: string
   documentId: string
-  rawScores: { vector?: number | undefined; keyword?: number | undefined; rrf?: number | undefined; liveRelevance?: number | undefined; memory?: number | undefined; graph?: number | undefined }
+  rawScores: { semantic?: number | undefined; keyword?: number | undefined; rrf?: number | undefined; liveRelevance?: number | undefined; memory?: number | undefined; graph?: number | undefined; memorySimilarity?: number | undefined; memoryImportance?: number | undefined; memoryRecency?: number | undefined }
   normalizedScore: number
   mode: 'indexed' | 'live' | 'cached' | 'memory' | 'graph'
   metadata: Record<string, unknown>
@@ -60,13 +60,26 @@ export function normalizePPR(pprScore: number, dampingFactor = 0.35): number {
   return Math.min(pprScore / dampingFactor, 1.0)
 }
 
-/** RRF weights by internal runner mode (used for inter-runner rank fusion). */
-const RRF_WEIGHTS: Record<string, number> = {
+/** Default RRF weights by internal runner mode. */
+const DEFAULT_RRF_WEIGHTS: Record<string, number> = {
   indexed: 0.5,
   live: 0.1,
   cached: 0.1,
   memory: 0.2,
   graph: 0.15,
+}
+
+/** Derive RRF weights from user's score weights.
+ *  Maps score categories to runner modes proportionally. */
+function deriveRRFWeights(scoreWeights?: Partial<Record<string, number>>): Record<string, number> {
+  if (!scoreWeights || Object.keys(scoreWeights).length === 0) return DEFAULT_RRF_WEIGHTS
+  return {
+    indexed: (scoreWeights.semantic ?? 0.5) + (scoreWeights.keyword ?? 0),
+    memory: scoreWeights.memory ?? 0.2,
+    graph: scoreWeights.graph ?? 0.15,
+    live: 0.1,
+    cached: 0.1,
+  }
 }
 
 export function mergeAndRank(
@@ -77,13 +90,14 @@ export function mergeAndRank(
   scoreWeights?: Partial<Record<'rrf' | 'semantic' | 'keyword' | 'graph' | 'memory', number>>
 ): NormalizedResult[] {
   const numLists = runnerResults.length
+  const rrfWeights = weights ?? deriveRRFWeights(scoreWeights)
 
   // Compute theoretical max RRF from actual runner weights (not numLists which assumes weight=1).
   // Each runner's weight comes from the mode of its first result.
   const k = 60
   const sumOfWeights = runnerResults.reduce((sum, results) => {
     const mode = results[0]?.mode
-    return sum + ((weights ?? RRF_WEIGHTS)[mode ?? 'indexed'] ?? 0.5)
+    return sum + (rrfWeights[mode ?? 'indexed'] ?? 0.5)
   }, 0)
   const theoreticalMaxRRF = sumOfWeights / (k + 1)
 
@@ -100,12 +114,12 @@ export function mergeAndRank(
   }
 
   // Default signals if not provided (all active — preserves legacy behavior)
-  const resolvedSignals: Required<QuerySignals> = signals ?? { vector: true, keyword: true, graph: true, memory: true }
+  const resolvedSignals: Required<QuerySignals> = signals ?? { semantic: true, keyword: true, graph: true, memory: true }
 
   const merged = Array.from(groups.values()).map(group => {
     // Weighted RRF across runners
     const rrfScore = group.reduce((sum, r) => {
-      const weight = (weights ?? RRF_WEIGHTS)[r.mode] ?? 0.5
+      const weight = rrfWeights[r.mode] ?? 0.5
       return sum + weight * (1 / (60 + r.runnerRank))
     }, 0)
 
@@ -124,15 +138,25 @@ export function mergeAndRank(
 
     // Compute normalized composite score using shared function.
     // Normalize RRF by the weight-corrected theoretical max (not numLists).
-    // No additional attenuation — the raw RRF already reflects how many runners
-    // contributed (fewer runners = lower raw RRF = lower normalized score).
     const nRRF = theoreticalMaxRRF > 0 ? Math.min(rrfScore / theoreticalMaxRRF, 1) : 0
+    const hasMemory = modes.has('memory')
+    const hasGraph = modes.has('graph')
+    const hasIndexed = modes.has('indexed')
+
+    // Use undefined for ineligible categories (weight redistributes),
+    // 0 for eligible-but-scored-poorly (penalizes).
     const normalizedScores: NormalizedScores = {
       rrf: nRRF,
-      semantic: aggregatedScores.vector ?? 0,
-      keyword: aggregatedScores.keyword ?? 0,
-      graph: normalizePPR(aggregatedScores.graph ?? 0),
-      memory: aggregatedScores.memory ?? 0,
+      semantic: aggregatedScores.semantic != null ? aggregatedScores.semantic
+        : (hasMemory && aggregatedScores.memorySimilarity != null) ? aggregatedScores.memorySimilarity
+        : (hasIndexed ? 0 : undefined),
+      keyword: aggregatedScores.keyword != null ? aggregatedScores.keyword : (resolvedSignals.keyword ? 0 : undefined),
+      graph: hasGraph || aggregatedScores.graph != null
+        ? normalizePPR(aggregatedScores.graph ?? 0)
+        : undefined,
+      memory: hasMemory
+        ? Math.min(Math.max(aggregatedScores.memory ?? 0, 0), 1)
+        : undefined,
     }
     const compositeScore = computeCompositeScore(normalizedScores, resolvedSignals, scoreWeights)
 
@@ -146,6 +170,6 @@ export function mergeAndRank(
   })
 
   return merged
-    .sort((a, b) => b.compositeScore - a.compositeScore)
+    .sort((a, b) => b.compositeScore - a.compositeScore || b.finalScore - a.finalScore)
     .slice(0, count)
 }

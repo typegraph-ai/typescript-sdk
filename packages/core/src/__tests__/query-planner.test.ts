@@ -57,7 +57,7 @@ describe('QueryPlanner', () => {
     const planner = new QueryPlanner(adapter, bucketIds, bucketEmbeddings)
     const response = await planner.execute('test', { buckets: ['src-1'] })
     for (const r of response.results) {
-      expect(r.bucket.id).toBe('src-1')
+      expect(r.document.bucketId).toBe('src-1')
     }
   })
 
@@ -88,12 +88,19 @@ describe('QueryPlanner', () => {
     expect(result).toHaveProperty('content')
     expect(result).toHaveProperty('score')
     expect(result).toHaveProperty('scores')
-    expect(result).toHaveProperty('bucket')
+    expect(result).toHaveProperty('document')
     expect(result).toHaveProperty('chunk')
     expect(result).toHaveProperty('metadata')
-    expect(result.bucket).toHaveProperty('id')
-    expect(result.bucket).toHaveProperty('documentId')
+    expect(result.document).toHaveProperty('id')
+    expect(result.document).toHaveProperty('bucketId')
     expect(result.chunk).toHaveProperty('index')
     expect(result.chunk).toHaveProperty('total')
+  })
+
+  it('uses "semantic" source label for indexed results', async () => {
+    const planner = new QueryPlanner(adapter, bucketIds, bucketEmbeddings)
+    const response = await planner.execute('Document 1')
+    const result = response.results[0]!
+    expect(result.sources).toContain('semantic')
   })
 })

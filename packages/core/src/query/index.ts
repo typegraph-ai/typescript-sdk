@@ -1,8 +1,6 @@
 export { QueryPlanner, resolveSignals, signalLabel, computeCompositeScore } from './planner.js'
-export { classifyQuery } from './classifier.js'
+export { classifyQuery, type QueryClassification, type QueryType } from './classifier.js'
 export { mergeAndRank, minMaxNormalize, dedupKey, normalizeRRF, normalizePPR } from './merger.js'
 export type { NormalizedResult } from './merger.js'
-export { assemble } from './assemble.js'
+// assemble is internal — users access formatting via opts.format on query()
 export { IndexedRunner } from './runners/indexed.js'
-export { searchWithContext } from './context-search.js'
-export type { ContextSearchOpts, ContextPassage, ContextSearchResponse } from './context-search.js'

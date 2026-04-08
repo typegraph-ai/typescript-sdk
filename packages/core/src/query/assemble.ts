@@ -1,5 +1,9 @@
 import type { d8umResult } from '../types/query.js'
-import type { AssembleOpts } from '../types/query.js'
+
+export interface AssembleOpts {
+  format?: 'xml' | 'markdown' | 'plain' | ((results: d8umResult[]) => string)
+  citeBuckets?: boolean
+}
 
 export function assemble(results: d8umResult[], opts: AssembleOpts = {}): string {
   const {
@@ -7,18 +11,13 @@ export function assemble(results: d8umResult[], opts: AssembleOpts = {}): string
     citeBuckets = true,
   } = opts
 
-  // TODO: implement neighbor joining - stitch adjacent chunks into passages
-  // TODO: implement token budget trimming
-
-  const trimmed = results
-
-  if (typeof format === 'function') return format(trimmed)
+  if (typeof format === 'function') return format(results)
 
   switch (format) {
-    case 'xml':  return assembleXml(trimmed, { citeBuckets })
-    case 'markdown': return assembleMarkdown(trimmed, { citeBuckets })
-    case 'plain': return assemblePlain(trimmed)
-    default: return assembleXml(trimmed, { citeBuckets })
+    case 'xml':  return assembleXml(results, { citeBuckets })
+    case 'markdown': return assembleMarkdown(results, { citeBuckets })
+    case 'plain': return assemblePlain(results)
+    default: return assembleXml(results, { citeBuckets })
   }
 }
 
@@ -28,8 +27,8 @@ export function assembleXml(results: d8umResult[], _opts: { citeBuckets: boolean
     const first = chunks[0]!
     const attrs = [
       `id="${bucketId}"`,
-      first.bucket.title ? `title="${escapeXml(first.bucket.title)}"` : '',
-      first.bucket.url ? `url="${escapeXml(first.bucket.url)}"` : '',
+      first.document.title ? `title="${escapeXml(first.document.title)}"` : '',
+      first.document.url ? `url="${escapeXml(first.document.url)}"` : '',
     ].filter(Boolean).join(' ')
 
     const passages = chunks.map(c =>
@@ -44,9 +43,9 @@ export function assembleXml(results: d8umResult[], _opts: { citeBuckets: boolean
 
 export function assembleMarkdown(results: d8umResult[], _opts: { citeBuckets: boolean }): string {
   return results.map(r => {
-    const title = r.bucket.title
-    const url = r.bucket.url
-    const heading = url ? `# (${title})[${url}]` : `# ${title}`
+    const title = r.document.title
+    const url = r.document.url
+    const heading = url ? `# [${title}](${url})` : `# ${title}`
     return `${heading}\n${r.content}`
   }).join('\n\n---\n\n')
 }
@@ -57,7 +56,7 @@ export function assemblePlain(results: d8umResult[]): string {
 
 export function groupByBucketId(results: d8umResult[]): Record<string, d8umResult[]> {
   return results.reduce((acc, r) => {
-    const key = r.bucket.id
+    const key = r.document.bucketId
     ;(acc[key] = acc[key] ?? []).push(r)
     return acc
   }, {} as Record<string, d8umResult[]>)
