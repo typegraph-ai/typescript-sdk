@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="d8um-badge.png" alt="d8um" width="250" />
+  <img src="typegraph-logo-dark.png" alt="TypeGraph" width="250" />
 </p>
 
 <div align="center">
