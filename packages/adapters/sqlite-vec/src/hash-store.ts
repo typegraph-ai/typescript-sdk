@@ -1,4 +1,4 @@
-import type { HashStoreAdapter, HashRecord } from '@d8um-ai/core'
+import type { HashStoreAdapter, HashRecord } from '@typegraph-ai/core'
 import type Database from 'better-sqlite3'
 
 function mapRow(row: Record<string, unknown>): HashRecord {

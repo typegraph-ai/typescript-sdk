@@ -1,9 +1,9 @@
-import type { PolicyStoreAdapter, Policy, CreatePolicyInput, UpdatePolicyInput, PolicyType } from '@d8um-ai/core'
+import type { PolicyStoreAdapter, Policy, CreatePolicyInput, UpdatePolicyInput, PolicyType } from '@typegraph-ai/core'
 import type { SqlExecutor } from './adapter.js'
 
 export interface PgPolicyStoreConfig {
   sql: SqlExecutor
-  /** Schema-qualified table name, e.g. '"cust_abc".d8um_policies' */
+  /** Schema-qualified table name, e.g. '"cust_abc".typegraph_policies' */
   policiesTable?: string
 }
 
@@ -13,7 +13,7 @@ export class PgPolicyStore implements PolicyStoreAdapter {
 
   constructor(config: PgPolicyStoreConfig) {
     this.sql = config.sql
-    this.table = config.policiesTable ?? 'd8um_policies'
+    this.table = config.policiesTable ?? 'typegraph_policies'
   }
 
   async createPolicy(input: CreatePolicyInput): Promise<Policy> {

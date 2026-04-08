@@ -1,4 +1,4 @@
-import type { d8umIdentity } from './identity.js'
+import type { typegraphIdentity } from './identity.js'
 import type { IndexResult } from './index-types.js'
 import type { MemoryRecord, ConversationTurnResult } from './memory.js'
 
@@ -11,7 +11,7 @@ export interface Job {
   status: JobStatus
   type: JobType
   bucketId?: string | undefined
-  identity?: d8umIdentity | undefined
+  identity?: typegraphIdentity | undefined
   /** Populated on completion. Shape depends on `type`. */
   result?: IndexResult | MemoryRecord | ConversationTurnResult | undefined
   /** Error message if status is 'failed'. */
@@ -25,5 +25,5 @@ export interface JobFilter {
   bucketId?: string | undefined
   status?: JobStatus | undefined
   type?: JobType | undefined
-  identity?: d8umIdentity | undefined
+  identity?: typegraphIdentity | undefined
 }

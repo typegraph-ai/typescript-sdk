@@ -17,13 +17,13 @@ export interface ExtractionConfig {
 
   /**
    * LLM for entity extraction (Pass 1 in two-pass mode) or the single combined call.
-   * Falls back to the main `d8umConfig.llm` if not provided.
+   * Falls back to the main `typegraphConfig.llm` if not provided.
    */
   entityLlm?: LLMProvider | undefined
 
   /**
    * LLM for relationship extraction (Pass 2 in two-pass mode).
-   * Only used when `twoPass: true`. Falls back to `entityLlm`, then `d8umConfig.llm`.
+   * Only used when `twoPass: true`. Falls back to `entityLlm`, then `typegraphConfig.llm`.
    */
   relationshipLlm?: LLMProvider | undefined
 }

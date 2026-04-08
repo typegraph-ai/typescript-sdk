@@ -29,7 +29,7 @@ importers:
 
   benchmarks-cloud:
     dependencies:
-      '@d8um-ai/core':
+      '@typegraph-ai/core':
         specifier: workspace:*
         version: link:../packages/core
       '@vercel/blob':
@@ -45,7 +45,7 @@ importers:
 
   packages/adapters/pgvector:
     dependencies:
-      '@d8um-ai/core':
+      '@typegraph-ai/core':
         specifier: workspace:*
         version: link:../../core
     devDependencies:
@@ -55,7 +55,7 @@ importers:
 
   packages/adapters/sqlite-vec:
     dependencies:
-      '@d8um-ai/core':
+      '@typegraph-ai/core':
         specifier: workspace:*
         version: link:../../core
       better-sqlite3:
@@ -96,7 +96,7 @@ importers:
 
   packages/graph:
     dependencies:
-      '@d8um-ai/core':
+      '@typegraph-ai/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -109,7 +109,7 @@ importers:
 
   packages/mcp-server:
     dependencies:
-      '@d8um-ai/graph':
+      '@typegraph-ai/graph':
         specifier: workspace:*
         version: link:../graph
     devDependencies:
@@ -122,7 +122,7 @@ importers:
 
   packages/otel:
     dependencies:
-      '@d8um-ai/core':
+      '@typegraph-ai/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -135,7 +135,7 @@ importers:
 
   packages/vercel-ai-provider:
     dependencies:
-      '@d8um-ai/graph':
+      '@typegraph-ai/graph':
         specifier: workspace:*
         version: link:../graph
     devDependencies:

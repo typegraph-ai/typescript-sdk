@@ -1,7 +1,7 @@
-import type { d8umDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput, PaginationOpts, PaginatedResult } from '@d8um-ai/core'
+import type { typegraphDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput, PaginationOpts, PaginatedResult } from '@typegraph-ai/core'
 import type { SqlExecutor } from './adapter.js'
 
-function mapDocRow(row: Record<string, unknown>): d8umDocument {
+function mapDocRow(row: Record<string, unknown>): typegraphDocument {
   return {
     id: row.id as string,
     bucketId: row.bucket_id as string,
@@ -14,8 +14,8 @@ function mapDocRow(row: Record<string, unknown>): d8umDocument {
     url: (row.url as string) ?? undefined,
     contentHash: row.content_hash as string,
     chunkCount: row.chunk_count as number,
-    status: row.status as d8umDocument['status'],
-    visibility: (row.visibility as d8umDocument['visibility']) ?? undefined,
+    status: row.status as typegraphDocument['status'],
+    visibility: (row.visibility as typegraphDocument['visibility']) ?? undefined,
     documentType: (row.document_type as string) ?? undefined,
     sourceType: (row.source_type as string) ?? undefined,
     indexedAt: new Date(row.indexed_at as string),
@@ -31,7 +31,7 @@ export class PgDocumentStore {
     private tableName: string
   ) {}
 
-  async upsert(input: UpsertDocumentInput): Promise<d8umDocument> {
+  async upsert(input: UpsertDocumentInput): Promise<typegraphDocument> {
     const rows = await this.sql(
       `INSERT INTO ${this.tableName}
         (id, bucket_id, tenant_id, group_id, user_id, agent_id, conversation_id,
@@ -77,7 +77,7 @@ export class PgDocumentStore {
     return mapDocRow(rows[0]!)
   }
 
-  async get(id: string): Promise<d8umDocument | null> {
+  async get(id: string): Promise<typegraphDocument | null> {
     const rows = await this.sql(
       `SELECT * FROM ${this.tableName} WHERE id = $1`,
       [id]
@@ -86,7 +86,7 @@ export class PgDocumentStore {
     return mapDocRow(rows[0]!)
   }
 
-  async list(filter: DocumentFilter, pagination?: PaginationOpts): Promise<d8umDocument[] | PaginatedResult<d8umDocument>> {
+  async list(filter: DocumentFilter, pagination?: PaginationOpts): Promise<typegraphDocument[] | PaginatedResult<typegraphDocument>> {
     const { where, params } = buildDocWhere(filter)
     const filterClause = where ? `WHERE ${where}` : ''
 
@@ -122,7 +122,7 @@ export class PgDocumentStore {
     return { count: rows.length, ids: rows.map(r => r.id as string) }
   }
 
-  async update(id: string, input: Partial<Pick<d8umDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<d8umDocument | null> {
+  async update(id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<typegraphDocument | null> {
     const setClauses: string[] = ['updated_at = NOW()']
     const params: unknown[] = []
     if (input.title !== undefined) { params.push(input.title); setClauses.push(`title = $${params.length}`) }

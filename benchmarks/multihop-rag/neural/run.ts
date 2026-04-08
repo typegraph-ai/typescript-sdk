@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * MultiHop-RAG Benchmark — d8um Neural (Hybrid + Graph PPR)
+ * MultiHop-RAG Benchmark — typegraph Neural (Hybrid + Graph PPR)
  *
  * Multi-hop QA over 609 news articles, ~2556 queries.
  * Single unified eval loop: retrieve → compute IR metrics → generate answer → score.
@@ -42,7 +42,7 @@ async function main() {
   printBanner(config, cli)
 
   // Phase 1: Initialize
-  console.log('Phase 1: Initializing d8um with graph bridge...')
+  console.log('Phase 1: Initializing typegraph with graph bridge...')
   console.log(`  LLM: ${LLM_MODEL} (triple extraction during ingest)`)
   const { d, adapter } = await initNeural(config)
   const { bucket } = await resolveBucket(d, config.bucketName, cli.shouldSeed)

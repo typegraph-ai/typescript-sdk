@@ -1,4 +1,4 @@
-import type { d8umIdentity } from '@d8um-ai/core'
+import type { typegraphIdentity } from '@typegraph-ai/core'
 import type { SemanticFact } from '../types/memory.js'
 import type { MemoryStoreAdapter } from '../types/adapter.js'
 import type { LLMProvider } from './llm-provider.js'
@@ -40,7 +40,7 @@ export class InvalidationEngine {
    */
   async checkContradictions(
     newFact: SemanticFact,
-    scope: d8umIdentity,
+    scope: typegraphIdentity,
   ): Promise<Contradiction[]> {
     // Search for semantically similar existing facts
     const existingFacts = await this.findRelatedFacts(newFact, scope)
@@ -104,7 +104,7 @@ export class InvalidationEngine {
    */
   private async findRelatedFacts(
     newFact: SemanticFact,
-    scope: d8umIdentity,
+    scope: typegraphIdentity,
   ): Promise<SemanticFact[]> {
     // Search by embedding similarity if available
     if (newFact.embedding) {

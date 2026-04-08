@@ -81,7 +81,7 @@ describe('QueryPlanner', () => {
     expect(response.query.tenantId).toBe('tenant-1')
   })
 
-  it('maps results to d8umResult shape', async () => {
+  it('maps results to typegraphResult shape', async () => {
     const planner = new QueryPlanner(adapter, bucketIds, bucketEmbeddings)
     const response = await planner.execute('Document 1')
     const result = response.results[0]!

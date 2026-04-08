@@ -2,7 +2,7 @@
 /**
  * seed.ts — Cloud benchmark seeder
  *
- * Seeds a d8um cloud instance with a benchmark corpus via the hosted API.
+ * Seeds a typegraph cloud instance with a benchmark corpus via the hosted API.
  * Uses the SDK in cloud mode (apiKey) — no local DB, adapters, or graph packages.
  *
  * Usage:
@@ -14,15 +14,15 @@
  *   npx tsx --env-file=.env seed.ts graphrag-bench-medical
  *
  * Required env vars:
- *   D8UM_API_KEY          — SDK key for the cloud account
+ *   TYPEGRAPH_API_KEY          — SDK key for the cloud account
  *   BLOB_READ_WRITE_TOKEN — Vercel Blob token (for loading corpus data)
  *
  * Optional:
- *   D8UM_BASE_URL         — Override cloud API base URL (default: https://api.d8um.dev)
+ *   TYPEGRAPH_BASE_URL         — Override cloud API base URL (default: https://api.typegraph.dev)
  */
 
-import { d8umCreate } from '@d8um-ai/core'
-import type { RawDocument } from '@d8um-ai/core'
+import { typegraphCreate } from '@typegraph-ai/core'
+import type { RawDocument } from '@typegraph-ai/core'
 import { getCloudConfig, BATCH_SIZE, CLOUD_DATASETS } from './lib/config.js'
 import { loadCorpus, loadBlobDirect } from './lib/datasets.js'
 import type { BeirCorpusRow } from './lib/datasets.js'
@@ -40,9 +40,9 @@ const config = getCloudConfig(datasetName)
 
 // ── Env validation ──
 
-const apiKey = process.env.D8UM_API_KEY
+const apiKey = process.env.TYPEGRAPH_API_KEY
 if (!apiKey) {
-  console.error('Error: D8UM_API_KEY env var is required.')
+  console.error('Error: TYPEGRAPH_API_KEY env var is required.')
   process.exit(1)
 }
 if (!process.env.BLOB_READ_WRITE_TOKEN) {
@@ -54,7 +54,7 @@ if (!process.env.BLOB_READ_WRITE_TOKEN) {
 
 async function main() {
   const totalStart = performance.now()
-  const baseUrl = process.env.D8UM_BASE_URL || 'https://api.d8um.dev'
+  const baseUrl = process.env.TYPEGRAPH_BASE_URL || 'https://api.typegraph.dev'
 
   console.log('╔══════════════════════════════════════════════════════════════╗')
   console.log(`║  Cloud Seed: ${config.displayName}`.padEnd(63) + '║')
@@ -62,8 +62,8 @@ async function main() {
   console.log()
 
   // Phase 1: Connect to cloud
-  console.log('Phase 1: Connecting to d8um cloud...')
-  const d = await d8umCreate({
+  console.log('Phase 1: Connecting to typegraph cloud...')
+  const d = await typegraphCreate({
     apiKey,
     baseUrl,
     timeout: 120_000,

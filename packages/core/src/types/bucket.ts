@@ -33,7 +33,7 @@ export interface IndexDefaults {
   chunkSize?: number | undefined
   chunkOverlap?: number | undefined
   deduplicateBy?: string[] | undefined
-  visibility?: import('./d8um-document.js').Visibility | undefined
+  visibility?: import('./typegraph-document.js').Visibility | undefined
   stripMarkdownForEmbedding?: boolean | undefined
   propagateMetadata?: string[] | undefined
 }
@@ -79,5 +79,5 @@ export interface IndexConfig extends ChunkOpts {
   /** App-specific source type applied to all documents from this bucket (e.g. 'upload', 'web_scrape'). */
   sourceType?: string | undefined
   /** Access visibility for all documents from this bucket. */
-  visibility?: import('./d8um-document.js').Visibility | undefined
+  visibility?: import('./typegraph-document.js').Visibility | undefined
 }

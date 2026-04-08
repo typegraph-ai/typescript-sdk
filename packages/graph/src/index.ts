@@ -41,11 +41,11 @@ export type { WorkingMemoryItem, WorkingMemoryConfig } from './working-memory.js
 
 // ── Events ──
 
-export type { d8umEvent, d8umEventType, d8umEventSink } from '@d8um-ai/core'
+export type { typegraphEvent, typegraphEventType, typegraphEventSink } from '@typegraph-ai/core'
 
 // ── Extraction ──
 
-export type { LLMProvider } from '@d8um-ai/core'
+export type { LLMProvider } from '@typegraph-ai/core'
 export { MemoryExtractor } from './extraction/index.js'
 export type {
   ConversationMessage,
@@ -95,8 +95,8 @@ export type { PgMemoryAdapterConfig } from './adapters/pgvector.js'
 
 // ── Unified API ──
 
-export { d8umMemory } from './d8um-memory.js'
-export type { d8umMemoryConfig, MemoryHealthReport } from './d8um-memory.js'
+export { TypegraphMemory } from './typegraph-memory.js'
+export type { typegraphMemoryConfig, MemoryHealthReport } from './typegraph-memory.js'
 
 // ── Graph Bridge ──
 

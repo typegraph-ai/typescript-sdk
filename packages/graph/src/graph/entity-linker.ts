@@ -1,8 +1,8 @@
-import type { d8umIdentity } from '@d8um-ai/core'
-import type { EmbeddingProvider } from '@d8um-ai/core'
+import type { typegraphIdentity } from '@typegraph-ai/core'
+import type { EmbeddingProvider } from '@typegraph-ai/core'
 import type { MemoryStoreAdapter } from '../types/adapter.js'
 import type { SemanticEntity, SemanticEdge } from '../types/memory.js'
-import { generateId } from '@d8um-ai/core'
+import { generateId } from '@typegraph-ai/core'
 
 export interface EntityLinkerConfig {
   embedding: EmbeddingProvider
@@ -35,7 +35,7 @@ export class EntityLinker {
   /**
    * Scan entities across buckets and create SYNONYM edges where similarity exceeds threshold.
    */
-  async linkAcrossBuckets(identity: d8umIdentity): Promise<EntityLinkResult> {
+  async linkAcrossBuckets(identity: typegraphIdentity): Promise<EntityLinkResult> {
     if (!this.store.searchEntities || !this.store.upsertEdge) {
       return { synonymEdgesCreated: 0, entitiesScanned: 0 }
     }

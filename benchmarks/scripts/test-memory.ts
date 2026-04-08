@@ -17,8 +17,8 @@
  */
 
 import { neon } from '@neondatabase/serverless'
-import { PgMemoryStoreAdapter, createGraphBridge } from '@d8um-ai/graph'
-import type { d8umIdentity } from '@d8um-ai/core'
+import { PgMemoryStoreAdapter, createGraphBridge } from '@typegraph-ai/graph'
+import type { typegraphIdentity } from '@typegraph-ai/core'
 
 // ── Config ──
 
@@ -36,10 +36,10 @@ console.log(`   Schema: ${testSchema}\n`)
 
 // ── Test Identities ──
 
-const alice: d8umIdentity = { tenantId: 'acme-corp', userId: 'alice' }
-const bob: d8umIdentity = { tenantId: 'acme-corp', userId: 'bob' }
-const carol: d8umIdentity = { tenantId: 'globex', userId: 'carol' }
-const dave: d8umIdentity = { tenantId: 'globex', userId: 'dave', groupId: 'engineering' }
+const alice: typegraphIdentity = { tenantId: 'acme-corp', userId: 'alice' }
+const bob: typegraphIdentity = { tenantId: 'acme-corp', userId: 'bob' }
+const carol: typegraphIdentity = { tenantId: 'globex', userId: 'carol' }
+const dave: typegraphIdentity = { tenantId: 'globex', userId: 'dave', groupId: 'engineering' }
 
 // ── Helpers ──
 
@@ -119,9 +119,9 @@ async function main() {
     ORDER BY table_name
   `
   const tableNames = tables.map((r: any) => r.table_name)
-  assert(tableNames.includes('d8um_memories'), 'memories table created')
-  assert(tableNames.includes('d8um_semantic_entities'), 'entities table created')
-  assert(tableNames.includes('d8um_semantic_edges'), 'edges table created')
+  assert(tableNames.includes('typegraph_memories'), 'memories table created')
+  assert(tableNames.includes('typegraph_semantic_entities'), 'entities table created')
+  assert(tableNames.includes('typegraph_semantic_edges'), 'edges table created')
 
   // Verify indexes exist
   const indexes = await sql`

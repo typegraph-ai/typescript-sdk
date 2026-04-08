@@ -7,7 +7,7 @@ export interface IndexOpts {
   userId?: string | undefined
   agentId?: string | undefined
   conversationId?: string | undefined
-  visibility?: import('./d8um-document.js').Visibility | undefined
+  visibility?: import('./typegraph-document.js').Visibility | undefined
   removeDeleted?: boolean | undefined
   dryRun?: boolean | undefined
   onProgress?: ((event: IndexProgressEvent) => void) | undefined

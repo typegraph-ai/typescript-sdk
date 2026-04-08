@@ -23,7 +23,7 @@ export interface AISDKLanguageModel {
 }
 
 /**
- * Configuration for using an AI SDK language model with d8um.
+ * Configuration for using an AI SDK language model with typegraph.
  *
  * @example
  * ```ts
@@ -39,7 +39,7 @@ export interface AISDKLLMInput {
 }
 
 /**
- * Wraps an AI SDK language model into d8um's LLMProvider interface.
+ * Wraps an AI SDK language model into typegraph's LLMProvider interface.
  * Calls `model.doGenerate()` directly - no dependency on the `ai` core package.
  */
 export function aiSdkLlmProvider(config: AISDKLLMInput): LLMProvider {

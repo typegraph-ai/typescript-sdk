@@ -1,6 +1,6 @@
-# NFCorpus Benchmark — d8um Graph (Neural Search)
+# NFCorpus Benchmark — TypeGraph Graph (Neural Search)
 
-Run the full [BEIR NFCorpus](https://www.nfcorpus.org/) benchmark against d8um using neural search — hybrid retrieval augmented with memory recall and Personalized PageRank (PPR) graph traversal over an automatically-constructed knowledge graph.
+Run the full [BEIR NFCorpus](https://www.nfcorpus.org/) benchmark against TypeGraph using neural search — hybrid retrieval augmented with memory recall and Personalized PageRank (PPR) graph traversal over an automatically-constructed knowledge graph.
 
 ## What You'll Measure
 
@@ -36,7 +36,7 @@ Results from all three are merged via **Reciprocal Rank Fusion (RRF)**.
 
 ### How the Knowledge Graph Gets Built
 
-During ingestion, when both `llm` and `graph` are configured, d8um's `TripleExtractor` automatically:
+During ingestion, when both `llm` and `graph` are configured, TypeGraph's `TripleExtractor` automatically:
 
 1. Sends each chunk to the LLM to extract Subject-Predicate-Object triples
 2. Calls `graph.addTriple()` for each triple
@@ -64,7 +64,7 @@ NFCorpus (NeurIPS 2021, part of BEIR) is the smallest benchmark in the BEIR suit
 ```bash
 mkdir nfcorpus-benchmark && cd nfcorpus-benchmark
 npm init -y
-npm install @d8um-ai/core @d8um-ai/adapter-sqlite-vec @d8um-ai/graph @ai-sdk/gateway ai
+npm install @typegraph-ai/core @typegraph-ai/adapter-sqlite-vec @typegraph-ai/graph @ai-sdk/gateway ai
 ```
 
 Set your API key:
@@ -77,12 +77,12 @@ export AI_GATEWAY_API_KEY=your-key-here
 
 The script (`run-neural.ts`) runs through 7 phases:
 
-### Phase 1: Initialize d8um with Graph Bridge
+### Phase 1: Initialize TypeGraph with Graph Bridge
 
 ```typescript
-import { d8umCreate } from '@d8um-ai/core'
-import { SqliteVecAdapter } from '@d8um-ai/adapter-sqlite-vec'
-import { createGraphBridge } from '@d8um-ai/graph'
+import { typegraphCreate } from '@typegraph-ai/core'
+import { SqliteVecAdapter } from '@typegraph-ai/adapter-sqlite-vec'
+import { createGraphBridge } from '@typegraph-ai/graph'
 import { gateway } from '@ai-sdk/gateway'
 import { generateText } from 'ai'
 
@@ -96,7 +96,7 @@ const graph = createGraphBridge({
   scope: { agentId: 'nfcorpus-benchmark' },
 })
 
-const d = await d8umCreate({
+const d = await typegraphCreate({
   vectorStore: adapter,
   embedding: { model: gateway.embeddingModel('openai/text-embedding-3-small'), dimensions: 1536 },
   llm,
@@ -110,7 +110,7 @@ Key difference from core: the `llm` and `graph` fields are provided. This activa
 
 #### The LLM Provider
 
-The script wraps Vercel AI Gateway's `generateText` into d8um's `LLMProvider` interface:
+The script wraps Vercel AI Gateway's `generateText` into TypeGraph's `LLMProvider` interface:
 
 ```typescript
 function createLLMProvider() {
@@ -130,8 +130,8 @@ function createLLMProvider() {
 
 #### The Graph Bridge
 
-`createGraphBridge` from `@d8um-ai/graph` composes:
-- **d8umMemory** — semantic memory recall (the 5 required `GraphBridge` methods)
+`createGraphBridge` from `@typegraph-ai/graph` composes:
+- **typegraphMemory** — semantic memory recall (the 5 required `GraphBridge` methods)
 - **EmbeddedGraph** — entity/edge CRUD and graph traversal
 - **EntityResolver** — entity deduplication (alias matching + vector similarity)
 
@@ -154,7 +154,7 @@ await d.ingest(bucket.id, [{ ... }], { chunkSize: 512, chunkOverlap: 64, dedupli
 ```
 
 Behind the scenes, for each chunk:
-1. d8um embeds the chunk (same as core)
+1. TypeGraph embeds the chunk (same as core)
 2. `TripleExtractor` sends the chunk to Gemini 3.1 Flash Lite
 3. LLM returns S-P-O triples like: `("Vitamin D", "prevents", "osteoporosis")`
 4. `graph.addTriple()` resolves entities and creates edges
@@ -199,7 +199,7 @@ Expected runtime: longer than core due to LLM triple extraction during ingestion
 
 ```
 ══════════════════════════════════════════════════════
-  NFCorpus Benchmark — d8um Graph (Neural Search)
+  NFCorpus Benchmark — TypeGraph Graph (Neural Search)
 ══════════════════════════════════════════════════════
 
   Corpus:        3,633 documents ingested

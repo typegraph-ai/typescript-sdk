@@ -1,10 +1,10 @@
-import type { d8umIdentity } from '@d8um-ai/core'
+import type { typegraphIdentity } from '@typegraph-ai/core'
 
 /**
  * Build an identity from partial parts. At least one identifier is required.
  */
-export function buildScope(parts: Partial<d8umIdentity>): d8umIdentity {
-  const scope: d8umIdentity = {}
+export function buildScope(parts: Partial<typegraphIdentity>): typegraphIdentity {
+  const scope: typegraphIdentity = {}
   if (parts.tenantId !== undefined) scope.tenantId = parts.tenantId
   if (parts.groupId !== undefined) scope.groupId = parts.groupId
   if (parts.userId !== undefined) scope.userId = parts.userId
@@ -21,7 +21,7 @@ export function buildScope(parts: Partial<d8umIdentity>): d8umIdentity {
 /**
  * Deterministic string key for an identity. Used for Map keys and cache lookups.
  */
-export function scopeKey(scope: d8umIdentity): string {
+export function scopeKey(scope: typegraphIdentity): string {
   const parts: string[] = []
   if (scope.tenantId) parts.push(`t:${scope.tenantId}`)
   if (scope.groupId) parts.push(`g:${scope.groupId}`)
@@ -36,7 +36,7 @@ export function scopeKey(scope: d8umIdentity): string {
  * A record matches if every field present in the query
  * is also present and equal in the record.
  */
-export function scopeMatches(record: d8umIdentity, query: d8umIdentity): boolean {
+export function scopeMatches(record: typegraphIdentity, query: typegraphIdentity): boolean {
   if (query.tenantId !== undefined && record.tenantId !== query.tenantId) return false
   if (query.groupId !== undefined && record.groupId !== query.groupId) return false
   if (query.userId !== undefined && record.userId !== query.userId) return false
@@ -49,7 +49,7 @@ export function scopeMatches(record: d8umIdentity, query: d8umIdentity): boolean
  * Convert an identity to a flat Record for storage queries.
  * Only includes defined fields.
  */
-export function scopeToFilter(scope: d8umIdentity): Record<string, string> {
+export function scopeToFilter(scope: typegraphIdentity): Record<string, string> {
   const filter: Record<string, string> = {}
   if (scope.tenantId) filter['tenantId'] = scope.tenantId
   if (scope.groupId) filter['groupId'] = scope.groupId

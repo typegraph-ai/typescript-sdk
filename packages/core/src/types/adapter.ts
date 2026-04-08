@@ -1,5 +1,5 @@
 import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from './document.js'
-import type { d8umDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from './d8um-document.js'
+import type { typegraphDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from './typegraph-document.js'
 import type { Bucket, BucketListFilter } from './bucket.js'
 import type { PaginationOpts, PaginatedResult } from './pagination.js'
 
@@ -36,7 +36,7 @@ export interface HashStoreAdapter {
 }
 
 export interface ScoredChunkWithDocument extends ScoredChunk {
-  document?: d8umDocument | undefined
+  document?: typegraphDocument | undefined
 }
 
 export interface UndeployResult {
@@ -51,7 +51,7 @@ export interface VectorStoreAdapter {
   /** Lightweight runtime init — load model registrations, etc. Assumes tables already exist. */
   connect(): Promise<void>
 
-  /** Drop all d8um tables. Refuses if any table contains data. */
+  /** Drop all typegraph tables. Refuses if any table contains data. */
   undeploy?(): Promise<UndeployResult>
 
   destroy?(): Promise<void>
@@ -72,19 +72,19 @@ export interface VectorStoreAdapter {
   // --- Document record methods (optional - adapters that support documents implement these) ---
 
   /** Create or update a document record. Returns the document with its UUID. */
-  upsertDocumentRecord?(input: UpsertDocumentInput): Promise<d8umDocument>
+  upsertDocumentRecord?(input: UpsertDocumentInput): Promise<typegraphDocument>
   /** Get a document by UUID. */
-  getDocument?(id: string): Promise<d8umDocument | null>
+  getDocument?(id: string): Promise<typegraphDocument | null>
   /** List documents matching a filter. Supports optional pagination. */
-  listDocuments?(filter: DocumentFilter, pagination?: PaginationOpts): Promise<d8umDocument[] | PaginatedResult<d8umDocument>>
+  listDocuments?(filter: DocumentFilter, pagination?: PaginationOpts): Promise<typegraphDocument[] | PaginatedResult<typegraphDocument>>
   /** Delete documents matching a filter. Returns count deleted. */
   deleteDocuments?(filter: DocumentFilter): Promise<number>
   /** Update a document's status and optionally its chunk count. */
   updateDocumentStatus?(id: string, status: DocumentStatus, chunkCount?: number): Promise<void>
   /** Update document metadata fields (title, url, visibility, etc.). Returns updated document. */
-  updateDocument?(id: string, input: Partial<Pick<d8umDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<d8umDocument>
+  updateDocument?(id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<typegraphDocument>
 
-  /** Hybrid search with document-level filtering via JOIN to d8um_documents. */
+  /** Hybrid search with document-level filtering via JOIN to typegraph_documents. */
   searchWithDocuments?(
     model: string,
     embedding: number[],

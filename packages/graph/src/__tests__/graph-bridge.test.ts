@@ -390,7 +390,7 @@ describe('createGraphBridge', () => {
   })
 
   describe('required methods', () => {
-    it('remember delegates to d8umMemory', async () => {
+    it('remember delegates to TypegraphMemory', async () => {
       const store = mockStore()
       const bridge = createGraphBridge({
         memoryStore: store,
@@ -417,7 +417,7 @@ describe('createGraphBridge', () => {
       expect(store.invalidate).toHaveBeenCalledWith('some-id')
     })
 
-    it('recall delegates to d8umMemory', async () => {
+    it('recall delegates to TypegraphMemory', async () => {
       const store = mockStore()
       const bridge = createGraphBridge({
         memoryStore: store,

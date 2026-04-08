@@ -1,4 +1,4 @@
-import type { d8umIdentity } from '@d8um-ai/core'
+import type { typegraphIdentity } from '@typegraph-ai/core'
 import type { SemanticEntity, SemanticEdge } from '../types/index.js'
 import { isActiveAt } from '../temporal.js'
 import type { MemoryStoreAdapter } from '../types/adapter.js'
@@ -275,7 +275,7 @@ export class EmbeddedGraph {
    */
   async findEntities(
     query: string,
-    scope: d8umIdentity,
+    scope: typegraphIdentity,
     limit: number = 10,
   ): Promise<SemanticEntity[]> {
     if (!this.store.findEntities) return []

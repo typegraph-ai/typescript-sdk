@@ -20,7 +20,7 @@ export const BATCH_SIZE = 30
 
 // ── Per-benchmark configuration ──
 
-/** Which retrieval signals to activate. Mirrors @d8um-ai/core QuerySignals. */
+/** Which retrieval signals to activate. Mirrors @typegraph-ai/core QuerySignals. */
 export interface BenchSignals {
   semantic?: boolean
   keyword?: boolean

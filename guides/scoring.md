@@ -1,6 +1,6 @@
 # Scoring & Ranking
 
-This guide explains how d8um scores, normalizes, and ranks retrieval results across all active signals.
+This guide explains how TypeGraph scores, normalizes, and ranks retrieval results across all active signals.
 
 ## Scoring Categories
 
@@ -170,7 +170,7 @@ Controls how graph results interact with indexed results:
 
 ## Result Score Structure
 
-Every `d8umResult` contains:
+Every `typegraphResult` contains:
 
 ```typescript
 {

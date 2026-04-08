@@ -1,29 +1,29 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { d8umInit, d8umDeploy } from '../d8um.js'
+import { typegraphInit, typegraphDeploy } from '../typegraph.js'
 import { createMockAdapter } from './helpers/mock-adapter.js'
 import { createMockEmbedding } from './helpers/mock-embedding.js'
 import { createMockBucket } from './helpers/mock-source.js'
 import { createTestDocument, createTestDocuments } from './helpers/mock-connector.js'
-import type { d8umInstance } from '../d8um.js'
+import type { typegraphInstance } from '../typegraph.js'
 import type { Bucket } from '../types/bucket.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 
 /** Register a pre-built Bucket + embedding on an instance (bypasses buckets.create UUID generation). */
-function registerTestBucket(instance: d8umInstance, bucket: Bucket, embedding: EmbeddingProvider) {
+function registerTestBucket(instance: typegraphInstance, bucket: Bucket, embedding: EmbeddingProvider) {
   const impl = instance as any
   impl._buckets.set(bucket.id, bucket)
   impl.bucketEmbeddings.set(bucket.id, embedding)
 }
 
-describe('d8umInit', () => {
+describe('typegraphInit', () => {
   let adapter: ReturnType<typeof createMockAdapter>
   let embedding: ReturnType<typeof createMockEmbedding>
-  let instance: d8umInstance
+  let instance: typegraphInstance
 
   beforeEach(async () => {
     adapter = createMockAdapter()
     embedding = createMockEmbedding()
-    instance = await d8umInit({ vectorStore: adapter, embedding })
+    instance = await typegraphInit({ vectorStore: adapter, embedding })
   })
 
   describe('buckets.create', () => {
@@ -136,7 +136,7 @@ describe('d8umInit', () => {
       await expect(instance.ingest([], indexConfig, { bucketId: 'unknown' })).rejects.toThrow('not found')
     })
 
-    it('calls adapter.connect during d8umInit', async () => {
+    it('calls adapter.connect during typegraphInit', async () => {
       expect(adapter.calls.filter(c => c.method === 'connect')).toHaveLength(1)
     })
   })
@@ -151,7 +151,7 @@ describe('d8umInit', () => {
     })
 
     it('passes tenantId from config', async () => {
-      const inst = await d8umInit({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
+      const inst = await typegraphInit({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
       const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(1) })
       registerTestBucket(inst, bucket, embedding)
       await inst.ingest(documents, indexConfig, { bucketId: bucket.id })
@@ -160,7 +160,7 @@ describe('d8umInit', () => {
     })
 
     it('per-query tenantId overrides config', async () => {
-      const inst = await d8umInit({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
+      const inst = await typegraphInit({ vectorStore: adapter, embedding, tenantId: 'config-tenant' })
       const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(1) })
       registerTestBucket(inst, bucket, embedding)
       await inst.ingest(documents, indexConfig, { bucketId: bucket.id })
@@ -190,7 +190,7 @@ describe('d8umInit', () => {
     it('fires onIndexStart and onIndexComplete', async () => {
       const onIndexStart = vi.fn()
       const onIndexComplete = vi.fn()
-      const inst = await d8umInit({
+      const inst = await typegraphInit({
         vectorStore: adapter,
         embedding,
         hooks: { onIndexStart, onIndexComplete },
@@ -204,7 +204,7 @@ describe('d8umInit', () => {
 
     it('fires onQueryResults', async () => {
       const onQueryResults = vi.fn()
-      const inst = await d8umInit({
+      const inst = await typegraphInit({
         vectorStore: adapter,
         embedding,
         hooks: { onQueryResults },
@@ -227,15 +227,15 @@ describe('d8umInit', () => {
   describe('lifecycle', () => {
     it('deploy() calls adapter.deploy() but does not set initialized', async () => {
       const a = createMockAdapter()
-      const inst = await d8umDeploy({ vectorStore: a, embedding })
+      const inst = await typegraphDeploy({ vectorStore: a, embedding })
       expect(a.calls.filter(c => c.method === 'deploy')).toHaveLength(1)
       expect(a.calls.filter(c => c.method === 'connect')).toHaveLength(0)
       await expect(inst.query('test')).rejects.toThrow()
     })
 
-    it('d8umInit calls connect()', async () => {
+    it('typegraphInit calls connect()', async () => {
       const a = createMockAdapter()
-      await d8umInit({ vectorStore: a, embedding })
+      await typegraphInit({ vectorStore: a, embedding })
       expect(a.calls.filter((c: { method: string }) => c.method === 'connect')).toHaveLength(1)
     })
 
@@ -248,7 +248,7 @@ describe('d8umInit', () => {
     it('undeploy() returns failure when adapter lacks undeploy', async () => {
       const a = createMockAdapter()
       delete (a as any).undeploy
-      const inst = await d8umInit({ vectorStore: a, embedding })
+      const inst = await typegraphInit({ vectorStore: a, embedding })
       const result = await inst.undeploy()
       expect(result.success).toBe(false)
       expect(result.message).toContain('does not support')

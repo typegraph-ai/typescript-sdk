@@ -1,12 +1,12 @@
 {
-  "name": "d8um-benchmarks",
+  "name": "typegraph-benchmarks",
   "private": true,
   "type": "module",
   "dependencies": {
     "@ai-sdk/gateway": "3.0.83",
-    "@d8um-ai/adapter-pgvector": "file:../packages/adapters/pgvector",
-    "@d8um-ai/core": "file:../packages/core",
-    "@d8um-ai/graph": "file:../packages/graph",
+    "@typegraph-ai/adapter-pgvector": "file:../packages/adapters/pgvector",
+    "@typegraph-ai/core": "file:../packages/core",
+    "@typegraph-ai/graph": "file:../packages/graph",
     "@neondatabase/serverless": "^0.10.0",
     "@vercel/blob": "^2.3.2",
     "ai": "6.0.141",

@@ -1,22 +1,22 @@
 import type { VectorStoreAdapter, UndeployResult } from './types/adapter.js'
 import type { Bucket, CreateBucketInput, BucketListFilter, EmbeddingConfig, IndexConfig } from './types/bucket.js'
-import type { QueryOpts, QueryResponse, d8umResult } from './types/query.js'
+import type { QueryOpts, QueryResponse, typegraphResult } from './types/query.js'
 import type { IndexOpts, IndexResult } from './types/index-types.js'
 import type { EmbeddingProvider } from './embedding/provider.js'
 import type { RawDocument, Chunk } from './types/connector.js'
-import type { d8umDocument, DocumentFilter, UpsertDocumentInput } from './types/d8um-document.js'
-import type { d8umHooks } from './types/hooks.js'
+import type { typegraphDocument, DocumentFilter, UpsertDocumentInput } from './types/typegraph-document.js'
+import type { typegraphHooks } from './types/hooks.js'
 import type { LLMProvider } from './types/llm-provider.js'
 import type {
   GraphBridge, EntityResult, EntityDetail, EdgeResult,
   SubgraphOpts, SubgraphResult, GraphStats,
 } from './types/graph-bridge.js'
 import type { ExtractionConfig } from './types/extraction-config.js'
-import type { d8umIdentity } from './types/identity.js'
-import type { d8umEventSink, d8umEventType } from './types/events.js'
+import type { typegraphIdentity } from './types/identity.js'
+import type { typegraphEventSink, typegraphEventType } from './types/events.js'
 import type { PolicyStoreAdapter, CreatePolicyInput, UpdatePolicyInput, Policy, PolicyType, PolicyAction } from './types/policy.js'
 import type { MemoryRecord, ConversationTurnResult, MemoryHealthReport } from './types/memory.js'
-import type { d8umLogger } from './types/logger.js'
+import type { typegraphLogger } from './types/logger.js'
 import type { Job, JobFilter } from './types/job.js'
 import type { PaginationOpts, PaginatedResult } from './types/pagination.js'
 import { PolicyEngine, PolicyViolationError } from './governance/policy-engine.js'
@@ -39,11 +39,11 @@ export type LLMConfig = LLMProvider | AISDKLLMInput
 /** @deprecated Use LLMConfig instead. */
 export type LLMInput = LLMConfig
 
-export interface d8umConfig {
+export interface typegraphConfig {
   // ── Cloud mode (mutually exclusive with vectorStore/embedding) ──
-  /** API key for d8um cloud. When provided, vectorStore and embedding are not required. */
+  /** API key for typegraph cloud. When provided, vectorStore and embedding are not required. */
   apiKey?: string | undefined
-  /** Base URL for the cloud API. Defaults to 'https://api.d8um.dev'. */
+  /** Base URL for the cloud API. Defaults to 'https://api.typegraph.dev'. */
   baseUrl?: string | undefined
   /** Request timeout in milliseconds for cloud mode. Default: 30000. */
   timeout?: number | undefined
@@ -53,7 +53,7 @@ export interface d8umConfig {
   embedding?: EmbeddingConfig | undefined
   tenantId?: string | undefined
   tokenizer?: ((text: string) => number) | undefined
-  hooks?: d8umHooks | undefined
+  hooks?: typegraphHooks | undefined
   /** Optional LLM provider for triple extraction, query classification, and memory operations. */
   llm?: LLMConfig | undefined
   /** Optional graph bridge for memory operations and neural query mode. */
@@ -61,11 +61,11 @@ export interface d8umConfig {
   /** Configure triple extraction behavior (single-pass vs two-pass, per-pass models). */
   extraction?: ExtractionConfig | undefined
   /** Optional event sink for observability. Events are emitted fire-and-forget. */
-  eventSink?: d8umEventSink | undefined
+  eventSink?: typegraphEventSink | undefined
   /** Optional policy store for governance. When provided, actions are checked against active policies. */
   policyStore?: PolicyStoreAdapter | undefined
   /** Optional logger for debugging. */
-  logger?: d8umLogger | undefined
+  logger?: typegraphLogger | undefined
 }
 
 function isEmbeddingProvider(
@@ -92,21 +92,21 @@ export function resolveLLMProvider(config: LLMConfig): LLMProvider {
   throw new ConfigError('Invalid LLM configuration. Pass an LLMProvider ({ generateText, generateJSON }) or an AI SDK language model ({ model }).')
 }
 
-/** Validate d8um configuration. Throws ConfigError for invalid configs. */
-function validateConfig(config: d8umConfig): void {
+/** Validate typegraph configuration. Throws ConfigError for invalid configs. */
+function validateConfig(config: typegraphConfig): void {
   if (config.apiKey && (config.vectorStore || config.embedding)) {
     throw new ConfigError('Both apiKey (cloud mode) and vectorStore/embedding (self-hosted mode) provided. Choose one.')
   }
   if (!config.apiKey) {
     if (!config.vectorStore) {
-      throw new ConfigError('Self-hosted mode requires a vectorStore adapter. Pass vectorStore to d8umConfig.')
+      throw new ConfigError('Self-hosted mode requires a vectorStore adapter. Pass vectorStore to typegraphConfig.')
     }
     if (!config.embedding) {
-      throw new ConfigError('Self-hosted mode requires an embedding provider. Pass embedding to d8umConfig.')
+      throw new ConfigError('Self-hosted mode requires an embedding provider. Pass embedding to typegraphConfig.')
     }
   }
   if (config.graph && !config.llm) {
-    config.logger?.warn('Graph bridge configured without an LLM. Triple extraction during ingestion will be skipped. Pass llm to d8umConfig for full graph functionality.')
+    config.logger?.warn('Graph bridge configured without an LLM. Triple extraction during ingestion will be skipped. Pass llm to typegraphConfig for full graph functionality.')
   }
 }
 
@@ -121,9 +121,9 @@ export interface BucketsApi {
 }
 
 export interface DocumentsApi {
-  get(id: string): Promise<d8umDocument | null>
-  list(filter?: DocumentFilter, pagination?: PaginationOpts): Promise<d8umDocument[] | PaginatedResult<d8umDocument>>
-  update(id: string, input: Partial<Pick<d8umDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<d8umDocument>
+  get(id: string): Promise<typegraphDocument | null>
+  list(filter?: DocumentFilter, pagination?: PaginationOpts): Promise<typegraphDocument[] | PaginatedResult<typegraphDocument>>
+  update(id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<typegraphDocument>
   delete(filter: DocumentFilter): Promise<number>
 }
 
@@ -133,7 +133,7 @@ export interface JobsApi {
 }
 
 export interface GraphApi {
-  searchEntities(query: string, identity: d8umIdentity, opts?: {
+  searchEntities(query: string, identity: typegraphIdentity, opts?: {
     limit?: number
     entityType?: string
     minConnections?: number
@@ -145,20 +145,20 @@ export interface GraphApi {
     limit?: number
   }): Promise<EdgeResult[]>
   getSubgraph(opts: SubgraphOpts): Promise<SubgraphResult>
-  stats(identity: d8umIdentity): Promise<GraphStats>
-  getRelationTypes(identity: d8umIdentity): Promise<Array<{ relation: string; count: number }>>
-  getEntityTypes(identity: d8umIdentity): Promise<Array<{ entityType: string; count: number }>>
+  stats(identity: typegraphIdentity): Promise<GraphStats>
+  getRelationTypes(identity: typegraphIdentity): Promise<Array<{ relation: string; count: number }>>
+  getEntityTypes(identity: typegraphIdentity): Promise<Array<{ entityType: string; count: number }>>
 }
 
-/** The d8um instance interface — all public methods. */
-export interface d8umInstance {
+/** The typegraph instance interface — all public methods. */
+export interface typegraphInstance {
   /** One-off infrastructure provisioning. Creates all tables/extensions. Idempotent. */
-  deploy(config: d8umConfig): Promise<this>
+  deploy(config: typegraphConfig): Promise<this>
 
   /** Lightweight runtime init. Registers jobs, loads state. No DDL. */
-  initialize(config: d8umConfig): Promise<this>
+  initialize(config: typegraphConfig): Promise<this>
 
-  /** Remove all d8um infrastructure. Refuses if any table contains data. */
+  /** Remove all typegraph infrastructure. Refuses if any table contains data. */
   undeploy(): Promise<UndeployResult>
 
   buckets: BucketsApi
@@ -184,18 +184,18 @@ export interface d8umInstance {
   // ── Memory operations (require graph bridge) ──
 
   /** Store a memory. LLM extracts triples → entity graph + memory record. */
-  remember(content: string, identity: d8umIdentity, category?: string, opts?: {
+  remember(content: string, identity: typegraphIdentity, category?: string, opts?: {
     importance?: number
     metadata?: Record<string, unknown>
   }): Promise<MemoryRecord>
   /** Invalidate a memory and its associated graph edges. Identity must match the memory owner. */
-  forget(id: string, identity: d8umIdentity): Promise<void>
+  forget(id: string, identity: typegraphIdentity): Promise<void>
   /** Apply a natural language correction. */
-  correct(correction: string, identity: d8umIdentity): Promise<{ invalidated: number; created: number; summary: string }>
+  correct(correction: string, identity: typegraphIdentity): Promise<{ invalidated: number; created: number; summary: string }>
   /** Search memories by semantic similarity. */
-  recall(query: string, identity: d8umIdentity, opts?: { limit?: number; types?: string[] }): Promise<MemoryRecord[]>
+  recall(query: string, identity: typegraphIdentity, opts?: { limit?: number; types?: string[] }): Promise<MemoryRecord[]>
   /** Build a formatted memory context block for LLM system prompts. */
-  buildMemoryContext(query: string, identity: d8umIdentity, opts?: {
+  buildMemoryContext(query: string, identity: typegraphIdentity, opts?: {
     includeWorking?: boolean
     includeFacts?: boolean
     includeEpisodes?: boolean
@@ -204,11 +204,11 @@ export interface d8umInstance {
     format?: 'xml' | 'markdown' | 'plain'
   }): Promise<string>
   /** Check memory system health — returns stats about stored memories, entities, and edges. */
-  healthCheck(identity: d8umIdentity): Promise<MemoryHealthReport>
+  healthCheck(identity: typegraphIdentity): Promise<MemoryHealthReport>
   /** Ingest a conversation turn with extraction. */
   addConversationTurn(
     messages: Array<{ role: string; content: string; timestamp?: Date }>,
-    identity: d8umIdentity,
+    identity: typegraphIdentity,
     conversationId?: string,
   ): Promise<ConversationTurnResult>
 
@@ -225,19 +225,19 @@ export interface d8umInstance {
   destroy(): Promise<void>
 }
 
-class d8umImpl implements d8umInstance {
+class TypegraphImpl implements typegraphInstance {
   private _buckets = new Map<string, Bucket>()
   private bucketEmbeddings = new Map<string, EmbeddingProvider>()
   private adapter!: VectorStoreAdapter
   private defaultEmbedding!: EmbeddingProvider
-  private config!: d8umConfig
+  private config!: typegraphConfig
   private configured = false
   private initialized = false
   private policyEngine?: PolicyEngine
 
   private get logger() { return this.config?.logger }
 
-  private emitEvent(eventType: d8umEventType, targetId?: string, payload: Record<string, unknown> = {}): void {
+  private emitEvent(eventType: typegraphEventType, targetId?: string, payload: Record<string, unknown> = {}): void {
     if (!this.config?.eventSink) return
     this.config.eventSink.emit({
       id: crypto.randomUUID(),
@@ -354,7 +354,7 @@ class d8umImpl implements d8umInstance {
   // ── Documents ──
 
   documents: DocumentsApi = {
-    get: async (id: string): Promise<d8umDocument | null> => {
+    get: async (id: string): Promise<typegraphDocument | null> => {
       this.assertConfigured()
       if (!this.adapter.getDocument) {
         throw new ConfigError('Adapter does not support document operations.')
@@ -362,7 +362,7 @@ class d8umImpl implements d8umInstance {
       return this.adapter.getDocument(id)
     },
 
-    list: async (filter?: DocumentFilter, pagination?: PaginationOpts): Promise<d8umDocument[] | PaginatedResult<d8umDocument>> => {
+    list: async (filter?: DocumentFilter, pagination?: PaginationOpts): Promise<typegraphDocument[] | PaginatedResult<typegraphDocument>> => {
       this.assertConfigured()
       if (!this.adapter.listDocuments) {
         throw new ConfigError('Adapter does not support document operations.')
@@ -370,7 +370,7 @@ class d8umImpl implements d8umInstance {
       return this.adapter.listDocuments(filter ?? {}, pagination)
     },
 
-    update: async (id: string, input: Partial<Pick<d8umDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<d8umDocument> => {
+    update: async (id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<typegraphDocument> => {
       this.assertConfigured()
       if (!this.adapter.updateDocument) {
         throw new ConfigError('Adapter does not support document update operations.')
@@ -411,7 +411,7 @@ class d8umImpl implements d8umInstance {
   // ── Graph Exploration ──
 
   graph: GraphApi = {
-    searchEntities: async (query: string, identity: d8umIdentity, opts?: {
+    searchEntities: async (query: string, identity: typegraphIdentity, opts?: {
       limit?: number
       entityType?: string
       minConnections?: number
@@ -450,19 +450,19 @@ class d8umImpl implements d8umInstance {
       return graph.getSubgraph(opts)
     },
 
-    stats: async (identity: d8umIdentity): Promise<GraphStats> => {
+    stats: async (identity: typegraphIdentity): Promise<GraphStats> => {
       const graph = this.requireGraph()
       if (!graph.getGraphStats) throw new ConfigError('Graph bridge does not support stats.')
       return graph.getGraphStats(identity)
     },
 
-    getRelationTypes: async (identity: d8umIdentity): Promise<Array<{ relation: string; count: number }>> => {
+    getRelationTypes: async (identity: typegraphIdentity): Promise<Array<{ relation: string; count: number }>> => {
       const graph = this.requireGraph()
       if (!graph.getRelationTypes) throw new ConfigError('Graph bridge does not support relation type queries.')
       return graph.getRelationTypes(identity)
     },
 
-    getEntityTypes: async (identity: d8umIdentity): Promise<Array<{ entityType: string; count: number }>> => {
+    getEntityTypes: async (identity: typegraphIdentity): Promise<Array<{ entityType: string; count: number }>> => {
       const graph = this.requireGraph()
       if (!graph.getEntityTypes) throw new ConfigError('Graph bridge does not support entity type queries.')
       return graph.getEntityTypes(identity)
@@ -471,13 +471,13 @@ class d8umImpl implements d8umInstance {
 
   // ── Core Methods ──
 
-  private applyConfig(config: d8umConfig): void {
+  private applyConfig(config: typegraphConfig): void {
     this.config = config
     this.adapter = config.vectorStore!
     this.defaultEmbedding = resolveEmbeddingProvider(config.embedding!)
   }
 
-  async deploy(config: d8umConfig): Promise<this> {
+  async deploy(config: typegraphConfig): Promise<this> {
     validateConfig(config)
     this.applyConfig(config)
     await this.adapter.deploy()
@@ -509,7 +509,7 @@ class d8umImpl implements d8umInstance {
     return this
   }
 
-  async initialize(config: d8umConfig): Promise<this> {
+  async initialize(config: typegraphConfig): Promise<this> {
     validateConfig(config)
     this.applyConfig(config)
 
@@ -532,7 +532,7 @@ class d8umImpl implements d8umInstance {
     }
     this.configured = true
     this.initialized = true
-    this.logger?.info('d8um initialized', { tenantId: config.tenantId, bucketCount: this._buckets.size })
+    this.logger?.info('typegraph initialized', { tenantId: config.tenantId, bucketCount: this._buckets.size })
     return this
   }
 
@@ -675,12 +675,12 @@ class d8umImpl implements d8umInstance {
 
   private requireGraph(): GraphBridge {
     if (!this.config.graph) {
-      throw new ConfigError('Graph not configured. Pass a graph bridge to d8umConfig to enable memory and graph operations.')
+      throw new ConfigError('Graph not configured. Pass a graph bridge to typegraphConfig to enable memory and graph operations.')
     }
     return this.config.graph
   }
 
-  async remember(content: string, identity: d8umIdentity, category?: string, opts?: {
+  async remember(content: string, identity: typegraphIdentity, category?: string, opts?: {
     importance?: number
     metadata?: Record<string, unknown>
   }): Promise<MemoryRecord> {
@@ -688,21 +688,21 @@ class d8umImpl implements d8umInstance {
     return this.requireGraph().remember(content, identity, category, opts)
   }
 
-  async forget(id: string, identity: d8umIdentity): Promise<void> {
+  async forget(id: string, identity: typegraphIdentity): Promise<void> {
     await this.enforcePolicy('memory.delete', identity, id)
     return this.requireGraph().forget(id, identity)
   }
 
-  async correct(correction: string, identity: d8umIdentity): Promise<{ invalidated: number; created: number; summary: string }> {
+  async correct(correction: string, identity: typegraphIdentity): Promise<{ invalidated: number; created: number; summary: string }> {
     return this.requireGraph().correct(correction, identity)
   }
 
-  async recall(query: string, identity: d8umIdentity, opts?: { limit?: number; types?: string[] }): Promise<MemoryRecord[]> {
+  async recall(query: string, identity: typegraphIdentity, opts?: { limit?: number; types?: string[] }): Promise<MemoryRecord[]> {
     await this.enforcePolicy('memory.read', identity)
     return this.requireGraph().recall(query, identity, opts)
   }
 
-  async buildMemoryContext(query: string, identity: d8umIdentity, opts?: {
+  async buildMemoryContext(query: string, identity: typegraphIdentity, opts?: {
     includeWorking?: boolean
     includeFacts?: boolean
     includeEpisodes?: boolean
@@ -715,7 +715,7 @@ class d8umImpl implements d8umInstance {
     return graph.buildMemoryContext(query, identity, opts)
   }
 
-  async healthCheck(identity: d8umIdentity): Promise<MemoryHealthReport> {
+  async healthCheck(identity: typegraphIdentity): Promise<MemoryHealthReport> {
     const graph = this.requireGraph()
     if (!graph.healthCheck) throw new ConfigError('healthCheck not supported by this graph bridge.')
     return graph.healthCheck(identity)
@@ -723,7 +723,7 @@ class d8umImpl implements d8umInstance {
 
   async addConversationTurn(
     messages: Array<{ role: string; content: string; timestamp?: Date }>,
-    identity: d8umIdentity,
+    identity: typegraphIdentity,
     conversationId?: string,
   ): Promise<ConversationTurnResult> {
     return this.requireGraph().addConversationTurn(messages, identity, conversationId)
@@ -733,7 +733,7 @@ class d8umImpl implements d8umInstance {
 
   private requirePolicyStore(): PolicyStoreAdapter {
     if (!this.config.policyStore) {
-      throw new ConfigError('Policy store not configured. Pass a policyStore to d8umConfig to enable policy operations.')
+      throw new ConfigError('Policy store not configured. Pass a policyStore to typegraphConfig to enable policy operations.')
     }
     return this.config.policyStore
   }
@@ -789,7 +789,7 @@ class d8umImpl implements d8umInstance {
     return engine
   }
 
-  private async enforcePolicy(action: PolicyAction, identity?: d8umIdentity, targetId?: string): Promise<void> {
+  private async enforcePolicy(action: PolicyAction, identity?: typegraphIdentity, targetId?: string): Promise<void> {
     if (!this.policyEngine) return
     await this.policyEngine.enforce({
       action,
@@ -813,12 +813,12 @@ class d8umImpl implements d8umInstance {
 
 /** Trim results to fit within a token budget, keeping highest-scored results first. */
 function trimToTokenBudget(
-  results: d8umResult[],
+  results: typegraphResult[],
   maxTokens: number,
   tokenizer?: (text: string) => number
-): d8umResult[] {
+): typegraphResult[] {
   const countTokens = tokenizer ?? ((text: string) => Math.ceil(text.split(/\s+/).length * 1.3))
-  const trimmed: d8umResult[] = []
+  const trimmed: typegraphResult[] = []
   let budget = maxTokens
   for (const r of results) {
     const tokens = countTokens(r.content)
@@ -834,7 +834,7 @@ function trimToTokenBudget(
  * - **Cloud mode**: pass `{ apiKey }` — everything runs server-side.
  * - **Self-hosted mode**: pass `{ vectorStore, embedding }`.
  */
-export async function d8umInit(config: d8umConfig): Promise<d8umInstance> {
+export async function typegraphInit(config: typegraphConfig): Promise<typegraphInstance> {
   if (config.apiKey) {
     const { createCloudInstance } = await import('./cloud/cloud-instance.js')
     return createCloudInstance({
@@ -845,12 +845,12 @@ export async function d8umInit(config: d8umConfig): Promise<d8umInstance> {
     })
   }
 
-  const instance = new d8umImpl()
+  const instance = new TypegraphImpl()
   return instance.initialize(config)
 }
 
 /** One-time infrastructure provisioning. Creates all tables/extensions. Idempotent.
  *  Returns an instance that is NOT initialized for runtime use. Call initialize() after. */
-export async function d8umDeploy(config: d8umConfig): Promise<d8umInstance> {
-  return new d8umImpl().deploy(config)
+export async function typegraphDeploy(config: typegraphConfig): Promise<typegraphInstance> {
+  return new TypegraphImpl().deploy(config)
 }

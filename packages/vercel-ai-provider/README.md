@@ -1,11 +1,11 @@
-# @d8um-ai/vercel-ai-provider
+# @typegraph-ai/vercel-ai-provider
 
 Vercel AI SDK integration -- memory tools and middleware for auto-context injection.
 
 ## Install
 
 ```bash
-npm install @d8um-ai/vercel-ai-provider
+npm install @typegraph-ai/vercel-ai-provider
 ```
 
 ## Usage
@@ -16,9 +16,9 @@ Pass memory tools directly to `generateText()`:
 
 ```ts
 import { generateText } from 'ai'
-import { d8umMemoryTools } from '@d8um-ai/vercel-ai-provider'
+import { typegraphMemoryTools } from '@typegraph-ai/vercel-ai-provider'
 
-const tools = d8umMemoryTools(memory)
+const tools = typegraphMemoryTools(memory)
 
 const { text } = await generateText({
   model: openai('gpt-4o'),
@@ -32,9 +32,9 @@ const { text } = await generateText({
 Auto-inject memory context into prompts:
 
 ```ts
-import { d8umMemoryMiddleware } from '@d8um-ai/vercel-ai-provider'
+import { typegraphMemoryMiddleware } from '@typegraph-ai/vercel-ai-provider'
 
-const middleware = d8umMemoryMiddleware(memory, {
+const middleware = typegraphMemoryMiddleware(memory, {
   includeFacts: true,
   includeEpisodes: true,
   maxMemoryTokens: 2000,
@@ -48,8 +48,8 @@ const enrichedSystem = await middleware.enrichSystem(systemPrompt, userQuery)
 
 | Export | Description |
 |--------|-------------|
-| `d8umMemoryTools()` | Generate Vercel AI SDK-compatible tool definitions |
-| `d8umMemoryMiddleware()` | Create middleware for auto-context injection |
+| `typegraphMemoryTools()` | Generate Vercel AI SDK-compatible tool definitions |
+| `typegraphMemoryMiddleware()` | Create middleware for auto-context injection |
 
 Pure structural typing -- no `ai` or `@ai-sdk/*` imports needed.
 
@@ -59,5 +59,5 @@ Pure structural typing -- no `ai` or `@ai-sdk/*` imports needed.
 
 ## Related
 
-- [d8um main repo](../../README.md)
-- [@d8um-ai/graph](../graph/README.md)
+- [TypeGraph main repo](../../README.md)
+- [@typegraph-ai/graph](../graph/README.md)

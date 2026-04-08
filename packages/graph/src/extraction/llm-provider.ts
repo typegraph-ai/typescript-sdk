@@ -1,1 +1,1 @@
-export type { LLMProvider } from '@d8um-ai/core'
+export type { LLMProvider } from '@typegraph-ai/core'

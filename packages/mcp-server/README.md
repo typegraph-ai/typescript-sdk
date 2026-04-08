@@ -1,22 +1,22 @@
-# @d8um-ai/mcp-server
+# @typegraph-ai/mcp-server
 
-MCP server exposing d8um cognitive memory as tools for AI agents.
+MCP server exposing TypeGraph cognitive memory as tools for AI agents.
 
 ## Install
 
 ```bash
-npm install @d8um-ai/mcp-server
+npm install @typegraph-ai/mcp-server
 ```
 
 ## Usage
 
 ```ts
-import { getToolDefinitions, executeTool } from '@d8um-ai/mcp-server'
+import { getToolDefinitions, executeTool } from '@typegraph-ai/mcp-server'
 
 const tools = getToolDefinitions()
 // => array of MCPToolDefinition schemas
 
-const result = await executeTool(memory, 'd8um_remember', {
+const result = await executeTool(memory, 'typegraph_remember', {
   content: 'Alice prefers morning meetings',
   category: 'semantic',
 })
@@ -26,19 +26,19 @@ const result = await executeTool(memory, 'd8um_remember', {
 
 | Tool | Description |
 |------|-------------|
-| `d8um_remember` | Store a memory with optional category |
-| `d8um_recall` | Search memories by semantic similarity |
-| `d8um_recall_facts` | Search specifically for semantic facts |
-| `d8um_forget` | Invalidate a memory by ID |
-| `d8um_correct` | Apply a natural language correction |
-| `d8um_add_conversation` | Ingest conversation messages into memory |
+| `typegraph_remember` | Store a memory with optional category |
+| `typegraph_recall` | Search memories by semantic similarity |
+| `typegraph_recall_facts` | Search specifically for semantic facts |
+| `typegraph_forget` | Invalidate a memory by ID |
+| `typegraph_correct` | Apply a natural language correction |
+| `typegraph_add_conversation` | Ingest conversation messages into memory |
 
 ## API
 
 | Export | Description |
 |--------|-------------|
 | `getToolDefinitions()` | Returns array of MCP tool schemas |
-| `executeTool()` | Dispatch a tool call to the d8umMemory instance |
+| `executeTool()` | Dispatch a tool call to the typegraphMemory instance |
 
 ### Types
 
@@ -46,5 +46,5 @@ const result = await executeTool(memory, 'd8um_remember', {
 
 ## Related
 
-- [d8um main repo](../../README.md)
-- [@d8um-ai/graph](../graph/README.md)
+- [TypeGraph main repo](../../README.md)
+- [@typegraph-ai/graph](../graph/README.md)

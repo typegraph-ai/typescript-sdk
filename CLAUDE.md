@@ -1,6 +1,6 @@
-# CLAUDE.md — d8um Project Guide
+# CLAUDE.md — TypeGraph Project Guide
 
-d8um is a TypeScript SDK for retrieval + memory for AI agents, built on Postgres + pgvector.
+TypeGraph is a TypeScript SDK for retrieval + memory for AI agents, built on Postgres + pgvector.
 
 ## Architecture
 
@@ -32,12 +32,12 @@ All user-facing tables use a standardized 5-field identity model with explicit B
 - 1 visibility: `(visibility)`
 
 **Tables with full identity columns:**
-- Core: `d8um_chunks`, `d8um_documents`, `d8um_hashes`, `d8um_buckets`, `d8um_jobs`
-- Graph/Memory: `d8um_memories`, `d8um_semantic_entities`, `d8um_semantic_edges`
+- Core: `typegraph_chunks`, `typegraph_documents`, `typegraph_hashes`, `typegraph_buckets`, `typegraph_jobs`
+- Graph/Memory: `typegraph_memories`, `typegraph_semantic_entities`, `typegraph_semantic_edges`
 
-**Postgres schema isolation:** Both `PgVectorAdapter` and `PgMemoryStoreAdapter` accept an optional `schema` config. When set, `CREATE SCHEMA IF NOT EXISTS` runs at deploy/initialize, and all table names are schema-qualified (e.g., `cust_abc.d8um_memories`). Index names use underscores instead of dots (e.g., `cust_abc_d8um_memories_tenant_user_idx`) because Postgres does not allow schema-qualified names in `CREATE INDEX` index name positions.
+**Postgres schema isolation:** Both `PgVectorAdapter` and `PgMemoryStoreAdapter` accept an optional `schema` config. When set, `CREATE SCHEMA IF NOT EXISTS` runs at deploy/initialize, and all table names are schema-qualified (e.g., `cust_abc.typegraph_memories`). Index names use underscores instead of dots (e.g., `cust_abc_typegraph_memories_tenant_user_idx`) because Postgres does not allow schema-qualified names in `CREATE INDEX` index name positions.
 
-**`d8um.deploy()` wiring:** When `config.graph` is configured, `deploy()` also calls `config.graph.deploy()` to create memory/entity/edge tables.
+**`typegraph.deploy()` wiring:** When `config.graph` is configured, `deploy()` also calls `config.graph.deploy()` to create memory/entity/edge tables.
 
 **Memory tables keep a `scope JSONB` column alongside explicit identity columns** for backward compatibility during the transition period. New code reads/writes explicit columns; the JSONB scope is maintained in parallel.
 
@@ -237,7 +237,7 @@ for each query:
 Chunk tables use the full embedding model path, not a numeric ID:
 - Chunks: `{prefix}_gateway_openai_text_embedding_3_small`
 - Registry: `{prefix}_registry`
-- Shared across all benchmarks: `d8um_documents`, `d8um_hashes`, `d8um_buckets`
+- Shared across all benchmarks: `typegraph_documents`, `typegraph_hashes`, `typegraph_buckets`
 
 Example table prefixes per benchmark runner:
 - `bench_license_core_` → `bench_license_core__gateway_openai_text_embedding_3_small`
@@ -303,8 +303,8 @@ For estimating seed times (~3 docs/s embedding throughput for core):
 ```sql
 TRUNCATE TABLE {prefix}_gateway_openai_text_embedding_3_small;
 TRUNCATE TABLE {prefix}_registry;
-DELETE FROM d8um_hashes WHERE bucket_id = (SELECT id FROM d8um_buckets WHERE name = '{bucket_name}');
-DELETE FROM d8um_documents WHERE bucket_id = (SELECT id FROM d8um_buckets WHERE name = '{bucket_name}');
+DELETE FROM typegraph_hashes WHERE bucket_id = (SELECT id FROM typegraph_buckets WHERE name = '{bucket_name}');
+DELETE FROM typegraph_documents WHERE bucket_id = (SELECT id FROM typegraph_buckets WHERE name = '{bucket_name}');
 ```
 
 **Neural variant** (e.g., `bench_license_neural_`) — same as core PLUS graph tables:
@@ -314,8 +314,8 @@ TRUNCATE TABLE {prefix}_registry;
 TRUNCATE TABLE {prefix}memories;
 TRUNCATE TABLE {prefix}entities;
 TRUNCATE TABLE {prefix}edges;
-DELETE FROM d8um_hashes WHERE bucket_id = (SELECT id FROM d8um_buckets WHERE name = '{bucket_name}');
-DELETE FROM d8um_documents WHERE bucket_id = (SELECT id FROM d8um_buckets WHERE name = '{bucket_name}');
+DELETE FROM typegraph_hashes WHERE bucket_id = (SELECT id FROM typegraph_buckets WHERE name = '{bucket_name}');
+DELETE FROM typegraph_documents WHERE bucket_id = (SELECT id FROM typegraph_buckets WHERE name = '{bucket_name}');
 ```
 
 Note: neural graph tables use `{prefix}memories` (no extra underscore), e.g. `bench_license_neural_memories`.
@@ -362,7 +362,7 @@ Note: neural graph tables use `{prefix}memories` (no extra underscore), e.g. `be
 | nfcorpus | core | 947 | 823 | 822 | — | Seeded but never benchmarked |
 | graphrag-bench-novel | neural | 1410 | 1147 | 1147 | 3,798 / 8,819 | Seeded ✓ (grok-4.20-reasoning extraction, 2026-04-01) |
 
-**legal-rag-bench anomaly:** `d8um_documents` and `d8um_hashes` have 4859 entries, but `bench_legalrag_core__gateway_openai_text_embedding_3_small` is empty. The chunk table was truncated without clearing hashes/documents. Before reseeding: clear hashes and documents for `legal-rag-bench` bucket, then the seed will re-ingest.
+**legal-rag-bench anomaly:** `typegraph_documents` and `typegraph_hashes` have 4859 entries, but `bench_legalrag_core__gateway_openai_text_embedding_3_small` is empty. The chunk table was truncated without clearing hashes/documents. Before reseeding: clear hashes and documents for `legal-rag-bench` bucket, then the seed will re-ingest.
 
 #### Reseed Procedure (MUST follow in order)
 
@@ -469,12 +469,12 @@ SELECT entity_type, COUNT(*) FROM {prefix}entities GROUP BY entity_type ORDER BY
 
 **Key milestones:**
 - **2026-03-28** — Beat text-embedding-3-small baseline on 3/4 BEIR benchmarks (PR #7)
-- **2026-04-01** — 🏆 **#1 on GraphRAG-Bench Novel** (58.4% ACC, statistically significant over HippoRAG2 at 56.5%) — first published benchmark where d8um outperforms all known graph-RAG systems (PR #15)
+- **2026-04-01** — 🏆 **#1 on GraphRAG-Bench Novel** (58.4% ACC, statistically significant over HippoRAG2 at 56.5%) — first published benchmark where TypeGraph outperforms all known graph-RAG systems (PR #15)
 - **2026-04-06** — Replaced monolithic `QueryMode` with composable `QuerySignals` — users now specify which retrieval systems to activate instead of choosing from arbitrary presets
 
 ### 2026-03-28 — Beat text-embedding-3-small baseline (PR #7)
 
-**Problem:** d8um scored significantly below the MLEB text-embedding-3-small baseline despite using the same embedding model. Australian-tax nDCG@10 was 0.6723 vs baseline 0.7431 (-0.0708).
+**Problem:** TypeGraph scored significantly below the MLEB text-embedding-3-small baseline despite using the same embedding model. Australian-tax nDCG@10 was 0.6723 vs baseline 0.7431 (-0.0708).
 
 **Root cause:** Chunk-level retrieval wasted ranking slots — multiple chunks from the same document consumed top-K positions, while the baseline embedded full documents as single vectors.
 
@@ -789,7 +789,7 @@ Default similarity threshold is **0.68** (lowered from original 0.78). This affe
 
 ### 2026-04-01 — 🏆 MILESTONE: #1 on GraphRAG-Bench Novel — extraction pipeline overhaul + reasoning model + full eval (PR #15)
 
-**Result: d8um achieves state-of-the-art on GraphRAG-Bench Novel (58.4% ACC), ranking #1 overall with statistical significance over HippoRAG2 (56.5%).** This is the first published graph-RAG benchmark where d8um outperforms all known systems including HippoRAG2, Microsoft GraphRAG, LightRAG, and Fast-GraphRAG.
+**Result: TypeGraph achieves state-of-the-art on GraphRAG-Bench Novel (58.4% ACC), ranking #1 overall with statistical significance over HippoRAG2 (56.5%).** This is the first published graph-RAG benchmark where TypeGraph outperforms all known systems including HippoRAG2, Microsoft GraphRAG, LightRAG, and Fast-GraphRAG.
 
 **Goal:** Implement a comprehensive extraction pipeline overhaul (9 phases) to improve graph signal quality, then reseed graphrag-bench-novel/neural with a reasoning model (xai/grok-4.20-reasoning) and measure impact.
 
@@ -801,9 +801,9 @@ Default similarity threshold is **0.68** (lowered from original 0.78). This affe
    - Tightened alias instructions to prevent garbage aliases
    - `twoPass: true` config preserves the old two-call behavior
 
-2. **ExtractionConfig SDK type** (`packages/core/src/types/extraction-config.ts`, `packages/core/src/d8um.ts`)
+2. **ExtractionConfig SDK type** (`packages/core/src/types/extraction-config.ts`, `packages/core/src/typegraph.ts`)
    - New `ExtractionConfig` interface: `{ twoPass?, entityLlm?, relationshipLlm? }`
-   - Surfaced as `d8umConfig.extraction` — allows different LLMs for extraction vs main pipeline
+   - Surfaced as `typegraphConfig.extraction` — allows different LLMs for extraction vs main pipeline
    - Wired through `createIndexEngine` → `TripleExtractor`
 
 3. **Entity descriptions persisted** (`triple-extractor.ts`, `graph-bridge.ts`, `entity-resolver.ts`)
@@ -863,13 +863,13 @@ Graph health comparison (previous gpt-5.4-mini extraction → new grok-4.20-reas
 
 **Overall ACC: 58.4%** [95% CI: 57.2%, 59.5%] — 6.6 hours, 11.9s/query avg, 1 error.
 
-| Category | d8um neural | HippoRAG2 | Delta | Significant? | Rank |
+| Category | TypeGraph neural | HippoRAG2 | Delta | Significant? | Rank |
 |----------|-------------|-----------|-------|--------------|------|
 | Fact Retrieval (n=970) | **61.7%** [59.7, 63.7] | 60.1% | +1.5 | No (CI overlaps) | **#1** |
 | Complex Reasoning (n=610) | 53.1% [51.4, 54.8] | **53.4%** | -0.3 | No (CI overlaps) | **#2** |
 | Contextual Summarize (n=362) | 60.4% [58.6, 62.2] | **64.1%** | -3.7 | **Yes (HippoRAG2 wins)** | **#3** |
 | Creative Generation (n=67) | 47.7% [44.3, 51.0] | **48.3%** | -0.6 | No (CI overlaps) | **#2** |
-| **Overall (n=2009)** | **58.4%** [57.2, 59.5] | 56.5% | **+1.9** | **Yes (d8um wins)** | **#1** |
+| **Overall (n=2009)** | **58.4%** [57.2, 59.5] | 56.5% | **+1.9** | **Yes (TypeGraph wins)** | **#1** |
 
 Earlier 100-query sample showed 56.6% — the full eval converged to 58.4%, demonstrating importance of full-dataset evaluation. Convergence stabilized from n=700 onward (CI width narrowed from 10.7% at n=100 to 2.3% at n=2009).
 
@@ -877,19 +877,19 @@ Earlier 100-query sample showed 56.6% — the full eval converged to 58.4%, demo
 
 | Rank | System | Fact Retr | Complex R | Ctx Summ | Creative | Overall | Source |
 |------|--------|-----------|-----------|----------|----------|---------|--------|
-| **#1** | **d8um neural** | **61.7** | 53.1 | 60.4 | 47.7 | **58.4** | Full eval (2,009 queries) |
+| **#1** | **TypeGraph neural** | **61.7** | 53.1 | 60.4 | 47.7 | **58.4** | Full eval (2,009 queries) |
 | #2 | HippoRAG2 | 60.1 | **53.4** | 64.1 | **48.3** | 56.5 | arXiv:2506.05690 Table 3 |
 | #3 | Fast-GraphRAG | 57.0 | 48.5 | 56.4 | 46.2 | 52.0 | arXiv:2506.05690 Table 3 |
 | #4 | GraphRAG local | 49.3 | 50.9 | **64.4** | 39.1 | 50.9 | arXiv:2506.05690 Table 3 |
 | #5 | RAG w/ rerank | 60.9 | 42.9 | 51.3 | 38.3 | 48.4 | arXiv:2506.05690 Table 3 |
 | #6 | LightRAG | 58.6 | 49.1 | 48.9 | 23.8 | 45.1 | arXiv:2506.05690 Table 3 |
 
-**d8um neural is #1 overall with statistical significance** (CI lower bound 57.2 > HippoRAG2's 56.5). Wins Fact Retrieval (#1), ties Complex Reasoning and Creative Generation (#2), loses Contextual Summarize (#3).
+**TypeGraph neural is #1 overall with statistical significance** (CI lower bound 57.2 > HippoRAG2's 56.5). Wins Fact Retrieval (#1), ties Complex Reasoning and Creative Generation (#2), loses Contextual Summarize (#3).
 
-**Defensible claim:** "d8um achieves state-of-the-art results on GraphRAG-Bench Novel, ranking #1 overall (58.4%) with statistical significance over HippoRAG2 (56.5%)."
+**Defensible claim:** "TypeGraph achieves state-of-the-art results on GraphRAG-Bench Novel, ranking #1 overall (58.4%) with statistical significance over HippoRAG2 (56.5%)."
 
 **Caveats for honest reporting:**
-1. **Generation model confounder**: d8um used GPT-5.4-mini, baselines used GPT-4o-mini. The generation model difference could partially explain the Fact Retrieval edge. A validation run with GPT-4o-mini would control for this.
+1. **Generation model confounder**: TypeGraph used GPT-5.4-mini, baselines used GPT-4o-mini. The generation model difference could partially explain the Fact Retrieval edge. A validation run with GPT-4o-mini would control for this.
 2. **Marginal significance**: CI lower bound 57.2 vs HippoRAG2 56.5 is only 0.7pp above. Different judge temperature or random seed could flip this.
 3. **No paired test**: We don't have HippoRAG2's per-query scores or CIs. Unpaired comparison is fundamentally limited.
 4. **Extraction cost asymmetry**: grok-4.20-reasoning ingestion (~139 min) is much more expensive than GPT-4.1 (HippoRAG2). Not normalized for compute budget.
@@ -905,9 +905,9 @@ Earlier 100-query sample showed 56.6% — the full eval converged to 58.4%, demo
 - **Sequential per-document extraction enables cross-chunk context** but removes intra-document parallelism. For neural ingestion, the bottleneck is LLM latency per chunk, so the parallelism loss is minimal (LLM calls are sequential anyway). Inter-document parallelism (concurrency semaphore) still provides the main speedup.
 - **Full-dataset eval is essential — small samples are misleading.** The 100-query sample gave ACC=0.566, the full 2,009-query eval converged to 0.584. Early samples (n=300) peaked at 0.609 before regressing to the mean. CI width went from 10.7% (n=100) to 2.3% (n=2009). Never draw conclusions from <500 queries on this benchmark.
 - **Convergence takes ~700 queries on GraphRAG-Bench Novel.** ACC stabilized at ~58% from n=700 onward and the CI width plateaued below 4%. For quick iteration, ~500 queries gives directionally useful results; for publishable claims, run the full dataset.
-- **Fact Retrieval is d8um's strongest category** (#1 at 61.7%) — hybrid search excels at specific passage lookup. This is also the largest category (48% of queries), which drives the overall lead.
+- **Fact Retrieval is TypeGraph's strongest category** (#1 at 61.7%) — hybrid search excels at specific passage lookup. This is also the largest category (48% of queries), which drives the overall lead.
 - **Contextual Summarize is a confirmed architectural weakness** (#3 at 60.4%, -3.7pp vs HippoRAG2, statistically significant). PPR chunk re-ranking cannot synthesize broad context the way community-based approaches (GraphRAG local, HippoRAG2) can. Fixing this requires either a global summary mechanism or allowing graph traversal to aggregate across document boundaries.
-- **Generation model is the main confounder for cross-system comparison.** d8um used GPT-5.4-mini for answer generation; baselines used GPT-4o-mini. A validation run with GPT-4o-mini generation would control for this and is the single most valuable next step for defensible claims.
+- **Generation model is the main confounder for cross-system comparison.** TypeGraph used GPT-5.4-mini for answer generation; baselines used GPT-4o-mini. A validation run with GPT-4o-mini generation would control for this and is the single most valuable next step for defensible claims.
 - **Score distribution is bimodal** (20% score 0.9-1.0, 12% score 0.1-0.2). The LLM-as-judge either strongly agrees or strongly disagrees with the gold answer. This makes the mean sensitive to tail queries — a few flips can move it 1-2 points. The median (58.75%) tracking close to the mean (58.38%) is reassuring.
 
 ### Benchmark Methodology Alignment (CRITICAL)
@@ -936,9 +936,9 @@ Earlier 100-query sample showed 56.6% — the full eval converged to 58.4%, demo
 **Type layer (`packages/core/src/types/`):**
 - Renamed `DocumentScope` → `Visibility`, expanded from `'tenant' | 'group' | 'user'` to include `'agent' | 'conversation'`
 - Added `groupId`, `userId`, `agentId`, `conversationId` to: `IndexOpts`, `ChunkFilter`, `EmbeddedChunk`, `Bucket`, `CreateBucketInput`, `Job`, `CreateJobInput`
-- Added `agentId`, `conversationId`, `visibility` to: `d8umDocument`, `DocumentFilter`, `UpsertDocumentInput`
+- Added `agentId`, `conversationId`, `visibility` to: `typegraphDocument`, `DocumentFilter`, `UpsertDocumentInput`
 - Added `deploy?(): Promise<void>` to `GraphBridge` interface
-- Updated `d8umResult.bucket` to carry all 5 identity fields + `visibility` (was `scope`)
+- Updated `typegraphResult.bucket` to carry all 5 identity fields + `visibility` (was `scope`)
 
 **DDL / Schema (`packages/adapters/pgvector/src/migrations.ts`):**
 - Added `group_id`, `user_id`, `agent_id`, `conversation_id` columns to chunks, documents, hashes, buckets, jobs tables
@@ -955,7 +955,7 @@ Earlier 100-query sample showed 56.6% — the full eval converged to 58.4%, demo
 - Index naming: `idxPrefix(t)` replaces dots with underscores for schema-qualified table names (Postgres cannot schema-qualify index names in `CREATE INDEX`)
 - HNSW index creation (`ensureHnswIndex`) uses same `idxPrefix` pattern
 - All CRUD methods (`upsert`, `upsertEntity`, `upsertEdge`, `list`, `findEntities`, `searchEntities`) write/read explicit identity columns
-- New helpers: `buildIdentityWhere()` (builds WHERE from d8umIdentity), `rowToIdentity()` (extracts identity from DB row)
+- New helpers: `buildIdentityWhere()` (builds WHERE from typegraphIdentity), `rowToIdentity()` (extracts identity from DB row)
 
 **Core adapter (`packages/adapters/pgvector/src/adapter.ts`):**
 - Added `schema` config + `CREATE SCHEMA IF NOT EXISTS` in `deploy()`
@@ -970,7 +970,7 @@ Earlier 100-query sample showed 56.6% — the full eval converged to 58.4%, demo
 - `buildDocWhere()`: filters on `agentId`, `conversationId`, `visibility` (was `scope`)
 
 **Query pipeline:**
-- `IndexedRunner.run()`: accepts full `d8umIdentity` (was `tenantId?: string`), passes all 5 fields to chunk filter
+- `IndexedRunner.run()`: accepts full `typegraphIdentity` (was `tenantId?: string`), passes all 5 fields to chunk filter
 - `QueryPlanner`: passes full identity to IndexedRunner (was only `tenantId`)
 - `merger.ts`: `NormalizedResult` carries `documentVisibility`, `agentId`, `conversationId` (was `documentScope`)
 - `context-search.ts`: passes identity object, maps `visibility` (was `scope`)
@@ -981,7 +981,7 @@ Earlier 100-query sample showed 56.6% — the full eval converged to 58.4%, demo
 - `scope: indexConfig.scope` → `visibility: visibility ?? indexConfig.visibility`
 
 **Deploy wiring:**
-- `d8um.deploy()`: calls `config.graph.deploy()` when graph is configured
+- `typegraph.deploy()`: calls `config.graph.deploy()` when graph is configured
 - `graph-bridge.ts`: implements `deploy()` → `memoryStore.initialize()`
 
 **Integration test (`benchmarks/scripts/test-memory.ts`):**
@@ -998,7 +998,7 @@ Earlier 100-query sample showed 56.6% — the full eval converged to 58.4%, demo
 
 ### 2026-04-06 — QuerySignals: composable query routing replaces monolithic QueryMode
 
-**Problem:** d8um had 5 monolithic query modes (`fast | hybrid | memory | neural | auto`) that locked users into arbitrary presets. Users could not combine retrieval systems freely — e.g., vector+graph without keyword, or vector+memory without graph were impossible. The mode system had 10 identified gaps blocking end-user functionality.
+**Problem:** TypeGraph had 5 monolithic query modes (`fast | hybrid | memory | neural | auto`) that locked users into arbitrary presets. Users could not combine retrieval systems freely — e.g., vector+graph without keyword, or vector+memory without graph were impossible. The mode system had 10 identified gaps blocking end-user functionality.
 
 **Solution:** Replaced `QueryMode` entirely with `QuerySignals` — a composable interface where users specify which retrieval systems to activate:
 

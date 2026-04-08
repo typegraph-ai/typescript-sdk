@@ -1,4 +1,4 @@
-import type { d8umMemory } from '@d8um-ai/graph'
+import type { TypegraphMemory } from '@typegraph-ai/graph'
 
 // ── Middleware ──
 // Structural type matching Vercel AI SDK's middleware pattern.
@@ -27,11 +27,11 @@ export interface MemoryMiddlewareOpts {
  *
  * @example
  * ```ts
- * const middleware = d8umMemoryMiddleware(memory)
+ * const middleware = typegraphMemoryMiddleware(memory)
  * const enrichedPrompt = await middleware.enrichPrompt('What should Alice have for dinner?')
  * ```
  */
-export function d8umMemoryMiddleware(memory: d8umMemory, opts: MemoryMiddlewareOpts = {}) {
+export function typegraphMemoryMiddleware(memory: TypegraphMemory, opts: MemoryMiddlewareOpts = {}) {
   return {
     /**
      * Enrich a prompt with memory context.

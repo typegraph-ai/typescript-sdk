@@ -1,4 +1,4 @@
-# Agentic RAG with d8um
+# Agentic RAG with TypeGraph
 
 ## What is Agentic RAG?
 
@@ -8,13 +8,13 @@ Retrieval-Augmented Generation (RAG) gives LLMs access to external knowledge at 
 
 This matters because real-world knowledge is fragmented. A customer support agent might need to pull from product documentation (indexed and embedded), a live pricing API (fetched at query time), and a cached compliance reference (refreshed daily). Each source has different latency, freshness, and relevance characteristics. Agentic RAG systems handle this heterogeneity naturally.
 
-## How d8um's Retrieval Works
+## How TypeGraph's Retrieval Works
 
-d8um is a TypeScript SDK that provides a unified retrieval interface across all your data sources. You define sources once, and d8um handles chunking, embedding, storage, retrieval, score merging, and prompt assembly.
+TypeGraph is a TypeScript SDK that provides a unified retrieval interface across all your data sources. You define sources once, and TypeGraph handles chunking, embedding, storage, retrieval, score merging, and prompt assembly.
 
 ### Sources and Modes
 
-Every data source in d8um is registered as a **source** with one of three modes:
+Every data source in TypeGraph is registered as a **source** with one of three modes:
 
 | Mode | Behavior | Best for |
 |------|----------|----------|
@@ -24,10 +24,10 @@ Every data source in d8um is registered as a **source** with one of three modes:
 
 ### Per-Source Embedding Models
 
-Each source can use a different embedding model. A documentation source might use OpenAI's `text-embedding-3-small` (1536 dimensions) while a support ticket source uses Cohere's `embed-english-v3.0` (1024 dimensions). d8um manages separate vector tables per model and handles the complexity at query time:
+Each source can use a different embedding model. A documentation source might use OpenAI's `text-embedding-3-small` (1536 dimensions) while a support ticket source uses Cohere's `embed-english-v3.0` (1024 dimensions). TypeGraph manages separate vector tables per model and handles the complexity at query time:
 
 ```ts
-d8um.initialize({
+typegraph.initialize({
   embedding: {
     model: openai.embedding('text-embedding-3-small'),
     dimensions: 1536,
@@ -36,19 +36,19 @@ d8um.initialize({
 })
 
 // Create buckets - each can use the global default or a per-bucket override
-const docs = await d8um.buckets.create({ name: 'docs' })
-const tickets = await d8um.buckets.create({ name: 'tickets' })
+const docs = await typegraph.buckets.create({ name: 'docs' })
+const tickets = await typegraph.buckets.create({ name: 'tickets' })
 ```
 
 ### Hybrid Search: Vector + BM25
 
-For indexed sources backed by the pgvector adapter, d8um runs **hybrid search** combining semantic vector similarity (HNSW index) with keyword matching (PostgreSQL tsvector/BM25). Both retrieval paths run in a single SQL query using CTEs, and results are fused via Reciprocal Rank Fusion.
+For indexed sources backed by the pgvector adapter, TypeGraph runs **hybrid search** combining semantic vector similarity (HNSW index) with keyword matching (PostgreSQL tsvector/BM25). Both retrieval paths run in a single SQL query using CTEs, and results are fused via Reciprocal Rank Fusion.
 
 The sqlite-vec adapter uses KNN vector search for local development environments.
 
 ### Multi-Model Fan-Out
 
-When you call `d8um.query()`, the `QueryPlanner` orchestrates the full retrieval pipeline:
+When you call `typegraph.query()`, the `QueryPlanner` orchestrates the full retrieval pipeline:
 
 1. **Group** sources by their embedding model
 2. **Embed** the query text once per distinct model (not once per source)
@@ -59,17 +59,17 @@ When you call `d8um.query()`, the `QueryPlanner` orchestrates the full retrieval
 
 ### RRF Score Merging
 
-d8um uses [Reciprocal Rank Fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf) to merge results from heterogeneous sources. RRF is rank-based rather than score-based, which means it works even when scores from different models or retrieval methods are on incompatible scales.
+TypeGraph uses [Reciprocal Rank Fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf) to merge results from heterogeneous sources. RRF is rank-based rather than score-based, which means it works even when scores from different models or retrieval methods are on incompatible scales.
 
 The formula for each result: `score = weight * (1 / (k + rank))` where `k = 60` (the standard RRF constant). Weights default to `indexed: 0.7, live: 0.2, cached: 0.1` and are configurable per query.
 
 ### Context Assembly with `assemble()`
 
-After retrieval, `d8um.assemble()` formats the ranked results into prompt-ready context. It supports XML (default), markdown, and plain text formats, plus custom formatter functions:
+After retrieval, `typegraph.assemble()` formats the ranked results into prompt-ready context. It supports XML (default), markdown, and plain text formats, plus custom formatter functions:
 
 ```ts
-const response = await d8um.query('how do I configure SSO?')
-const context = d8um.assemble(response.results, { format: 'xml' })
+const response = await typegraph.query('how do I configure SSO?')
+const context = typegraph.assemble(response.results, { format: 'xml' })
 // <context>
 //   <source id="faq" title="How do I set up SSO?">
 //     <passage score="0.9142">
@@ -83,10 +83,10 @@ Results can be grouped by source, with citation metadata preserved for downstrea
 
 ### Context Search with Neighbor Expansion
 
-For richer context, `d8um.searchWithContext()` extends basic retrieval with **neighbor chunk expansion**. Each hit is expanded to include surrounding chunks from the same document, then stitched into coherent passages with truncation markers for gaps:
+For richer context, `typegraph.searchWithContext()` extends basic retrieval with **neighbor chunk expansion**. Each hit is expanded to include surrounding chunks from the same document, then stitched into coherent passages with truncation markers for gaps:
 
 ```ts
-const response = await d8um.searchWithContext('SSO configuration', {
+const response = await typegraph.searchWithContext('SSO configuration', {
   surroundingChunks: 2,  // include 2 chunks before and after each hit
   count: 10,
 })
@@ -98,7 +98,7 @@ const response = await d8um.searchWithContext('SSO configuration', {
 ## Architecture
 
 ```
-                        d8um.query("how do I configure SSO?")
+                        typegraph.query("how do I configure SSO?")
                                       |
                      +----------------+----------------+
                      v                v                v
@@ -137,8 +137,8 @@ const response = await d8um.searchWithContext('SSO configuration', {
 **Core modules:**
 
 ```
-@d8um-ai/core
-+-- d8um()              Main orchestrator, per-source embedding resolution
+@typegraph-ai/core
++-- typegraph()              Main orchestrator, per-source embedding resolution
 +-- embedding/
 |   +-- provider.ts     EmbeddingProvider interface
 |   +-- ai-sdk-adapter  Wraps any AI SDK model via structural typing (zero deps)
@@ -148,13 +148,13 @@ const response = await d8um.searchWithContext('SSO configuration', {
 +-- assemble()          Format results for prompt injection
 +-- types/              Full TypeScript type system
 
-@d8um-ai/adapter-*         Swappable vector store backends (per-model table isolation)
-@d8um-ai/integration-*     Modular 3rd party integrations (Slack, HubSpot, Google Drive, etc.)
+@typegraph-ai/adapter-*         Swappable vector store backends (per-model table isolation)
+@typegraph-ai/integration-*     Modular 3rd party integrations (Slack, HubSpot, Google Drive, etc.)
 ```
 
 ## Embedding Providers
 
-d8um builds on the [Vercel AI SDK](https://ai-sdk.dev) provider ecosystem for embeddings. The core package does not import any AI SDK dependency directly. Instead, it uses TypeScript structural typing: any object that satisfies the `EmbeddingProvider` interface works, whether it comes from `@ai-sdk/openai`, `@ai-sdk/cohere`, `@ai-sdk/anthropic`, a local model, or a test mock.
+TypeGraph builds on the [Vercel AI SDK](https://ai-sdk.dev) provider ecosystem for embeddings. The core package does not import any AI SDK dependency directly. Instead, it uses TypeScript structural typing: any object that satisfies the `EmbeddingProvider` interface works, whether it comes from `@ai-sdk/openai`, `@ai-sdk/cohere`, `@ai-sdk/anthropic`, a local model, or a test mock.
 
 This means access to 40+ embedding providers with zero wrapper code:
 
@@ -167,7 +167,7 @@ import { google } from '@ai-sdk/google'
 For full control, implement the `EmbeddingProvider` interface directly:
 
 ```ts
-d8um.initialize({
+typegraph.initialize({
   embedding: {
     model: 'custom/my-model',
     dimensions: 768,
@@ -185,7 +185,7 @@ For full control, implement the `EmbeddingProvider` interface directly — any o
 The `query()` method accepts a rich set of options:
 
 ```ts
-const response = await d8um.query('search text', {
+const response = await typegraph.query('search text', {
   count: 10,                              // max results
   buckets: ['docs', 'wiki'],              // filter to specific buckets
   tenantId: 'acme',                       // multi-tenant isolation
@@ -211,7 +211,7 @@ const response = await d8um.query('search text', {
 
 The response includes per-source diagnostics (timing, result counts, errors) alongside the merged results, giving full observability into retrieval performance.
 
-## Landscape: Where d8um Fits
+## Landscape: Where TypeGraph Fits
 
 The retrieval and RAG tooling ecosystem has grown rapidly, with several excellent frameworks serving different audiences and use cases. The field benefits from this diversity -- advances in one project raise the bar for everyone.
 
@@ -229,16 +229,16 @@ The retrieval and RAG tooling ecosystem has grown rapidly, with several excellen
 
 ### Vercel AI SDK
 
-The [Vercel AI SDK](https://github.com/vercel/ai) is a TypeScript-native, lightweight toolkit for building AI-powered applications. It takes a provider-agnostic approach to model access, with a clean abstraction layer over 40+ LLM and embedding providers. The AI SDK is intentionally minimal -- it provides the building blocks (streaming, tool calling, embeddings) without imposing framework-level opinions on how you structure your application. d8um builds directly on the AI SDK's embedding ecosystem, using its provider interface as the standard for embedding model access.
+The [Vercel AI SDK](https://github.com/vercel/ai) is a TypeScript-native, lightweight toolkit for building AI-powered applications. It takes a provider-agnostic approach to model access, with a clean abstraction layer over 40+ LLM and embedding providers. The AI SDK is intentionally minimal -- it provides the building blocks (streaming, tool calling, embeddings) without imposing framework-level opinions on how you structure your application. TypeGraph builds directly on the AI SDK's embedding ecosystem, using its provider interface as the standard for embedding model access.
 
-### Where d8um fits
+### Where TypeGraph fits
 
-d8um occupies a specific position in this landscape:
+TypeGraph occupies a specific position in this landscape:
 
 - **TypeScript-native.** Not a Python framework with a TypeScript port. The type system, APIs, and developer experience are designed for TypeScript from the ground up.
-- **Composable, not a framework.** d8um does not ask you to build inside it. It provides retrieval as a library that composes alongside your existing stack -- your web framework, your database, your deployment model.
-- **Per-source embedding models.** Different data sources have different characteristics. d8um lets each source use the embedding model best suited to its content, then handles the multi-model fan-out and merge transparently.
-- **Unified retrieval + memory.** d8um's retrieval engine and cognitive memory system share the same embedding infrastructure and adapter layer, providing a single SDK for both RAG and agent memory.
-- **AI SDK ecosystem.** Rather than maintaining its own embedding provider wrappers, d8um builds on the Vercel AI SDK ecosystem. Any provider that works with the AI SDK works with d8um.
+- **Composable, not a framework.** TypeGraph does not ask you to build inside it. It provides retrieval as a library that composes alongside your existing stack -- your web framework, your database, your deployment model.
+- **Per-source embedding models.** Different data sources have different characteristics. TypeGraph lets each source use the embedding model best suited to its content, then handles the multi-model fan-out and merge transparently.
+- **Unified retrieval + memory.** TypeGraph's retrieval engine and cognitive memory system share the same embedding infrastructure and adapter layer, providing a single SDK for both RAG and agent memory.
+- **AI SDK ecosystem.** Rather than maintaining its own embedding provider wrappers, TypeGraph builds on the Vercel AI SDK ecosystem. Any provider that works with the AI SDK works with TypeGraph.
 
-The RAG landscape benefits from having tools optimized for different audiences and runtimes. LangChain and LlamaIndex serve the Python ecosystem exceptionally well. d8um serves TypeScript developers who want composable retrieval without framework lock-in.
+The RAG landscape benefits from having tools optimized for different audiences and runtimes. LangChain and LlamaIndex serve the Python ecosystem exceptionally well. TypeGraph serves TypeScript developers who want composable retrieval without framework lock-in.

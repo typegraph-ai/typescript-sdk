@@ -5,8 +5,8 @@
  * Each runner still has its own main() — these are helpers, not a framework.
  */
 
-import { d8umInit, aiSdkLlmProvider } from '@d8um-ai/core'
-import { createGraphBridge, PgMemoryStoreAdapter } from '@d8um-ai/graph'
+import { typegraphInit, aiSdkLlmProvider } from '@typegraph-ai/core'
+import { createGraphBridge, PgMemoryStoreAdapter } from '@typegraph-ai/graph'
 import { gateway } from '@ai-sdk/gateway'
 import { neon } from '@neondatabase/serverless'
 import { createBenchmarkAdapter } from './adapter.js'
@@ -57,7 +57,7 @@ export function parseCliArgs(): CliArgs {
 // ── Initialization ──
 
 export interface CoreInit {
-  d: Awaited<ReturnType<typeof d8umInit>>
+  d: Awaited<ReturnType<typeof typegraphInit>>
   adapter: ReturnType<typeof createBenchmarkAdapter>
 }
 
@@ -66,7 +66,7 @@ export async function initCore(config: BenchmarkConfig): Promise<CoreInit> {
   const embModel = resolveEmbeddingModel(config)
   const embDims = resolveEmbeddingDims(config)
 
-  const d = await d8umInit({
+  const d = await typegraphInit({
     vectorStore: adapter,
     embedding: {
       model: gateway.embeddingModel(embModel),
@@ -130,7 +130,7 @@ export async function initNeural(config: BenchmarkConfig): Promise<NeuralInit> {
     scope: { agentId: `${config.dataset}-benchmark` },
   })
 
-  const d = await d8umInit({
+  const d = await typegraphInit({
     vectorStore: adapter,
     embedding: { model: embeddingModel, dimensions: embDims },
     llm,
@@ -563,7 +563,7 @@ export function printBanner(config: BenchmarkConfig, cliArgs: CliArgs): void {
     : 'Core (Hybrid + Fast)'
 
   console.log('╔══════════════════════════════════════════════════════════════╗')
-  console.log(`║  ${config.displayName} — d8um ${modeLabel}`.padEnd(63) + '║')
+  console.log(`║  ${config.displayName} — typegraph ${modeLabel}`.padEnd(63) + '║')
   console.log('╚══════════════════════════════════════════════════════════════╝')
   console.log()
 

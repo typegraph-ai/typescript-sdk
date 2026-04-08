@@ -1,7 +1,7 @@
 {
-  "name": "@d8um-ai/mcp-server",
+  "name": "@typegraph-ai/mcp-server",
   "version": "0.1.2",
-  "description": "MCP server exposing d8um cognitive memory as tools and resources for AI agents",
+  "description": "MCP server exposing typegraph cognitive memory as tools and resources for AI agents",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +19,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@d8um-ai/graph": "workspace:*"
+    "@typegraph-ai/graph": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

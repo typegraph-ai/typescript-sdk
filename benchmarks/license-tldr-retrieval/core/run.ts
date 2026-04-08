@@ -1,9 +1,9 @@
 #!/usr/bin/env npx tsx
 /**
- * License TLDR Retrieval Benchmark — d8um Core (Hybrid + Fast)
+ * License TLDR Retrieval Benchmark — typegraph Core (Hybrid + Fast)
  *
  * Runs the isaacus/license-tldr-retrieval benchmark (65 docs, 65 queries)
- * using d8um core with both hybrid search and fast (pure vector) search.
+ * using typegraph core with both hybrid search and fast (pure vector) search.
  *
  * Usage:
  *   npx tsx --env-file=.env license-tldr-retrieval/core/run.ts              # query-only
@@ -30,7 +30,7 @@ async function main() {
   printBanner(config, cli)
 
   // Phase 1: Initialize
-  console.log('Phase 1: Initializing d8um with Neon pgvector...')
+  console.log('Phase 1: Initializing typegraph with Neon pgvector...')
   const { d, adapter } = await initCore(config)
   const { bucket } = await resolveBucket(d, config.bucketName, cli.shouldSeed)
   const latency = await measureLatencyProfile(adapter)

@@ -1,15 +1,15 @@
 import { describe, it, expect, vi } from 'vitest'
-import { d8umInit } from '../d8um.js'
+import { typegraphInit } from '../typegraph.js'
 import { createMockAdapter } from './helpers/mock-adapter.js'
 import { createMockEmbedding } from './helpers/mock-embedding.js'
 import { createMockBucket } from './helpers/mock-source.js'
 import { createTestDocument, createTestDocuments } from './helpers/mock-connector.js'
-import type { d8umInstance } from '../d8um.js'
+import type { typegraphInstance } from '../typegraph.js'
 import type { Bucket } from '../types/bucket.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 
 /** Register a pre-built Bucket + embedding on an instance (bypasses buckets.create UUID generation). */
-function registerTestBucket(instance: d8umInstance, bucket: Bucket, embedding: EmbeddingProvider) {
+function registerTestBucket(instance: typegraphInstance, bucket: Bucket, embedding: EmbeddingProvider) {
   const impl = instance as any
   impl._buckets.set(bucket.id, bucket)
   impl.bucketEmbeddings.set(bucket.id, embedding)
@@ -19,7 +19,7 @@ describe('integration', () => {
   it('add bucket → ingest → query → format xml', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umInit({ vectorStore: adapter, embedding })
+    const instance = await typegraphInit({ vectorStore: adapter, embedding })
 
     const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(3) })
     registerTestBucket(instance, bucket, embedding)
@@ -35,7 +35,7 @@ describe('integration', () => {
   it('ingest → re-ingest with changes → query shows updated content', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umInit({ vectorStore: adapter, embedding })
+    const instance = await typegraphInit({ vectorStore: adapter, embedding })
 
     const docs = [createTestDocument({ id: 'doc-1', content: 'Original content for testing' })]
     const { bucket, indexConfig } = createMockBucket({ documents: docs })
@@ -53,7 +53,7 @@ describe('integration', () => {
   it('multi-bucket → merged query results', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umInit({ vectorStore: adapter, embedding })
+    const instance = await typegraphInit({ vectorStore: adapter, embedding })
 
     const { bucket: source1, documents: docs1, indexConfig: indexConfig1 } = createMockBucket({ id: 'src-1', documents: createTestDocuments(2, 'Alpha') })
     const { bucket: source2, documents: docs2, indexConfig: indexConfig2 } = createMockBucket({ id: 'src-2', documents: createTestDocuments(2, 'Beta') })
@@ -73,7 +73,7 @@ describe('integration', () => {
     const adapter = createMockAdapter()
     const embeddingA = createMockEmbedding({ model: 'model-a', dimensions: 4 })
     const embeddingB = createMockEmbedding({ model: 'model-b', dimensions: 4 })
-    const instance = await d8umInit({ vectorStore: adapter, embedding: embeddingA })
+    const instance = await typegraphInit({ vectorStore: adapter, embedding: embeddingA })
 
     const { bucket: source1, documents: docs1, indexConfig: indexConfig1 } = createMockBucket({ id: 'src-1', documents: createTestDocuments(2, 'Alpha') })
     const { bucket: source2, documents: docs2, indexConfig: indexConfig2 } = createMockBucket({ id: 'src-2', documents: createTestDocuments(2, 'Beta') })
@@ -90,7 +90,7 @@ describe('integration', () => {
   it('idempotency (repeated ingestion is no-op)', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umInit({ vectorStore: adapter, embedding })
+    const instance = await typegraphInit({ vectorStore: adapter, embedding })
 
     const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(2) })
     registerTestBucket(instance, bucket, embedding)
@@ -106,7 +106,7 @@ describe('integration', () => {
   it('tenant isolation', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umInit({ vectorStore: adapter, embedding })
+    const instance = await typegraphInit({ vectorStore: adapter, embedding })
 
     const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(2) })
     registerTestBucket(instance, bucket, embedding)
@@ -124,7 +124,7 @@ describe('integration', () => {
   it('ingestPreChunked → query', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umInit({ vectorStore: adapter, embedding })
+    const instance = await typegraphInit({ vectorStore: adapter, embedding })
 
     const { bucket } = createMockBucket({ documents: [] })
     registerTestBucket(instance, bucket, embedding)
@@ -143,7 +143,7 @@ describe('integration', () => {
   it('query format pipeline (same results → xml/md/plain/custom)', async () => {
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umInit({ vectorStore: adapter, embedding })
+    const instance = await typegraphInit({ vectorStore: adapter, embedding })
 
     const { bucket, documents, indexConfig } = createMockBucket({ documents: createTestDocuments(2) })
     registerTestBucket(instance, bucket, embedding)
@@ -167,7 +167,7 @@ describe('integration', () => {
 
     const adapter = createMockAdapter()
     const embedding = createMockEmbedding()
-    const instance = await d8umInit({
+    const instance = await typegraphInit({
       vectorStore: adapter,
       embedding,
       hooks: { onIndexStart, onIndexComplete, onQueryResults },

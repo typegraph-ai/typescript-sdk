@@ -1,4 +1,4 @@
-import type { EmbeddingProvider } from '@d8um-ai/core'
+import type { EmbeddingProvider } from '@typegraph-ai/core'
 
 /**
  * Synonym groups: first element is canonical form, rest map to it.

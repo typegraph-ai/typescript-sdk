@@ -1,9 +1,9 @@
 #!/usr/bin/env npx tsx
 /**
- * Contractual Clause Retrieval — d8um Graph (Neural Search)
+ * Contractual Clause Retrieval — typegraph Graph (Neural Search)
  *
  * Runs the contractual-clause-retrieval benchmark
- * using d8um graph with neural search (hybrid + memory recall + PPR graph traversal).
+ * using typegraph graph with neural search (hybrid + memory recall + PPR graph traversal).
  *
  * Usage:
  *   npx tsx --env-file=.env contractual-clause-retrieval/neural/run.ts              # query-only
@@ -29,7 +29,7 @@ async function main() {
   printBanner(config, cli)
 
   // Phase 1: Initialize with graph bridge
-  console.log('Phase 1: Initializing d8um with graph bridge...')
+  console.log('Phase 1: Initializing typegraph with graph bridge...')
   const { d, adapter } = await initNeural(config)
   console.log(`  LLM: ${LLM_MODEL} (triple extraction during ingest)`)
   const { bucket } = await resolveBucket(d, config.bucketName, cli.shouldSeed)

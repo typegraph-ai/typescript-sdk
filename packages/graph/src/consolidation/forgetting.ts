@@ -1,6 +1,6 @@
-import type { LLMProvider } from '@d8um-ai/core'
-import type { d8umIdentity } from '@d8um-ai/core'
-import { generateId } from '@d8um-ai/core'
+import type { LLMProvider } from '@typegraph-ai/core'
+import type { typegraphIdentity } from '@typegraph-ai/core'
+import { generateId } from '@typegraph-ai/core'
 import type { MemoryRecord } from '../types/index.js'
 import type { MemoryStoreAdapter } from '../types/adapter.js'
 import { findDecayedMemories, type DecayConfig, DEFAULT_DECAY_CONFIG } from './decay.js'
@@ -36,7 +36,7 @@ export class ForgettingEngine {
    * - 'delete': Permanently remove from the store
    */
   async forget(
-    scope: d8umIdentity,
+    scope: typegraphIdentity,
     policy: ForgettingPolicy,
     decayConfig: DecayConfig = DEFAULT_DECAY_CONFIG,
   ): Promise<ForgettingResult> {
@@ -69,7 +69,7 @@ export class ForgettingEngine {
 
   private async summarizeMemories(
     memories: MemoryRecord[],
-    _scope: d8umIdentity,
+    _scope: typegraphIdentity,
   ): Promise<ForgettingResult> {
     if (!this.llm || memories.length === 0) {
       // Fall back to archive if no LLM available

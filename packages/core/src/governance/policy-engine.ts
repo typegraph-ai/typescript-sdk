@@ -1,6 +1,6 @@
 import type { PolicyStoreAdapter, PolicyEvalContext, PolicyDecision, PolicyRule, Policy } from '../types/policy.js'
-import type { d8umEventSink, d8umEvent } from '../types/events.js'
-import type { d8umIdentity } from '../types/identity.js'
+import type { typegraphEventSink, typegraphEvent } from '../types/events.js'
+import type { typegraphIdentity } from '../types/identity.js'
 
 /**
  * Evaluates policies against SDK actions.
@@ -11,7 +11,7 @@ import type { d8umIdentity } from '../types/identity.js'
 export class PolicyEngine {
   constructor(
     private store: PolicyStoreAdapter,
-    private eventSink?: d8umEventSink,
+    private eventSink?: typegraphEventSink,
   ) {}
 
   /**
@@ -63,7 +63,7 @@ export class PolicyEngine {
   }
 
   /** Load all enabled policies that apply to this identity scope. */
-  private async loadApplicable(identity: d8umIdentity): Promise<Policy[]> {
+  private async loadApplicable(identity: typegraphIdentity): Promise<Policy[]> {
     const policies = await this.store.listPolicies({ enabled: true })
 
     return policies.filter((p) => {
@@ -90,7 +90,7 @@ export class PolicyEngine {
 
   private emitViolation(ctx: PolicyEvalContext, policyId: string, policyName: string, rule: PolicyRule): void {
     if (!this.eventSink) return
-    const event: d8umEvent = {
+    const event: typegraphEvent = {
       id: crypto.randomUUID(),
       eventType: 'policy.violation',
       identity: ctx.identity,

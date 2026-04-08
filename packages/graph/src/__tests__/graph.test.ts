@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { EmbeddedGraph } from '../graph/embedded-graph.js'
-import type { d8umIdentity } from '@d8um-ai/core'
+import type { typegraphIdentity } from '@typegraph-ai/core'
 import type { MemoryStoreAdapter, SemanticEntity, SemanticEdge } from '../index.js'
 import { buildScope } from '../index.js'
 
@@ -48,7 +48,7 @@ function mockStore(
     search: vi.fn().mockResolvedValue([]),
     upsertEntity: vi.fn().mockImplementation(async (e: SemanticEntity) => { entities.set(e.id, e); return e }),
     getEntity: vi.fn().mockImplementation(async (id: string) => entities.get(id) ?? null),
-    findEntities: vi.fn().mockImplementation(async (query: string, _scope: d8umIdentity) => {
+    findEntities: vi.fn().mockImplementation(async (query: string, _scope: typegraphIdentity) => {
       return [...entities.values()].filter(e => e.name.toLowerCase().includes(query.toLowerCase()))
     }),
     searchEntities: vi.fn().mockResolvedValue([]),

@@ -31,7 +31,7 @@ export type {
 
 export type {
   QuerySignals,
-  d8umResult,
+  typegraphResult,
   RawScores,
   NormalizedScores,
   QueryOpts,
@@ -47,18 +47,18 @@ export type {
 export { IndexError } from './index-types.js'
 
 export type {
-  d8umDocument,
+  typegraphDocument,
   DocumentStatus,
   Visibility,
   DocumentFilter,
   UpsertDocumentInput,
-} from './d8um-document.js'
+} from './typegraph-document.js'
 
-export type { d8umHooks } from './hooks.js'
+export type { typegraphHooks } from './hooks.js'
 
 export type { LLMProvider, LLMGenerateOptions } from './llm-provider.js'
 
-export type { d8umIdentity } from './identity.js'
+export type { typegraphIdentity } from './identity.js'
 
 export type {
   GraphBridge,
@@ -73,13 +73,13 @@ export type {
 export type { ExtractionConfig } from './extraction-config.js'
 
 export type {
-  d8umEventType,
-  d8umEvent,
+  typegraphEventType,
+  typegraphEvent,
   TokenUsage,
-  d8umEventSink,
+  typegraphEventSink,
 } from './events.js'
 
-export { D8umError, NotFoundError, NotInitializedError, ConfigError } from './errors.js'
+export { TypegraphError, NotFoundError, NotInitializedError, ConfigError } from './errors.js'
 
 export type {
   PolicyType,
@@ -100,7 +100,7 @@ export type {
   MemoryHealthReport,
 } from './memory.js'
 
-export type { d8umLogger } from './logger.js'
+export type { typegraphLogger } from './logger.js'
 
 export type {
   PaginationOpts,

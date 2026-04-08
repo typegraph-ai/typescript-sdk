@@ -1,4 +1,4 @@
-# Cognitive Memory with d8um
+# Cognitive Memory with TypeGraph
 
 ## Why Agents Need Memory
 
@@ -10,22 +10,22 @@ Human cognition solves this with multiple, specialized memory systems working in
 
 ## The Cognitive Science Foundation
 
-d8um's memory system draws on established models from cognitive science and neuroscience:
+TypeGraph's memory system draws on established models from cognitive science and neuroscience:
 
-**Atkinson-Shiffrin model (1968)** introduced the multi-store framework: sensory memory, short-term (working) memory, and long-term memory. Working memory has limited capacity and acts as a processing buffer; long-term memory is vast but requires encoding and retrieval. d8um implements this with a bounded `WorkingMemory` buffer and persistent long-term storage.
+**Atkinson-Shiffrin model (1968)** introduced the multi-store framework: sensory memory, short-term (working) memory, and long-term memory. Working memory has limited capacity and acts as a processing buffer; long-term memory is vast but requires encoding and retrieval. TypeGraph implements this with a bounded `WorkingMemory` buffer and persistent long-term storage.
 
-**Tulving's taxonomy (1972)** distinguished episodic memory (autobiographical events with temporal context) from semantic memory (general knowledge and facts). Later work added procedural memory (learned skills and patterns). d8um implements all three as distinct `MemoryCategory` types with specialized data structures for each.
+**Tulving's taxonomy (1972)** distinguished episodic memory (autobiographical events with temporal context) from semantic memory (general knowledge and facts). Later work added procedural memory (learned skills and patterns). TypeGraph implements all three as distinct `MemoryCategory` types with specialized data structures for each.
 
-**Complementary Learning Systems theory (CLS)** (McClelland et al., 1995) explains how the hippocampus rapidly encodes episodic experiences while the neocortex slowly consolidates them into stable semantic knowledge. d8um mirrors this with its extraction pipeline (fast episodic capture) and consolidation system (gradual promotion to semantic facts).
+**Complementary Learning Systems theory (CLS)** (McClelland et al., 1995) explains how the hippocampus rapidly encodes episodic experiences while the neocortex slowly consolidates them into stable semantic knowledge. TypeGraph mirrors this with its extraction pipeline (fast episodic capture) and consolidation system (gradual promotion to semantic facts).
 
-## How d8um Implements Each Memory Type
+## How TypeGraph Implements Each Memory Type
 
 ### Working Memory
 
 A bounded in-memory buffer inspired by cognitive science's capacity limits. Items are stored with a priority score and evicted by lowest priority first, then oldest first, when capacity is exceeded.
 
 ```ts
-const memory = new d8umMemory({ memoryStore, embedding, llm })
+const memory = new typegraphMemory({ memoryStore, embedding, llm })
 
 // Add items to working memory with priority
 memory.working.add('User is debugging a PostgreSQL connection issue', 'system', 5)
@@ -86,7 +86,7 @@ const procedures = await memory.recallProcedures('deploy to production')
 
 ## The Bi-Temporal Data Model
 
-Inspired by Graphiti's temporal knowledge graph (arXiv:2501.13956) and Snodgrass's temporal database theory (1999), every memory record in d8um carries two independent timelines:
+Inspired by Graphiti's temporal knowledge graph (arXiv:2501.13956) and Snodgrass's temporal database theory (1999), every memory record in TypeGraph carries two independent timelines:
 
 | Timeline | Fields | Meaning |
 |----------|--------|---------|
@@ -125,7 +125,7 @@ Status transitions are validated -- the system enforces that only legal transiti
 
 ## LLM-Driven Extraction Pipeline
 
-Inspired by Mem0's memory extraction model (arXiv:2504.19413), d8um uses a two-phase LLM pipeline:
+Inspired by Mem0's memory extraction model (arXiv:2504.19413), TypeGraph uses a two-phase LLM pipeline:
 
 **Phase 1: Fact Extraction.** Given a conversation turn, the LLM extracts candidate facts as subject-predicate-object triples with importance and confidence scores.
 
@@ -154,24 +154,24 @@ Edge invalidation follows Graphiti's approach: when a new fact contradicts an ex
 
 ## Consolidation, Decay, and Forgetting
 
-The `@d8um-ai/graph` package provides lifecycle management:
+The `@typegraph-ai/graph` package provides lifecycle management:
 
 - **Consolidation** promotes episodic memories to semantic facts when patterns emerge from repeated observations
 - **Decay** reduces the effective priority of memories based on access frequency, age, and importance
 - **Forgetting** archives memories that have decayed below a threshold, keeping them available for explicit historical queries but excluded from default retrieval
 
-These operations run as schedulable jobs via d8um's job system.
+These operations run as schedulable jobs via TypeGraph's job system.
 
 ## Dual-Mode Execution
 
-d8um memory supports two execution modes that share the same underlying engines:
+TypeGraph memory supports two execution modes that share the same underlying engines:
 
 ### Imperative API
 
 Direct method calls for immediate results:
 
 ```ts
-const memory = new d8umMemory({ memoryStore, embedding, llm })
+const memory = new typegraphMemory({ memoryStore, embedding, llm })
 
 await memory.remember('Prefers dark mode interfaces')
 const facts = await memory.recallFacts('UI preferences')
@@ -184,27 +184,27 @@ const context = await memory.assembleContext('user preferences')
 Schedulable, automated memory operations:
 
 ```ts
-import { registerConsolidationJobs } from '@d8um-ai/graph'
+import { registerConsolidationJobs } from '@typegraph-ai/graph'
 registerConsolidationJobs()
 
 // Schedule nightly consolidation
-d8um.jobs.create({ type: 'memory_consolidation', schedule: '0 3 * * *' })
+typegraph.jobs.create({ type: 'memory_consolidation', schedule: '0 3 * * *' })
 
 // Schedule hourly decay
-d8um.jobs.create({ type: 'memory_decay', schedule: '0 * * * *' })
+typegraph.jobs.create({ type: 'memory_decay', schedule: '0 * * * *' })
 
 // Ingest conversations as a job
-d8um.jobs.create({ type: 'memory_conversation_ingest', config: { messages, conversationId } })
+typegraph.jobs.create({ type: 'memory_conversation_ingest', config: { messages, conversationId } })
 ```
 
-The job system uses the same `JobTypeDefinition` interface as d8um's retrieval jobs, providing scheduling, status tracking, and run history.
+The job system uses the same `JobTypeDefinition` interface as TypeGraph's retrieval jobs, providing scheduling, status tracking, and run history.
 
 ## Multi-Level Scoping
 
 Memory is scoped across five levels for isolation and sharing:
 
 ```ts
-const identity: d8umIdentity = {
+const identity: typegraphIdentity = {
   tenantId: 'acme-corp',      // organization-level isolation
   groupId: 'team-alpha',      // shared team/channel/project memory
   userId: 'alice',            // individual memory owner
@@ -217,9 +217,9 @@ Scoping uses subset filtering: a query for `{ groupId: 'team-alpha' }` matches r
 
 ## MCP Server and Vercel AI SDK Integration
 
-`@d8um-ai/mcp-server` exposes memory operations as MCP tools (`d8um_remember`, `d8um_recall`, `d8um_correct`), making d8um memory accessible to any MCP-compatible agent.
+`@typegraph-ai/mcp-server` exposes memory operations as MCP tools (`typegraph_remember`, `typegraph_recall`, `typegraph_correct`), making TypeGraph memory accessible to any MCP-compatible agent.
 
-`@d8um-ai/vercel-ai-provider` provides memory tools and middleware for the Vercel AI SDK, enabling seamless integration with `generateText()`, `streamText()`, and the AI SDK's tool system.
+`@typegraph-ai/vercel-ai-provider` provides memory tools and middleware for the Vercel AI SDK, enabling seamless integration with `generateText()`, `streamText()`, and the AI SDK's tool system.
 
 ## Context Assembly
 
@@ -252,7 +252,7 @@ const context = await memory.assembleContext('database setup', {
 // </memory>
 ```
 
-## Landscape: Where d8um Fits
+## Landscape: Where TypeGraph Fits
 
 Agent memory is an active and rapidly evolving area of research. Several excellent projects have advanced the field, each contributing important ideas that benefit the broader ecosystem.
 
@@ -280,18 +280,18 @@ Several papers provide important theoretical grounding for agent memory systems:
 - **CoALA (Cognitive Architectures for Language Agents)** (arXiv:2309.02427) provides a framework for understanding how language agents can be organized around cognitive architectures, including memory systems.
 - **Mem^p** (arXiv:2508.06433) explores procedural memory specifically -- how agents can learn and recall step-by-step procedures from experience.
 
-### Where d8um fits
+### Where TypeGraph fits
 
-d8um's cognitive memory system serves a specific audience with specific constraints:
+TypeGraph's cognitive memory system serves a specific audience with specific constraints:
 
-- **TypeScript-native.** d8um is the only cognitive memory framework built natively in TypeScript. Graphiti, Mem0, MemOS, and Letta are all Python-first. For teams building in TypeScript/Node.js, d8um provides first-class types, native async/await patterns, and zero Python interop overhead.
+- **TypeScript-native.** TypeGraphis the only cognitive memory framework built natively in TypeScript. Graphiti, Mem0, MemOS, and Letta are all Python-first. For teams building in TypeScript/Node.js, TypeGraphprovides first-class types, native async/await patterns, and zero Python interop overhead.
 
-- **Lightest infrastructure.** d8um requires no graph database. The memory substrate works with the same vector store adapters used for retrieval (pgvector, sqlite-vec). For teams that want cognitive memory without adding Neo4j or a separate memory service to their stack, d8um provides the full memory lifecycle with minimal operational burden.
+- **Lightest infrastructure.** TypeGraphrequires no graph database. The memory substrate works with the same vector store adapters used for retrieval (pgvector, sqlite-vec). For teams that want cognitive memory without adding Neo4j or a separate memory service to their stack, TypeGraphprovides the full memory lifecycle with minimal operational burden.
 
-- **Unified RAG + memory.** d8um's retrieval engine and memory system share the same embedding infrastructure, adapter layer, and job system. A single SDK handles both document retrieval and agent memory, with `assembleContext()` merging both into a single prompt context.
+- **Unified RAG + memory.** TypeGraph's retrieval engine and memory system share the same embedding infrastructure, adapter layer, and job system. A single SDK handles both document retrieval and agent memory, with `assembleContext()` merging both into a single prompt context.
 
-- **Job system for memory operations.** d8um is unique in offering schedulable memory operations (consolidation, decay, forgetting) through the same job system used for data ingestion. No competitor provides built-in scheduled memory lifecycle management.
+- **Job system for memory operations.** TypeGraphis unique in offering schedulable memory operations (consolidation, decay, forgetting) through the same job system used for data ingestion. No competitor provides built-in scheduled memory lifecycle management.
 
-- **Bi-temporal model without a graph DB.** d8um implements Graphiti-inspired bi-temporal tracking (world time + system time) on top of standard vector storage, providing point-in-time queries and full invalidation history without requiring a graph database.
+- **Bi-temporal model without a graph DB.** TypeGraph implements Graphiti-inspired bi-temporal tracking (world time + system time) on top of standard vector storage, providing point-in-time queries and full invalidation history without requiring a graph database.
 
-These are excellent tools that have advanced the field significantly. Graphiti established the bi-temporal paradigm. Mem0 demonstrated that memory can be radically simple. MemOS showed that lifecycle management matters. Letta proved that agents can manage their own context. d8um builds on these research contributions while serving TypeScript developers who want lightweight infrastructure and composable integration with their existing stack.
+These are excellent tools that have advanced the field significantly. Graphiti established the bi-temporal paradigm. Mem0 demonstrated that memory can be radically simple. MemOS showed that lifecycle management matters. Letta proved that agents can manage their own context. TypeGraphbuilds on these research contributions while serving TypeScript developers who want lightweight infrastructure and composable integration with their existing stack.

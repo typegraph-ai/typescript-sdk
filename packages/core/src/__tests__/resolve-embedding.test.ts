@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveEmbeddingProvider } from '../d8um.js'
+import { resolveEmbeddingProvider } from '../typegraph.js'
 import { createMockEmbedding, createMockAISDKModel } from './helpers/mock-embedding.js'
 
 describe('resolveEmbeddingProvider', () => {

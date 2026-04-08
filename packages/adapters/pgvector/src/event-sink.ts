@@ -1,9 +1,9 @@
-import type { d8umEvent, d8umEventSink } from '@d8um-ai/core'
+import type { typegraphEvent, typegraphEventSink } from '@typegraph-ai/core'
 
 export interface PgEventSinkConfig {
   /** Postgres query function (same pool as the adapter). */
   sql: (query: string, params?: unknown[]) => Promise<unknown[]>
-  /** Table name for events. Defaults to 'd8um_events'. */
+  /** Table name for events. Defaults to 'typegraph_events'. */
   eventsTable?: string | undefined
   /** Max events to buffer before flushing. Default: 50. */
   bufferSize?: number | undefined
@@ -15,17 +15,17 @@ export interface PgEventSinkConfig {
  * Postgres-backed event sink with batched inserts.
  * Fire-and-forget: errors are logged to console, never thrown to callers.
  */
-export class PgEventSink implements d8umEventSink {
+export class PgEventSink implements typegraphEventSink {
   private sql: PgEventSinkConfig['sql']
   private eventsTable: string
   private bufferSize: number
   private flushIntervalMs: number
-  private buffer: d8umEvent[] = []
+  private buffer: typegraphEvent[] = []
   private timer: ReturnType<typeof setInterval> | null = null
 
   constructor(config: PgEventSinkConfig) {
     this.sql = config.sql
-    this.eventsTable = config.eventsTable ?? 'd8um_events'
+    this.eventsTable = config.eventsTable ?? 'typegraph_events'
     this.bufferSize = config.bufferSize ?? 50
     this.flushIntervalMs = config.flushIntervalMs ?? 100
 
@@ -39,14 +39,14 @@ export class PgEventSink implements d8umEventSink {
     }
   }
 
-  emit(event: d8umEvent): void {
+  emit(event: typegraphEvent): void {
     this.buffer.push(event)
     if (this.buffer.length >= this.bufferSize) {
       this.flush().catch(() => {})
     }
   }
 
-  emitBatch(events: d8umEvent[]): void {
+  emitBatch(events: typegraphEvent[]): void {
     this.buffer.push(...events)
     if (this.buffer.length >= this.bufferSize) {
       this.flush().catch(() => {})
@@ -108,7 +108,7 @@ export class PgEventSink implements d8umEventSink {
       )
     } catch (err) {
       // Fire-and-forget: log but don't throw
-      console.error('[d8um] Failed to flush events:', (err as Error).message)
+      console.error('[typegraph] Failed to flush events:', (err as Error).message)
     }
   }
 

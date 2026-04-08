@@ -1,9 +1,9 @@
-import type { LLMProvider } from '@d8um-ai/core'
+import type { LLMProvider } from '@typegraph-ai/core'
 import type { MemoryStoreAdapter } from '../types/adapter.js'
-import type { d8umIdentity } from '@d8um-ai/core'
+import type { typegraphIdentity } from '@typegraph-ai/core'
 import type { SemanticFact } from '../types/index.js'
 import { invalidateRecord, createTemporal } from '../temporal.js'
-import { generateId } from '@d8um-ai/core'
+import { generateId } from '@typegraph-ai/core'
 
 // ── Correction Types ──
 
@@ -39,7 +39,7 @@ export class MemoryCorrector {
    */
   async correct(
     correction: string,
-    scope: d8umIdentity,
+    scope: typegraphIdentity,
   ): Promise<CorrectionResult> {
     // Parse the correction to identify what to change
     const parsed = await this.parseCorrection(correction)

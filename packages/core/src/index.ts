@@ -1,8 +1,8 @@
 // Main public API
-export { d8umInit, d8umDeploy, resolveEmbeddingProvider, resolveLLMProvider, DEFAULT_BUCKET_ID } from './d8um.js'
-export type { d8umConfig, d8umInstance, BucketsApi, DocumentsApi, JobsApi, GraphApi, LLMConfig } from './d8um.js'
+export { typegraphInit, typegraphDeploy, resolveEmbeddingProvider, resolveLLMProvider, DEFAULT_BUCKET_ID } from './typegraph.js'
+export type { typegraphConfig, typegraphInstance, BucketsApi, DocumentsApi, JobsApi, GraphApi, LLMConfig } from './typegraph.js'
 /** @deprecated Use LLMConfig instead. */
-export type { LLMInput } from './d8um.js'
+export type { LLMInput } from './typegraph.js'
 
 // Types
 export type {
@@ -25,7 +25,7 @@ export type {
   UndeployResult,
   ScoredChunkWithDocument,
   QuerySignals,
-  d8umResult,
+  typegraphResult,
   RawScores,
   NormalizedScores,
   QueryOpts,
@@ -33,15 +33,15 @@ export type {
   IndexOpts,
   IndexProgressEvent,
   IndexResult,
-  d8umDocument,
+  typegraphDocument,
   DocumentStatus,
   Visibility,
   DocumentFilter,
   UpsertDocumentInput,
-  d8umHooks,
+  typegraphHooks,
   LLMProvider,
   LLMGenerateOptions,
-  d8umIdentity,
+  typegraphIdentity,
   GraphBridge,
   EntityResult,
   EntityDetail,
@@ -50,9 +50,9 @@ export type {
   SubgraphResult,
   GraphStats,
   ExtractionConfig,
-  d8umEvent,
-  d8umEventType,
-  d8umEventSink,
+  typegraphEvent,
+  typegraphEventType,
+  typegraphEventSink,
   TokenUsage,
   PolicyType,
   PolicyAction,
@@ -67,7 +67,7 @@ export type {
   MemoryRecord,
   ConversationTurnResult,
   MemoryHealthReport,
-  d8umLogger,
+  typegraphLogger,
   PaginationOpts,
   PaginatedResult,
   Job,
@@ -78,7 +78,7 @@ export type {
 /** @deprecated Use EmbeddingConfig instead. */
 export type { EmbeddingInput } from './types/index.js'
 export { IndexError } from './types/index.js'
-export { D8umError, NotFoundError, NotInitializedError, ConfigError } from './types/index.js'
+export { TypegraphError, NotFoundError, NotInitializedError, ConfigError } from './types/index.js'
 
 // Embedding
 export type { EmbeddingProvider } from './embedding/index.js'
@@ -104,5 +104,5 @@ export type { NormalizedResult } from './query/index.js'
 export { generateId } from './utils/id.js'
 
 // Cloud mode
-export { createCloudInstance, HttpClient, d8umApiError } from './cloud/index.js'
-export type { d8umCloudInstance, CloudConfig } from './cloud/index.js'
+export { createCloudInstance, HttpClient, TypegraphApiError } from './cloud/index.js'
+export type { typegraphCloudInstance, CloudConfig } from './cloud/index.js'

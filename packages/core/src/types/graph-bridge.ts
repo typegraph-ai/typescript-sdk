@@ -1,37 +1,37 @@
-import type { d8umIdentity } from './identity.js'
+import type { typegraphIdentity } from './identity.js'
 import type { MemoryRecord, ConversationTurnResult, MemoryHealthReport } from './memory.js'
 import type { PaginationOpts } from './pagination.js'
 
 /**
  * Structural interface for the graph/memory bridge.
- * Core does NOT depend on @d8um-ai/graph — this interface uses pure structural typing.
+ * Core does NOT depend on @typegraph/graph — this interface uses pure structural typing.
  * The graph package provides a factory that returns an object matching this shape.
  */
 export interface GraphBridge {
-  /** Deploy memory/graph tables. Called by d8um.deploy() when graph is configured. */
+  /** Deploy memory/graph tables. Called by typegraph.deploy() when graph is configured. */
   deploy?(): Promise<void>
 
   /** Store a memory. LLM extracts triples → entity graph + memory record. */
-  remember(content: string, identity: d8umIdentity, category?: string, opts?: {
+  remember(content: string, identity: typegraphIdentity, category?: string, opts?: {
     importance?: number
     metadata?: Record<string, unknown>
   }): Promise<MemoryRecord>
 
   /** Invalidate a memory and its associated graph edges. Caller must prove ownership via identity. */
-  forget(id: string, identity: d8umIdentity): Promise<void>
+  forget(id: string, identity: typegraphIdentity): Promise<void>
 
   /** Apply a natural language correction (e.g., "Actually, Alice works at Beta Inc now"). */
-  correct(correction: string, identity: d8umIdentity): Promise<{ invalidated: number; created: number; summary: string }>
+  correct(correction: string, identity: typegraphIdentity): Promise<{ invalidated: number; created: number; summary: string }>
 
   /** Ingest a conversation turn with extraction. */
   addConversationTurn(
     messages: Array<{ role: string; content: string; timestamp?: Date }>,
-    identity: d8umIdentity,
+    identity: typegraphIdentity,
     conversationId?: string
   ): Promise<ConversationTurnResult>
 
   /** Recall memories by semantic similarity. */
-  recall(query: string, identity: d8umIdentity, opts?: {
+  recall(query: string, identity: typegraphIdentity, opts?: {
     limit?: number
     types?: string[]
     /** Only return memories valid at this timestamp. */
@@ -43,7 +43,7 @@ export interface GraphBridge {
   /** Recall memories using hybrid search (vector + BM25 keyword).
    *  When the memory store supports it, uses RRF to fuse vector and keyword results.
    *  Falls back to vector-only recall if not implemented. */
-  recallHybrid?(query: string, identity: d8umIdentity, opts?: {
+  recallHybrid?(query: string, identity: typegraphIdentity, opts?: {
     limit?: number
     types?: string[]
     temporalAt?: Date
@@ -51,7 +51,7 @@ export interface GraphBridge {
   }): Promise<MemoryRecord[]>
 
   /** Build an LLM-ready context string from memories. */
-  buildMemoryContext?(query: string, identity: d8umIdentity, opts?: {
+  buildMemoryContext?(query: string, identity: typegraphIdentity, opts?: {
     includeWorking?: boolean
     includeFacts?: boolean
     includeEpisodes?: boolean
@@ -61,7 +61,7 @@ export interface GraphBridge {
   }): Promise<string>
 
   /** Get memory system health statistics. */
-  healthCheck?(identity: d8umIdentity): Promise<MemoryHealthReport>
+  healthCheck?(identity: typegraphIdentity): Promise<MemoryHealthReport>
 
   /** Check if the memory store has any active memories. Used to skip memory runner when empty. */
   hasMemories?(): Promise<boolean>
@@ -86,7 +86,7 @@ export interface GraphBridge {
   }): Promise<void>
 
   /** Search entities by embedding similarity. Used during graph-augmented retrieval. */
-  searchEntities?(query: string, identity: d8umIdentity, limit?: number): Promise<Array<{ id: string; name: string; entityType: string; similarity?: number }>>
+  searchEntities?(query: string, identity: typegraphIdentity, limit?: number): Promise<Array<{ id: string; name: string; entityType: string; similarity?: number }>>
 
   /** Get adjacency list for PPR. */
   getAdjacencyList?(entityIds: string[]): Promise<Map<string, Array<{ target: string; weight: number }>>>
@@ -110,13 +110,13 @@ export interface GraphBridge {
   getSubgraph?(opts: SubgraphOpts): Promise<SubgraphResult>
 
   /** Get graph-level statistics. */
-  getGraphStats?(identity: d8umIdentity): Promise<GraphStats>
+  getGraphStats?(identity: typegraphIdentity): Promise<GraphStats>
 
   /** Get all relation types in the graph with counts. */
-  getRelationTypes?(identity: d8umIdentity): Promise<Array<{ relation: string; count: number }>>
+  getRelationTypes?(identity: typegraphIdentity): Promise<Array<{ relation: string; count: number }>>
 
   /** Get all entity types in the graph with counts. */
-  getEntityTypes?(identity: d8umIdentity): Promise<Array<{ entityType: string; count: number }>>
+  getEntityTypes?(identity: typegraphIdentity): Promise<Array<{ entityType: string; count: number }>>
 }
 
 // ── Graph exploration types ──
@@ -160,7 +160,7 @@ export interface SubgraphOpts {
   entityIds?: string[] | undefined
   /** Or search by text to find seed entities. */
   query?: string | undefined
-  identity: d8umIdentity
+  identity: typegraphIdentity
   /** Expansion hops from seeds. Default: 1, max: 3. */
   depth?: number | undefined
   /** Max total entities. Default: 100. */

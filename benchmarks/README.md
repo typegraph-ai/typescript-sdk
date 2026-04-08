@@ -1,6 +1,6 @@
-# d8um Benchmarks
+# TypeGraph Benchmarks
 
-Reproducible evaluation of d8um's retrieval and graph-RAG capabilities against published academic benchmarks. Each benchmark uses the **exact methodology** (chunk sizes, scoring functions, context windows) from its source paper to ensure results are directly comparable to published baselines.
+Reproducible evaluation of TypeGraph's retrieval and graph-RAG capabilities against published academic benchmarks. Each benchmark uses the **exact methodology** (chunk sizes, scoring functions, context windows) from its source paper to ensure results are directly comparable to published baselines.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ Reproducible evaluation of d8um's retrieval and graph-RAG capabilities against p
 ## Prerequisites
 
 - Node.js 18+
-- The d8um SDK built from source (`pnpm run build` from the repo root)
+- The TypeGraph SDK built from source (`pnpm run build` from the repo root)
 - A `.env` file in this directory with the required credentials (see `.env.example`)
 
 ### Required Services
@@ -38,7 +38,7 @@ Reproducible evaluation of d8um's retrieval and graph-RAG capabilities against p
 
 ```bash
 # 1. Build the SDK (REQUIRED — benchmark runners import from dist/)
-cd /path/to/d8um
+cd /path/to/typegraph
 pnpm run build
 
 # 2. Install benchmark dependencies
@@ -50,7 +50,7 @@ cp .env.example .env
 # Then fill in your credentials
 ```
 
-**Always rebuild the SDK before running benchmarks.** The runners import d8um packages via their compiled `dist/` output (package.json `exports` field). Running against a stale build causes silent failures or incorrect behavior.
+**Always rebuild the SDK before running benchmarks.** The runners import TypeGraph packages via their compiled `dist/` output (package.json `exports` field). Running against a stale build causes silent failures or incorrect behavior.
 
 ## Running Benchmarks
 
@@ -160,7 +160,7 @@ Here's the recommended workflow for running a benchmark from scratch:
 ### 1. Build the SDK
 
 ```bash
-cd /path/to/d8um
+cd /path/to/typegraph
 pnpm run build
 ```
 
@@ -248,7 +248,7 @@ The eval cache writes each scored query to a JSONL file immediately (`{dataset}/
 
 The benchmark pipeline is designed to be safely re-run:
 
-- **Hash store deduplication**: Each document's content is SHA256-hashed on ingest. The hash is stored in `d8um_hashes` keyed by content + embedding model. On re-seed, documents with matching hashes are skipped entirely — no embedding calls, no database writes.
+- **Hash store deduplication**: Each document's content is SHA256-hashed on ingest. The hash is stored in `typegraph_hashes` keyed by content + embedding model. On re-seed, documents with matching hashes are skipped entirely — no embedding calls, no database writes.
 
 - **Upsert at the chunk level**: Even if a document passes the hash check, the chunk INSERT uses `ON CONFLICT (idempotency_key, chunk_index, bucket_id) DO UPDATE`, preventing row duplication at the database level.
 
@@ -281,8 +281,8 @@ When you need to reseed with changed configuration, you must clear the existing 
 
 TRUNCATE TABLE {prefix}_gateway_openai_text_embedding_3_small;
 TRUNCATE TABLE {prefix}_registry;
-DELETE FROM d8um_hashes WHERE bucket_id = (SELECT id FROM d8um_buckets WHERE name = '{bucket_name}');
-DELETE FROM d8um_documents WHERE bucket_id = (SELECT id FROM d8um_buckets WHERE name = '{bucket_name}');
+DELETE FROM typegraph_hashes WHERE bucket_id = (SELECT id FROM typegraph_buckets WHERE name = '{bucket_name}');
+DELETE FROM typegraph_documents WHERE bucket_id = (SELECT id FROM typegraph_buckets WHERE name = '{bucket_name}');
 ```
 
 ### Neural variant (core tables + graph tables)
@@ -293,8 +293,8 @@ TRUNCATE TABLE {prefix}_registry;
 TRUNCATE TABLE {prefix}memories;
 TRUNCATE TABLE {prefix}entities;
 TRUNCATE TABLE {prefix}edges;
-DELETE FROM d8um_hashes WHERE bucket_id = (SELECT id FROM d8um_buckets WHERE name = '{bucket_name}');
-DELETE FROM d8um_documents WHERE bucket_id = (SELECT id FROM d8um_buckets WHERE name = '{bucket_name}');
+DELETE FROM typegraph_hashes WHERE bucket_id = (SELECT id FROM typegraph_buckets WHERE name = '{bucket_name}');
+DELETE FROM typegraph_documents WHERE bucket_id = (SELECT id FROM typegraph_buckets WHERE name = '{bucket_name}');
 ```
 
 Note: Neural graph tables use `{prefix}memories` (no extra underscore), e.g., `bench_license_neural_memories`.
@@ -427,7 +427,7 @@ Each runner is a thin `main()` function that composes shared helpers:
 
 ```
 1. Parse CLI args (--seed, --validate, --record, etc.)
-2. Initialize d8um (initCore or initNeural)
+2. Initialize TypeGraph (initCore or initNeural)
 3. Load dataset from Vercel Blob (corpus, queries, qrels)
 4. If --validate: run smoke test and exit
 5. If --seed: ingest full corpus
@@ -446,9 +446,9 @@ Chunk tables encode the full embedding model path:
 ```
 
 Shared tables across all benchmarks:
-- `d8um_documents` — document records
-- `d8um_hashes` — content hashes for deduplication
-- `d8um_buckets` — bucket registry
+- `typegraph_documents` — document records
+- `typegraph_hashes` — content hashes for deduplication
+- `typegraph_buckets` — bucket registry
 
 ## Metrics
 
@@ -485,7 +485,7 @@ The hash store matches on content + embedding model. If both are unchanged, docu
 If you see unexpected errors or metrics that don't match expectations, rebuild:
 
 ```bash
-cd /path/to/d8um
+cd /path/to/typegraph
 pnpm run build
 ```
 

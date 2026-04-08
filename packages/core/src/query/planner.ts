@@ -1,10 +1,10 @@
 import type { Bucket } from '../types/bucket.js'
-import type { QueryOpts, QueryResponse, QuerySignals, d8umResult, RawScores, NormalizedScores } from '../types/query.js'
+import type { QueryOpts, QueryResponse, QuerySignals, typegraphResult, RawScores, NormalizedScores } from '../types/query.js'
 import type { VectorStoreAdapter } from '../types/adapter.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import type { GraphBridge } from '../types/graph-bridge.js'
-import type { d8umEvent, d8umEventSink } from '../types/events.js'
-import type { d8umLogger } from '../types/logger.js'
+import type { typegraphEvent, typegraphEventSink } from '../types/events.js'
+import type { typegraphLogger } from '../types/logger.js'
 import { IndexedRunner } from './runners/indexed.js'
 import { MemoryRunner } from './runners/memory-runner.js'
 import { GraphRunner } from './runners/graph-runner.js'
@@ -122,8 +122,8 @@ export class QueryPlanner {
     private bucketIds: string[],
     private bucketEmbeddings: Map<string, EmbeddingProvider>,
     private graph?: GraphBridge,
-    private eventSink?: d8umEventSink,
-    private logger?: d8umLogger,
+    private eventSink?: typegraphEventSink,
+    private logger?: typegraphLogger,
   ) {}
 
   async execute(text: string, opts: QueryOpts = {}): Promise<QueryResponse> {
@@ -186,7 +186,7 @@ export class QueryPlanner {
           results: [],
           buckets: {},
           query: { text, tenantId, durationMs: Date.now() - startMs, mergeStrategy: 'rrf' },
-          warnings: ['Graph/memory signals require a graph bridge. Configure graph in d8umConfig.'],
+          warnings: ['Graph/memory signals require a graph bridge. Configure graph in typegraphConfig.'],
         }
       }
 
@@ -218,7 +218,7 @@ export class QueryPlanner {
         ? mergeAndRank(runnerArrays, count, undefined, signals, effectiveScoreWeights)
         : (runnerArrays[0] ?? []).slice(0, count)
 
-      const results: d8umResult[] = allResults.map(r => {
+      const results: typegraphResult[] = allResults.map(r => {
         const merged = r as any
         const agg = merged.rawScores ?? r.rawScores
         const rawScores: RawScores = {}
@@ -412,8 +412,8 @@ export class QueryPlanner {
       ? mergeAndRank(runnerArrays, count, undefined, signals, effectiveScoreWeights)
       : allResults.slice(0, count)
 
-    // Map NormalizedResult → d8umResult with raw/normalized score structure
-    const results: d8umResult[] = mergedResults.map(r => {
+    // Map NormalizedResult → typegraphResult with raw/normalized score structure
+    const results: typegraphResult[] = mergedResults.map(r => {
       const merged = r as any
 
       // Get aggregated raw scores (from merger if merged, raw if not)
@@ -513,7 +513,7 @@ export class QueryPlanner {
     const durationMs = Date.now() - startMs
 
     if (this.eventSink) {
-      const event: d8umEvent = {
+      const event: typegraphEvent = {
         id: crypto.randomUUID(),
         eventType: 'query.execute',
         identity,

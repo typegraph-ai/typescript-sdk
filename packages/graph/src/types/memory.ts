@@ -1,4 +1,4 @@
-import type { d8umIdentity, Visibility } from '@d8um-ai/core'
+import type { typegraphIdentity, Visibility } from '@typegraph-ai/core'
 
 // ── Memory Categories ──
 
@@ -52,7 +52,7 @@ export interface MemoryRecord extends TemporalRecord {
   /** Arbitrary metadata */
   metadata: Record<string, unknown>
   /** Who this memory belongs to */
-  scope: d8umIdentity
+  scope: typegraphIdentity
   /** Access visibility. Default: 'user' (most restrictive). */
   visibility?: Visibility | undefined
 }
@@ -89,7 +89,7 @@ export interface SemanticEntity {
   properties: Record<string, unknown>
   /** Embedding of the entity name for similarity matching */
   embedding?: number[] | undefined
-  scope: d8umIdentity
+  scope: typegraphIdentity
   /** Access visibility. Default: 'tenant' (entities are typically shared within org). */
   visibility?: Visibility | undefined
   temporal: TemporalRecord
@@ -108,7 +108,7 @@ export interface SemanticEdge {
   weight: number
   /** Arbitrary typed properties */
   properties: Record<string, unknown>
-  scope: d8umIdentity
+  scope: typegraphIdentity
   /** Access visibility. Default: 'tenant' (edges are typically shared within org). */
   visibility?: Visibility | undefined
   temporal: TemporalRecord

@@ -6,7 +6,7 @@ export interface EmbeddedChunk {
   userId?: string | undefined
   agentId?: string | undefined
   conversationId?: string | undefined
-  /** UUID referencing d8um_documents.id. */
+  /** UUID referencing typegraph_documents.id. */
   documentId: string
 
   content: string

@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * GraphRAG-Bench Novel — d8um Core (Hybrid + Fast)
+ * GraphRAG-Bench Novel — typegraph Core (Hybrid + Fast)
  *
  * Answer-generation benchmark: 20 Project Gutenberg novels (~1,147 chunks at 1200 tokens),
  * 2,010 questions. Single-loop eval: retrieve → generate answer → score vs gold.
@@ -36,7 +36,7 @@ async function main() {
   printBanner(config, cli)
 
   // Phase 1: Initialize
-  console.log('Phase 1: Initializing d8um with Neon pgvector...')
+  console.log('Phase 1: Initializing typegraph with Neon pgvector...')
   const { d, adapter } = await initCore(config)
   const { bucket } = await resolveBucket(d, config.bucketName, cli.shouldSeed)
   const latency = await measureLatencyProfile(adapter)

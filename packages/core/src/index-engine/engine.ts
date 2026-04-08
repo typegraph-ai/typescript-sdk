@@ -9,7 +9,7 @@ import { sha256, resolveIdempotencyKey, buildHashStoreKey } from './hash.js'
 import { defaultChunker } from './chunker.js'
 import { stripMarkdown } from './strip-markdown.js'
 import type { TripleExtractor, EntityContext } from './triple-extractor.js'
-import type { d8umEventSink } from '../types/events.js'
+import type { typegraphEventSink } from '../types/events.js'
 
 /** Race a promise against a timeout. Resolves to undefined on timeout (never rejects). */
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
@@ -23,12 +23,12 @@ const TRIPLE_EXTRACTION_TIMEOUT_MS = 120_000 // 2 minutes per chunk
 
 export class IndexEngine {
   tripleExtractor?: TripleExtractor
-  eventSink: d8umEventSink | undefined
+  eventSink: typegraphEventSink | undefined
 
   constructor(
     private adapter: VectorStoreAdapter,
     private embedding: EmbeddingProvider,
-    eventSink?: d8umEventSink
+    eventSink?: typegraphEventSink
   ) {
     this.eventSink = eventSink
   }

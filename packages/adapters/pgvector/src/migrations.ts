@@ -22,7 +22,7 @@ function djb2(s: string): number {
 export function safeIdx(tablePrefix: string, suffix: string): string {
   // Sanitize schema-qualified names for index identifiers — Postgres does not
   // allow schema-qualified names (dots) in CREATE INDEX index name positions.
-  // e.g. "cust_abc".d8um_hashes → cust_abc_d8um_hashes
+  // e.g. "cust_abc".typegraph_hashes → cust_abc_typegraph_hashes
   const sanitized = tablePrefix.replace(/"/g, '').replace(/\./g, '_')
   const full = `${sanitized}_${suffix}`
   if (full.length <= PG_IDENT_MAX) return full
@@ -221,7 +221,7 @@ export const DOCUMENTS_TABLE_SQL = (documentsTable: string) => {
 }
 
 /**
- * DDL for the sources table - persists d8um Bucket records.
+ * DDL for the sources table - persists typegraph Bucket records.
  */
 export const BUCKETS_TABLE_SQL = (table: string) => {
   const idx = (suffix: string) => safeIdx(table, suffix)

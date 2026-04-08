@@ -14,7 +14,7 @@ export interface AISDKEmbeddingModel {
 }
 
 /**
- * Configuration for using an AI SDK embedding model with d8um.
+ * Configuration for using an AI SDK embedding model with typegraph.
  *
  * @example
  * ```ts
@@ -32,7 +32,7 @@ export interface AISDKEmbeddingInput {
 }
 
 /**
- * Wraps an AI SDK embedding model into d8um's EmbeddingProvider interface.
+ * Wraps an AI SDK embedding model into typegraph's EmbeddingProvider interface.
  * Calls `model.doEmbed()` directly - no dependency on the `ai` core package.
  * Automatically batches requests according to `model.maxEmbeddingsPerCall`.
  */

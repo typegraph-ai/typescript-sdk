@@ -1,4 +1,4 @@
-import type { d8umMemory } from '@d8um-ai/graph'
+import type { TypegraphMemory } from '@typegraph-ai/graph'
 
 // ── Tool Definition ──
 // Structural type matching Vercel AI SDK's tool definition pattern.
@@ -11,14 +11,14 @@ export interface ToolDefinition {
 }
 
 /**
- * Generate Vercel AI SDK-compatible tool definitions from a d8umMemory instance.
+ * Generate Vercel AI SDK-compatible tool definitions from a TypegraphMemory instance.
  *
  * Usage with Vercel AI SDK:
  * ```ts
  * import { generateText } from 'ai'
- * import { d8umMemoryTools } from '@d8um-ai/vercel-ai-provider'
+ * import { typegraphMemoryTools } from '@typegraph-ai/vercel-ai-provider'
  *
- * const tools = d8umMemoryTools(memory)
+ * const tools = typegraphMemoryTools(memory)
  * const { text } = await generateText({
  *   model: openai('gpt-4o'),
  *   tools,
@@ -26,7 +26,7 @@ export interface ToolDefinition {
  * })
  * ```
  */
-export function d8umMemoryTools(memory: d8umMemory): Record<string, ToolDefinition> {
+export function typegraphMemoryTools(memory: TypegraphMemory): Record<string, ToolDefinition> {
   return {
     remember: {
       description: 'Store a memory for future recall',

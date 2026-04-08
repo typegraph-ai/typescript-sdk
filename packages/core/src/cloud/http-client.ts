@@ -1,10 +1,10 @@
-const DEFAULT_BASE_URL = 'https://api.d8um.dev'
+const DEFAULT_BASE_URL = 'https://api.typegraph.dev'
 const DEFAULT_TIMEOUT = 30_000
 
 export interface CloudConfig {
-  /** API key for the d8um cloud service. */
+  /** API key for the typegraph cloud service. */
   apiKey: string
-  /** Base URL for the cloud API. Defaults to 'https://api.d8um.dev'. */
+  /** Base URL for the cloud API. Defaults to 'https://api.typegraph.dev'. */
   baseUrl?: string | undefined
   /** Default tenant ID for all operations. */
   tenantId?: string | undefined
@@ -12,14 +12,14 @@ export interface CloudConfig {
   timeout?: number | undefined
 }
 
-export class d8umApiError extends Error {
+export class TypegraphApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
     public readonly body?: unknown,
   ) {
     super(message)
-    this.name = 'd8umApiError'
+    this.name = 'TypegraphApiError'
   }
 }
 
@@ -94,8 +94,8 @@ export class HttpClient {
 
       if (!response.ok) {
         const body = await response.text().catch(() => '')
-        throw new d8umApiError(
-          `d8um API error: ${response.status} ${response.statusText}`,
+        throw new TypegraphApiError(
+          `typegraph API error: ${response.status} ${response.statusText}`,
           response.status,
           body ? tryParseJson(body) : undefined,
         )
@@ -105,9 +105,9 @@ export class HttpClient {
       if (!text) return undefined as T
       return JSON.parse(text, dateReviver) as T
     } catch (error) {
-      if (error instanceof d8umApiError) throw error
+      if (error instanceof TypegraphApiError) throw error
       if (error instanceof DOMException && error.name === 'AbortError') {
-        throw new d8umApiError('Request timed out', 0)
+        throw new TypegraphApiError('Request timed out', 0)
       }
       throw error
     } finally {

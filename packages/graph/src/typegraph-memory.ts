@@ -1,6 +1,6 @@
-import type { EmbeddingProvider, d8umEventSink, d8umEventType } from '@d8um-ai/core'
+import type { EmbeddingProvider, typegraphEventSink, typegraphEventType } from '@typegraph-ai/core'
 import type { MemoryStoreAdapter } from './types/adapter.js'
-import type { d8umIdentity } from '@d8um-ai/core'
+import type { typegraphIdentity } from '@typegraph-ai/core'
 import type {
   MemoryRecord,
   MemoryCategory,
@@ -14,7 +14,7 @@ import { MemoryExtractor } from './extraction/extractor.js'
 import { InvalidationEngine } from './extraction/invalidation.js'
 import { WorkingMemory, type WorkingMemoryConfig } from './working-memory.js'
 import { createTemporal } from './temporal.js'
-import { generateId } from '@d8um-ai/core'
+import { generateId } from '@typegraph-ai/core'
 
 // ── Memory Health Report ──
 
@@ -32,35 +32,35 @@ export interface MemoryHealthReport {
   stalenessIndex: number
 }
 
-// ── d8umMemory Config ──
+// ── typegraphMemoryConfig ──
 
-export interface d8umMemoryConfig {
+export interface typegraphMemoryConfig {
   memoryStore: MemoryStoreAdapter
   embedding: EmbeddingProvider
   llm: LLMProvider
-  scope: d8umIdentity
+  scope: typegraphIdentity
   workingMemory?: WorkingMemoryConfig | undefined
-  eventSink?: d8umEventSink | undefined
+  eventSink?: typegraphEventSink | undefined
 }
 
-// ── d8umMemory ──
+// ── TypegraphMemory ──
 // Unified developer-facing API for cognitive memory.
 // Imperative mode - direct calls, instant results.
 // Same engines used by job system for automation.
 
-export class d8umMemory {
+export class TypegraphMemory {
   readonly working: WorkingMemory
-  readonly identity: d8umIdentity
+  readonly identity: typegraphIdentity
 
   private readonly store: MemoryStoreAdapter
   private readonly embedding: EmbeddingProvider
   private readonly llm: LLMProvider
-  private readonly scope: d8umIdentity
+  private readonly scope: typegraphIdentity
   private readonly extractor: MemoryExtractor
   private readonly invalidation: InvalidationEngine
-  private readonly eventSink: d8umEventSink | undefined
+  private readonly eventSink: typegraphEventSink | undefined
 
-  constructor(config: d8umMemoryConfig) {
+  constructor(config: typegraphMemoryConfig) {
     this.store = config.memoryStore
     this.embedding = config.embedding
     this.llm = config.llm
@@ -83,7 +83,7 @@ export class d8umMemory {
 
   // ── Internal ──
 
-  private emit(eventType: d8umEventType, targetId: string | undefined, payload: Record<string, unknown>, durationMs?: number): void {
+  private emit(eventType: typegraphEventType, targetId: string | undefined, payload: Record<string, unknown>, durationMs?: number): void {
     if (!this.eventSink) return
     this.eventSink.emit({
       id: crypto.randomUUID(),

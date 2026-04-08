@@ -1,7 +1,7 @@
-import { generateId } from '@d8um-ai/core'
-import type { EmbeddingProvider, LLMProvider } from '@d8um-ai/core'
+import { generateId } from '@typegraph-ai/core'
+import type { EmbeddingProvider, LLMProvider } from '@typegraph-ai/core'
 import type { MemoryStoreAdapter } from '../types/adapter.js'
-import type { d8umIdentity } from '@d8um-ai/core'
+import type { typegraphIdentity } from '@typegraph-ai/core'
 import type { EpisodicMemory, SemanticFact, ProceduralMemory } from '../types/index.js'
 import type { EmbeddedGraph } from '../graph/embedded-graph.js'
 
@@ -56,7 +56,7 @@ export class ConsolidationEngine {
    * Run consolidation strategies for a scope.
    */
   async consolidate(
-    scope: d8umIdentity,
+    scope: typegraphIdentity,
     opts: ConsolidationOpts = {},
   ): Promise<ConsolidationResult> {
     const strategies = opts.strategies ?? ['episodic_to_semantic']
@@ -98,7 +98,7 @@ export class ConsolidationEngine {
    * Promote unconsolidated episodic memories into semantic facts.
    */
   async promoteEpisodicToSemantic(
-    scope: d8umIdentity,
+    scope: typegraphIdentity,
     opts: ConsolidationOpts = {},
   ): Promise<{ factsExtracted: number; episodesConsolidated: number }> {
     const minAge = opts.minEpisodicAgeMs ?? 60 * 60 * 1000 // 1 hour
@@ -187,7 +187,7 @@ Respond with only valid JSON: [{"content": "...", "subject": "...", "predicate":
    * Detect repeated patterns in episodic memories and create procedural memories.
    */
   async promoteToProcedural(
-    scope: d8umIdentity,
+    scope: typegraphIdentity,
     opts: ConsolidationOpts = {},
   ): Promise<{ proceduresCreated: number }> {
     // Find tool-trace or action episodes

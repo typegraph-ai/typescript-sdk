@@ -1,10 +1,10 @@
-import type { EmbeddingProvider } from '@d8um-ai/core'
-import type { d8umIdentity } from '@d8um-ai/core'
+import type { EmbeddingProvider } from '@typegraph-ai/core'
+import type { typegraphIdentity } from '@typegraph-ai/core'
 import type { EpisodicMemory, SemanticFact } from '../types/memory.js'
 import type { LLMProvider } from './llm-provider.js'
 import { factExtractionPrompt, conflictResolutionPrompt } from './prompts.js'
 import { createTemporal } from '../temporal.js'
-import { generateId } from '@d8um-ai/core'
+import { generateId } from '@typegraph-ai/core'
 
 // ── Extraction Types ──
 
@@ -48,7 +48,7 @@ export interface ExtractionResult {
 export interface ExtractionConfig {
   llm: LLMProvider
   embedding: EmbeddingProvider
-  scope: d8umIdentity
+  scope: typegraphIdentity
 }
 
 // ── Memory Extractor ──
@@ -59,7 +59,7 @@ export interface ExtractionConfig {
 export class MemoryExtractor {
   private readonly llm: LLMProvider
   private readonly embedding: EmbeddingProvider
-  private readonly scope: d8umIdentity
+  private readonly scope: typegraphIdentity
 
   constructor(config: ExtractionConfig) {
     this.llm = config.llm

@@ -1,5 +1,5 @@
 {
-  "name": "@d8um-ai/vercel-ai-provider",
+  "name": "@typegraph-ai/vercel-ai-provider",
   "version": "0.1.2",
   "description": "Vercel AI SDK integration - memory tools and middleware for auto-context injection",
   "type": "module",
@@ -19,7 +19,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@d8um-ai/graph": "workspace:*"
+    "@typegraph-ai/graph": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

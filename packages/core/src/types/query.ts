@@ -32,7 +32,7 @@ export interface NormalizedScores {
   memory?: number | undefined
 }
 
-export interface d8umResult {
+export interface typegraphResult {
   content: string
 
   /** Composite score — the final ranking value regardless of mode (0-1) */
@@ -85,7 +85,7 @@ export interface QueryOpts {
   agentId?: string | undefined
   conversationId?: string | undefined
   /** Filter results by document-level fields (status, scope, type, etc.). */
-  documentFilter?: import('./d8um-document.js').DocumentFilter | undefined
+  documentFilter?: import('./typegraph-document.js').DocumentFilter | undefined
 
   /** Override composite score weights. Keys are signal names; values are 0-1 weights.
    *  When omitted, defaults are derived from active signals. */
@@ -125,7 +125,7 @@ export interface QueryOpts {
   includeInvalidated?: boolean | undefined
 
   /** Format results into an LLM-ready context string. When set, response includes `context`. */
-  format?: 'xml' | 'markdown' | 'plain' | ((results: d8umResult[]) => string) | undefined
+  format?: 'xml' | 'markdown' | 'plain' | ((results: typegraphResult[]) => string) | undefined
   /** Token budget for formatted context. Trims lowest-scored results to fit. */
   maxTokens?: number | undefined
 
@@ -136,7 +136,7 @@ export interface QueryOpts {
 }
 
 export interface QueryResponse {
-  results: d8umResult[]
+  results: typegraphResult[]
   buckets: Record<string, {
     mode: 'indexed' | 'live' | 'cached'
     resultCount: number

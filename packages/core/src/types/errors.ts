@@ -1,31 +1,31 @@
 /**
- * Typed error classes for the d8um SDK.
+ * Typed error classes for the typegraph SDK.
  * These allow consumers to distinguish expected errors (not found, config)
  * from unexpected crashes without string-matching error messages.
  */
 
-export class D8umError extends Error {
+export class TypegraphError extends Error {
   constructor(
     message: string,
     public code: string,
     public statusHint: number = 500,
   ) {
     super(message)
-    this.name = 'D8umError'
+    this.name = 'TypegraphError'
   }
 }
 
-export class NotFoundError extends D8umError {
+export class NotFoundError extends TypegraphError {
   constructor(resource: string, id: string) {
     super(`${resource} "${id}" not found`, 'NOT_FOUND', 404)
     this.name = 'NotFoundError'
   }
 }
 
-export class NotInitializedError extends D8umError {
+export class NotInitializedError extends TypegraphError {
   constructor() {
     super(
-      'd8um not initialized. Call d8um.initialize(...) first.',
+      'typegraph not initialized. Call typegraph.initialize(...) first.',
       'NOT_INITIALIZED',
       500,
     )
@@ -33,7 +33,7 @@ export class NotInitializedError extends D8umError {
   }
 }
 
-export class ConfigError extends D8umError {
+export class ConfigError extends TypegraphError {
   constructor(message: string) {
     super(message, 'CONFIG_ERROR', 400)
     this.name = 'ConfigError'

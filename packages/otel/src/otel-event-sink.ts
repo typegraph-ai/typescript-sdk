@@ -1,4 +1,4 @@
-import type { d8umEvent, d8umEventSink } from '@d8um-ai/core'
+import type { typegraphEvent, typegraphEventSink } from '@typegraph-ai/core'
 
 // OTel semantic convention attribute keys
 const ATTR = {
@@ -11,16 +11,16 @@ const ATTR = {
   GEN_AI_TOOL_TYPE: 'gen_ai.tool.type',
   GEN_AI_TOOL_CALL_ID: 'gen_ai.tool.call.id',
   GEN_AI_REQUEST_TOP_K: 'gen_ai.request.top_k',
-  // d8um-specific namespace
-  D8UM_TENANT_ID: 'd8um.tenant.id',
-  D8UM_GROUP_ID: 'd8um.group.id',
-  D8UM_USER_ID: 'd8um.user.id',
-  D8UM_EVENT_TYPE: 'd8um.event.type',
-  D8UM_TARGET_ID: 'd8um.target.id',
-  D8UM_TARGET_TYPE: 'd8um.target.type',
-  D8UM_MEMORY_CATEGORY: 'd8um.memory.category',
-  D8UM_QUERY_MODE: 'd8um.query.mode',
-  D8UM_VISIBILITY: 'd8um.visibility',
+  // typegraph-specific namespace
+  TYPEGRAPH_TENANT_ID: 'typegraph.tenant.id',
+  TYPEGRAPH_GROUP_ID: 'typegraph.group.id',
+  TYPEGRAPH_USER_ID: 'typegraph.user.id',
+  TYPEGRAPH_EVENT_TYPE: 'typegraph.event.type',
+  TYPEGRAPH_TARGET_ID: 'typegraph.target.id',
+  TYPEGRAPH_TARGET_TYPE: 'typegraph.target.type',
+  TYPEGRAPH_MEMORY_CATEGORY: 'typegraph.memory.category',
+  TYPEGRAPH_QUERY_MODE: 'typegraph.query.mode',
+  TYPEGRAPH_VISIBILITY: 'typegraph.visibility',
 } as const
 
 // Lazy OTel API loader — avoids top-level await and handles optional peer dep
@@ -37,22 +37,22 @@ async function getOTelApi(): Promise<typeof import('@opentelemetry/api') | null>
   return _otelApi
 }
 
-export class OTelEventSink implements d8umEventSink {
+export class OTelEventSink implements typegraphEventSink {
   private readonly _tracer: import('@opentelemetry/api').Tracer | undefined
 
   /**
    * @param tracer Optional OTel Tracer. If omitted, one is lazily obtained via
-   *               `trace.getTracer('d8um')` when @opentelemetry/api is available.
+   *               `trace.getTracer('typegraph')` when @opentelemetry/api is available.
    */
   constructor(tracer?: import('@opentelemetry/api').Tracer) {
     this._tracer = tracer
   }
 
-  async emit(event: d8umEvent): Promise<void> {
+  async emit(event: typegraphEvent): Promise<void> {
     const api = await getOTelApi()
     if (api === null) return // OTel not installed — no-op
 
-    const tracer = this._tracer ?? api.trace.getTracer('d8um')
+    const tracer = this._tracer ?? api.trace.getTracer('typegraph')
     const { SpanStatusCode, SpanKind, context, trace } = api
 
     // Build context: if the event carries a traceId/spanId, link this span
@@ -66,7 +66,7 @@ export class OTelEventSink implements d8umEventSink {
       parentCtx = trace.setSpanContext(parentCtx, spanContext)
     }
 
-    const spanName = `d8um.${event.eventType}`
+    const spanName = `typegraph.${event.eventType}`
 
     const span = tracer.startSpan(
       spanName,
@@ -97,18 +97,18 @@ export class OTelEventSink implements d8umEventSink {
 // ── Attribute builder ──────────────────────────────────────────────────────────
 
 function buildAttributes(
-  event: d8umEvent,
+  event: typegraphEvent,
 ): Record<string, string | number | boolean> {
   const { identity, eventType, targetId, targetType, payload } = event
   const attrs: Record<string, string | number | boolean> = {}
 
   // Core event metadata
-  attrs[ATTR.D8UM_EVENT_TYPE] = eventType
+  attrs[ATTR.TYPEGRAPH_EVENT_TYPE] = eventType
 
-  // Identity — d8um namespace
-  if (identity.tenantId) attrs[ATTR.D8UM_TENANT_ID] = identity.tenantId
-  if (identity.groupId) attrs[ATTR.D8UM_GROUP_ID] = identity.groupId
-  if (identity.userId) attrs[ATTR.D8UM_USER_ID] = identity.userId
+  // Identity — typegraph namespace
+  if (identity.tenantId) attrs[ATTR.TYPEGRAPH_TENANT_ID] = identity.tenantId
+  if (identity.groupId) attrs[ATTR.TYPEGRAPH_GROUP_ID] = identity.groupId
+  if (identity.userId) attrs[ATTR.TYPEGRAPH_USER_ID] = identity.userId
 
   // Identity — GenAI semantic conventions
   if (identity.agentId) {
@@ -119,15 +119,15 @@ function buildAttributes(
   }
 
   // Target object
-  if (targetId) attrs[ATTR.D8UM_TARGET_ID] = targetId
-  if (targetType) attrs[ATTR.D8UM_TARGET_TYPE] = targetType
+  if (targetId) attrs[ATTR.TYPEGRAPH_TARGET_ID] = targetId
+  if (targetType) attrs[ATTR.TYPEGRAPH_TARGET_TYPE] = targetType
 
   // Event-type-specific attributes
   switch (eventType) {
     case 'query.execute': {
       attrs[ATTR.GEN_AI_OPERATION_NAME] = 'retrieval'
       if (typeof payload['mode'] === 'string') {
-        attrs[ATTR.D8UM_QUERY_MODE] = payload['mode']
+        attrs[ATTR.TYPEGRAPH_QUERY_MODE] = payload['mode']
       }
       if (typeof payload['count'] === 'number') {
         attrs[ATTR.GEN_AI_REQUEST_TOP_K] = payload['count']
@@ -154,10 +154,10 @@ function buildAttributes(
     case 'memory.consolidate':
     case 'memory.decay': {
       if (typeof payload['category'] === 'string') {
-        attrs[ATTR.D8UM_MEMORY_CATEGORY] = payload['category']
+        attrs[ATTR.TYPEGRAPH_MEMORY_CATEGORY] = payload['category']
       }
       if (typeof payload['visibility'] === 'string') {
-        attrs[ATTR.D8UM_VISIBILITY] = payload['visibility']
+        attrs[ATTR.TYPEGRAPH_VISIBILITY] = payload['visibility']
       }
       break
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * MultiHop-RAG Benchmark — d8um Core (Hybrid + Fast)
+ * MultiHop-RAG Benchmark — typegraph Core (Hybrid + Fast)
  *
  * Multi-hop QA over 609 news articles, ~2556 queries.
  * Single unified eval loop: retrieve → compute IR metrics → generate answer → score.
@@ -37,7 +37,7 @@ async function main() {
   printBanner(config, cli)
 
   // Phase 1: Initialize
-  console.log('Phase 1: Initializing d8um with Neon pgvector...')
+  console.log('Phase 1: Initializing typegraph with Neon pgvector...')
   const { d, adapter } = await initCore(config)
   const { bucket } = await resolveBucket(d, config.bucketName, cli.shouldSeed)
   const latency = await measureLatencyProfile(adapter)

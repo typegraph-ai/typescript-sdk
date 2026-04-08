@@ -1,39 +1,39 @@
-# d8um vs Letta: Comparative SDK Analysis
+# TypeGraph vs Letta: Comparative SDK Analysis
 
 ## Executive Summary
 
-**d8um** and **Letta** (formerly MemGPT) represent fundamentally different philosophies for giving AI agents memory. d8um is a composable TypeScript library that provides retrieval and cognitive memory as importable modules. Letta is a full agent runtime where agents manage their own memory through self-editing operations. This report compares both across architecture, memory capabilities, infrastructure, and use-case fit.
+**TypeGraph** and **Letta** (formerly MemGPT) represent fundamentally different philosophies for giving AI agents memory. TypeGraph is a composable TypeScript library that provides retrieval and cognitive memory as importable modules. Letta is a full agent runtime where agents manage their own memory through self-editing operations. This report compares both across architecture, memory capabilities, infrastructure, and use-case fit.
 
 ---
 
 ## 1. Origins and Ecosystem
 
-| Dimension | d8um | Letta |
+| Dimension | TypeGraph | Letta |
 |---|---|---|
 | **What it is** | TypeScript library (composable SDK) | Full agent runtime / framework |
 | **Primary language** | TypeScript-native | Python-first (99.4%); TS SDK auto-generated via Fern |
 | **Origin** | TypeScript-native design | MemGPT research paper (arXiv:2310.08560, UC Berkeley) |
-| **npm package** | `@d8um-ai/core` + composable packages | `@letta-ai/letta-client` (auto-generated client) |
+| **npm package** | `@typegraph-ai/core` + composable packages | `@letta-ai/letta-client` (auto-generated client) |
 | **GitHub stars** | Early-stage (alpha) | ~21.8K |
 | **Funding** | N/A | $10M seed (Felicis); $70M post-money valuation |
 | **License** | MIT | Apache-2.0 |
-| **Managed cloud** | d8um Cloud (API key) | Letta Cloud (Free / Pro / Max / API pay-as-you-go) |
+| **Managed cloud** | TypeGraph Cloud (API key) | Letta Cloud (Free / Pro / Max / API pay-as-you-go) |
 | **Self-hosted** | Yes (import as library) | Yes (Docker container running a server) |
 | **Notable investors** | N/A | Jeff Dean, Clem Delangue (HuggingFace), Cristobal Valenzuela (Runway) |
 
-**Key takeaway:** d8um is a library you import. Letta is a server you deploy. This architectural difference shapes everything else.
+**Key takeaway:** TypeGraph is a library you import. Letta is a server you deploy. This architectural difference shapes everything else.
 
 ---
 
 ## 2. Architecture Comparison
 
-### d8um: Composable Library
+### TypeGraph: Composable Library
 
-d8um runs in-process as an imported TypeScript module. No separate server, no Docker container, no REST API between your app and the memory layer. You call functions directly.
+TypeGraph runs in-process as an imported TypeScript module. No separate server, no Docker container, no REST API between your app and the memory layer. You call functions directly.
 
 ```
 Your Node.js App
-└── import { d8um } from '@d8um-ai/core'
+└── import { typegraph } from '@typegraph-ai/core'
     ├── Retrieval Engine (indexed / live / cached sources)
     ├── Cognitive Memory (episodic / semantic / procedural / working)
     ├── Knowledge Graph (entity-relation triples, PPR traversal)
@@ -55,7 +55,7 @@ Your App ──REST──> Letta Server (Docker / Cloud)
                        └── Tool System (memory ops are tool calls)
 ```
 
-**Critical difference:** In d8um, your application code decides when to store/retrieve/consolidate memory. In Letta, the LLM agent decides -- memory management is delegated to the AI itself via tool calls.
+**Critical difference:** In TypeGraph, your application code decides when to store/retrieve/consolidate memory. In Letta, the LLM agent decides -- memory management is delegated to the AI itself via tool calls.
 
 ---
 
@@ -63,7 +63,7 @@ Your App ──REST──> Letta Server (Docker / Cloud)
 
 ### 3.1 Memory Types
 
-| Memory Type | d8um | Letta |
+| Memory Type | TypeGraph | Letta |
 |---|---|---|
 | **Working memory** | Bounded buffer with priority eviction (maxItems, maxTokens) | Core Memory -- always in context, 2K char limit per block, agent-editable |
 | **Episodic memory** | Timestamped events with session/sequence, participants, event types | Recall Memory -- full conversation history, searchable by date/text |
@@ -72,11 +72,11 @@ Your App ──REST──> Letta Server (Docker / Cloud)
 | **Long-term storage** | Persistent via pgvector/SQLite with lifecycle management | Archival Memory -- vector-indexed, agent-managed read/write |
 | **Memory structure** | Typed categories with specialized data structures | Free-form text blocks (core) + unstructured embeddings (archival) |
 
-**Winner: d8um** for structured memory. **Letta** for the self-editing paradigm (agent controls its own memory). The approaches solve different problems: d8um provides deterministic, typed memory with lifecycle management; Letta provides flexible, agent-driven memory that adapts autonomously.
+**Winner: TypeGraph** for structured memory. **Letta** for the self-editing paradigm (agent controls its own memory). The approaches solve different problems: TypeGraph provides deterministic, typed memory with lifecycle management; Letta provides flexible, agent-driven memory that adapts autonomously.
 
 ### 3.2 Memory Management Philosophy
 
-| Aspect | d8um | Letta |
+| Aspect | TypeGraph | Letta |
 |---|---|---|
 | **Who manages memory** | Application code + scheduled jobs | The LLM agent itself (via tool calls) |
 | **Fact extraction** | LLM-driven pipeline with conflict resolution (ADD/UPDATE/DELETE/NOOP) | Agent decides what to store; no automated extraction pipeline |
@@ -85,11 +85,11 @@ Your App ──REST──> Letta Server (Docker / Cloud)
 | **Decay / forgetting** | Access-frequency/age/importance decay via scheduled jobs | No automatic decay; agent can manually delete archival entries |
 | **Determinism** | High -- extraction rules are explicit, lifecycle is state-machine-driven | Low -- agent behavior is unpredictable; may discard important info or fail to store critical details |
 
-**Winner: d8um** for reliability and auditability. **Letta** for flexibility and autonomy. This is the core philosophical tradeoff.
+**Winner: TypeGraph** for reliability and auditability. **Letta** for flexibility and autonomy. This is the core philosophical tradeoff.
 
 ### 3.3 Knowledge Graph
 
-| Capability | d8um | Letta |
+| Capability | TypeGraph | Letta |
 |---|---|---|
 | **Native graph support** | Yes -- entity-relation triples stored in vector adapter | No native graph support |
 | **Graph DB required** | No (graph on pgvector/SQLite) | N/A |
@@ -99,11 +99,11 @@ Your App ──REST──> Letta Server (Docker / Cloud)
 | **Graph traversal** | Personalized PageRank in neural query mode | None |
 | **External graph integration** | N/A (built-in) | Possible via custom tools (Graphiti, etc.) |
 
-**Winner: d8um.** Letta has no native graph capabilities. Teams needing knowledge graphs with Letta must integrate external tools like Graphiti.
+**Winner: TypeGraph.** Letta has no native graph capabilities. Teams needing knowledge graphs with Letta must integrate external tools like Graphiti.
 
 ### 3.4 Retrieval & Search
 
-| Capability | d8um | Letta |
+| Capability | TypeGraph | Letta |
 |---|---|---|
 | **Document RAG** | Yes -- full indexing, chunking, hybrid search | No built-in RAG; file attachments with basic search |
 | **Vector search** | pgvector HNSW / sqlite-vec KNN | pgvector / sqlite-vec (archival memory) |
@@ -116,11 +116,11 @@ Your App ──REST──> Letta Server (Docker / Cloud)
 | **Context assembly** | XML / markdown / plain / custom formatting | Automatic -- managed by agent loop |
 | **File search** | Via integrations | Built-in: semantic search + grep over attached files |
 
-**Winner: d8um** for retrieval depth and flexibility. Letta's retrieval is basic vector similarity; d8um offers five query modes with hybrid search, graph traversal, and multi-model fan-out.
+**Winner: TypeGraph** for retrieval depth and flexibility. Letta's retrieval is basic vector similarity; TypeGraph offers five query modes with hybrid search, graph traversal, and multi-model fan-out.
 
 ### 3.5 Bi-Temporal Data Model
 
-| Capability | d8um | Letta |
+| Capability | TypeGraph | Letta |
 |---|---|---|
 | **World time tracking** | Yes (validAt / invalidAt) | No |
 | **System time tracking** | Yes (createdAt / expiredAt) | Timestamps on messages/memories |
@@ -128,11 +128,11 @@ Your App ──REST──> Letta Server (Docker / Cloud)
 | **Invalidation audit trail** | Yes -- old facts preserved with invalidAt set | No -- core memory blocks are overwritten |
 | **Knowledge evolution history** | Full history preserved | Conversation history preserved; memory changes are not tracked |
 
-**Winner: d8um.** Letta does not model temporal evolution of knowledge.
+**Winner: TypeGraph.** Letta does not model temporal evolution of knowledge.
 
 ### 3.6 Infrastructure & Deployment
 
-| Dimension | d8um | Letta |
+| Dimension | TypeGraph | Letta |
 |---|---|---|
 | **Deployment model** | In-process library (import and use) | Separate server (Docker container or cloud) |
 | **Production DB** | PostgreSQL + pgvector | PostgreSQL + pgvector |
@@ -143,14 +143,14 @@ Your App ──REST──> Letta Server (Docker / Cloud)
 | **Serverless compatible** | Yes (lightweight init, no DDL on cold start) | No (requires persistent server process) |
 | **Operational overhead** | Low (library, no extra services) | Medium-High (Docker/server management, API routing) |
 
-**Winner: d8um** for operational simplicity. d8um is a library call; Letta requires deploying and maintaining a separate server.
+**Winner: TypeGraph** for operational simplicity. TypeGraph is a library call; Letta requires deploying and maintaining a separate server.
 
 ### 3.7 Agent Framework Integration
 
-| Integration | d8um | Letta |
+| Integration | TypeGraph | Letta |
 |---|---|---|
-| **MCP server** | Yes (`@d8um-ai/mcp-server`) -- 6 memory tools | Yes (MCP support for tool communication) |
-| **Vercel AI SDK** | Yes (`@d8um-ai/vercel-ai-provider`) -- tools + middleware | Yes (`@letta-ai/vercel-ai-sdk-provider`) |
+| **MCP server** | Yes (`@typegraph-ai/mcp-server`) -- 6 memory tools | Yes (MCP support for tool communication) |
+| **Vercel AI SDK** | Yes (`@typegraph-ai/vercel-ai-provider`) -- tools + middleware | Yes (`@letta-ai/vercel-ai-sdk-provider`) |
 | **LangChain** | No built-in | Yes (tool import support) |
 | **CrewAI** | No | Yes (tool import support) |
 | **Composio** | No | Yes (500+ external tool integrations) |
@@ -161,41 +161,41 @@ Your App ──REST──> Letta Server (Docker / Cloud)
 
 ### 3.8 Data Source Integrations
 
-| Capability | d8um | Letta |
+| Capability | TypeGraph | Letta |
 |---|---|---|
 | **Built-in connectors** | 11: Slack, Gmail, Google Calendar, Google Drive, HubSpot, Salesforce, Attio, Linear, Gong, Fathom | None (file attachments only) |
 | **Web crawling** | Built-in: URL scrape, domain BFS crawl | No |
 | **Sync modes** | Full + incremental per integration | N/A |
 | **Job system** | Schedulable sync, consolidation, decay, crawl | Scheduled messages to agents (not data sync jobs) |
 
-**Winner: d8um.** Letta has no data ingestion pipeline.
+**Winner: TypeGraph.** Letta has no data ingestion pipeline.
 
 ### 3.9 TypeScript Experience
 
-| Dimension | d8um | Letta |
+| Dimension | TypeGraph | Letta |
 |---|---|---|
 | **SDK origin** | Built natively in TypeScript | Auto-generated from OpenAPI spec via Fern |
 | **Type safety** | Full generics, structural typing, composable interfaces | Generated types (correct but not idiomatic) |
 | **API style** | Direct function calls (in-process) | HTTP client wrapping REST API calls |
-| **Package design** | Modular monorepo (@d8um-ai/core, @d8um-ai/graph, etc.) | Single client package (@letta-ai/letta-client) |
+| **Package design** | Modular monorepo (@typegraph-ai/core, @typegraph-ai/graph, etc.) | Single client package (@letta-ai/letta-client) |
 | **Async patterns** | Native async/await, no network overhead | Async/await over HTTP (latency per call) |
 | **Local development** | Zero external dependencies possible (SQLite + local embeddings) | Requires running Letta server (Docker) |
 
-**Winner: d8um.** Native TypeScript with in-process calls vs auto-generated HTTP client wrappers.
+**Winner: TypeGraph.** Native TypeScript with in-process calls vs auto-generated HTTP client wrappers.
 
 ### 3.10 Multi-Tenancy & Scoping
 
-| Dimension | d8um | Letta |
+| Dimension | TypeGraph | Letta |
 |---|---|---|
 | **Scope levels** | 5: tenantId, groupId, userId, agentId, conversationId | Per-agent isolation (each agent has its own memory) |
 | **Shared memory** | Subset filtering across scope levels | Sleep-time agents can share memory blocks with primary agents |
 | **Organization isolation** | tenantId for org-level | Managed at server/cloud level |
 
-**Winner: d8um** for multi-tenant flexibility. Letta's memory is per-agent; sharing requires explicit architectural patterns.
+**Winner: TypeGraph** for multi-tenant flexibility. Letta's memory is per-agent; sharing requires explicit architectural patterns.
 
 ---
 
-## 4. What d8um Does That Letta Doesn't
+## 4. What TypeGraph Does That Letta Doesn't
 
 1. **Unified RAG + memory** -- Document ingestion, chunking, hybrid search alongside cognitive memory. Letta has no RAG pipeline.
 2. **Structured semantic memory** -- S-P-O triples with confidence scores, entity resolution, alias tracking. Letta stores free text only.
@@ -213,10 +213,10 @@ Your App ──REST──> Letta Server (Docker / Cloud)
 14. **Contradiction detection** -- LLM-driven invalidation engine classifying conflicts as direct/temporal/superseded.
 15. **Deterministic memory operations** -- Application-controlled, auditable, predictable.
 
-## 5. What Letta Does That d8um Doesn't
+## 5. What Letta Does That TypeGraph Doesn't
 
 1. **Agent self-editing memory** -- The LLM autonomously decides what to remember, forget, and update. This is Letta's core innovation from the MemGPT paper.
-2. **Full agent runtime** -- Complete agent loop with tool calling, reasoning, and persistent state. d8um is a library, not a runtime.
+2. **Full agent runtime** -- Complete agent loop with tool calling, reasoning, and persistent state. TypeGraph is a library, not a runtime.
 3. **Virtual context management** -- OS-inspired paging between context window and storage, with automatic conversation summarization on overflow.
 4. **Multi-agent orchestration** -- Agents can create, invoke, and coordinate with other agents natively.
 5. **Agent Development Environment (ADE)** -- Visual UI for building, monitoring, and debugging agents.
@@ -233,9 +233,9 @@ Your App ──REST──> Letta Server (Docker / Cloud)
 
 ## 6. Use-Case Recommendations
 
-### Choose d8um when:
+### Choose TypeGraph when:
 
-| Use Case | Why d8um |
+| Use Case | Why TypeGraph |
 |---|---|
 | **TypeScript/Node.js stack** | Native TS, not auto-generated wrappers over HTTP |
 | **RAG + memory in one SDK** | Don't want separate systems for retrieval and memory |
@@ -267,7 +267,7 @@ Your App ──REST──> Letta Server (Docker / Cloud)
 
 ## 7. Maturity & Risk Assessment
 
-| Dimension | d8um | Letta |
+| Dimension | TypeGraph | Letta |
 |---|---|---|
 | **Maturity** | Alpha | Production (v0.16.6, 175 releases) |
 | **Breaking changes risk** | High (alpha) | Medium (rapid versioning with occasional breaking changes) |
@@ -283,25 +283,25 @@ Your App ──REST──> Letta Server (Docker / Cloud)
 
 ## 8. Summary Verdict
 
-**d8um and Letta are not interchangeable -- they solve different problems.**
+**TypeGraph and Letta are not interchangeable -- they solve different problems.**
 
-**d8um is a composable memory and retrieval library.** You import it, call functions, and get deterministic, structured memory with lifecycle management. It fits into your existing architecture without requiring a runtime change. Best for teams that want full control over memory behavior, need retrieval + memory unified, and are building in TypeScript.
+**TypeGraph is a composable memory and retrieval library.** You import it, call functions, and get deterministic, structured memory with lifecycle management. It fits into your existing architecture without requiring a runtime change. Best for teams that want full control over memory behavior, need retrieval + memory unified, and are building in TypeScript.
 
 **Letta is a complete agent runtime built on the virtual context paradigm.** The agent manages its own memory, which enables powerful autonomous behavior but sacrifices predictability. It requires deploying a server and adopting its agent model. Best for teams building autonomous, long-running agents that need to manage unbounded context and coordinate across multi-agent systems.
 
 | If you need... | Choose |
 |---|---|
-| A memory library to add to your existing app | **d8um** |
+| A memory library to add to your existing app | **TypeGraph** |
 | A full agent runtime from scratch | **Letta** |
-| Deterministic, auditable memory operations | **d8um** |
+| Deterministic, auditable memory operations | **TypeGraph** |
 | Agent-driven autonomous memory management | **Letta** |
-| TypeScript-native with minimal infrastructure | **d8um** |
+| TypeScript-native with minimal infrastructure | **TypeGraph** |
 | Multi-agent orchestration with visual tooling | **Letta** |
-| RAG + memory unified | **d8um** |
-| Knowledge graph without extra infrastructure | **d8um** |
+| RAG + memory unified | **TypeGraph** |
+| Knowledge graph without extra infrastructure | **TypeGraph** |
 | Long-running conversational agents with virtual context | **Letta** |
-| Serverless / edge deployment | **d8um** |
+| Serverless / edge deployment | **TypeGraph** |
 
 ---
 
-*Analysis generated March 2026. Letta v0.16.6 (TS SDK v1.7.12+). d8um at alpha stage.*
+*Analysis generated March 2026. Letta v0.16.6 (TS SDK v1.7.12+). TypeGraph at alpha stage.*

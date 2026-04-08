@@ -2,13 +2,13 @@
  * PostgreSQL + pgvector implementation of MemoryStoreAdapter.
  * Provides persistent storage for memories, semantic entities, and edges.
  *
- * Uses the same SqlExecutor pattern as @d8um-ai/adapter-pgvector for
+ * Uses the same SqlExecutor pattern as @typegraph-ai/adapter-pgvector for
  * driver-agnostic Postgres access (Neon, node-postgres, Drizzle, etc.).
  */
 
 import type { MemoryStoreAdapter, MemoryFilter, MemorySearchOpts } from '../types/adapter.js'
 import type { MemoryRecord, SemanticEntity, SemanticEdge } from '../types/memory.js'
-import type { d8umIdentity } from '@d8um-ai/core'
+import type { typegraphIdentity } from '@typegraph-ai/core'
 
 type SqlExecutor = (
   query: string,
@@ -29,7 +29,7 @@ export interface PgMemoryAdapterConfig {
 // ── DDL ──
 
 // Index prefix: replace dots with underscores so schema-qualified table names
-// produce valid Postgres index names (e.g. "myschema.d8um_memories" → "myschema_d8um_memories").
+// produce valid Postgres index names (e.g. "myschema.typegraph_memories" → "myschema_typegraph_memories").
 const idxPrefix = (t: string) => t.replace(/"/g, '').replace(/\./g, '_')
 
 // Postgres limits identifiers to 63 chars. Truncate + hash when needed.
@@ -217,9 +217,9 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     this.sql = config.sql
     this.schema = config.schema
     const prefix = config.schema ? `"${config.schema}".` : ''
-    this.memoriesTable = config.memoriesTable ?? `${prefix}d8um_memories`
-    this.entitiesTable = config.entitiesTable ?? `${prefix}d8um_semantic_entities`
-    this.edgesTable = config.edgesTable ?? `${prefix}d8um_semantic_edges`
+    this.memoriesTable = config.memoriesTable ?? `${prefix}typegraph_memories`
+    this.entitiesTable = config.entitiesTable ?? `${prefix}typegraph_semantic_entities`
+    this.edgesTable = config.edgesTable ?? `${prefix}typegraph_semantic_edges`
     this.embeddingDimensions = config.embeddingDimensions ?? 1536
   }
 
@@ -275,7 +275,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
       if (target === 'entity') this.hnswEntityIndexCreated = true
       else this.hnswMemoryIndexCreated = true
     } catch (err: unknown) {
-      console.warn(`[d8um] HNSW index creation on ${table} failed: ${err instanceof Error ? err.message : String(err)}`)
+      console.warn(`[typegraph] HNSW index creation on ${table} failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -570,7 +570,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     return rows.length > 0 ? mapRowToEntity(rows[0]!) : null
   }
 
-  async findEntities(query: string, scope: d8umIdentity, limit?: number): Promise<SemanticEntity[]> {
+  async findEntities(query: string, scope: typegraphIdentity, limit?: number): Promise<SemanticEntity[]> {
     const { where, params } = buildIdentityWhere(scope)
     const baseIdx = params.length
     params.push(`%${query}%`)
@@ -589,7 +589,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     return rows.map(mapRowToEntity)
   }
 
-  async searchEntities(embedding: number[], scope: d8umIdentity, limit?: number): Promise<SemanticEntity[]> {
+  async searchEntities(embedding: number[], scope: typegraphIdentity, limit?: number): Promise<SemanticEntity[]> {
     const vectorStr = `[${embedding.join(',')}]`
     const { where, params } = buildIdentityWhere(scope, 1)
     const scopeClause = where ? ` AND ${where}` : ''
@@ -961,11 +961,11 @@ function buildMemoryWhere(
 }
 
 /**
- * Build WHERE conditions from a d8umIdentity for entity/edge queries.
+ * Build WHERE conditions from a typegraphIdentity for entity/edge queries.
  * Only adds conditions for non-null identity fields.
  */
 function buildIdentityWhere(
-  identity: d8umIdentity,
+  identity: typegraphIdentity,
   paramOffset = 0
 ): { where: string; params: unknown[] } {
   const conditions: string[] = []
@@ -987,8 +987,8 @@ function buildIdentityWhere(
 /**
  * Extract identity from a DB row's explicit columns.
  */
-function rowToIdentity(row: Record<string, unknown>): d8umIdentity {
-  const id: d8umIdentity = {}
+function rowToIdentity(row: Record<string, unknown>): typegraphIdentity {
+  const id: typegraphIdentity = {}
   if (row.tenant_id) id.tenantId = row.tenant_id as string
   if (row.group_id) id.groupId = row.group_id as string
   if (row.user_id) id.userId = row.user_id as string

@@ -1,8 +1,8 @@
-import type { VectorStoreAdapter, SearchOpts, ScoredChunkWithDocument, UndeployResult } from '@d8um-ai/core'
-import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from '@d8um-ai/core'
-import type { d8umDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from '@d8um-ai/core'
-import type { Bucket } from '@d8um-ai/core'
-import { generateId, DEFAULT_BUCKET_ID } from '@d8um-ai/core'
+import type { VectorStoreAdapter, SearchOpts, ScoredChunkWithDocument, UndeployResult } from '@typegraph-ai/core'
+import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from '@typegraph-ai/core'
+import type { typegraphDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from '@typegraph-ai/core'
+import type { Bucket } from '@typegraph-ai/core'
+import { generateId, DEFAULT_BUCKET_ID } from '@typegraph-ai/core'
 import {
   REGISTRY_SQL, MODEL_TABLE_SQL, HASH_TABLE_SQL, DOCUMENTS_TABLE_SQL,
   BUCKETS_TABLE_SQL, EVENTS_TABLE_SQL, POLICIES_TABLE_SQL,
@@ -68,12 +68,12 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     this.transaction = config.transaction
     this.schema = config.schema
     const prefix = config.schema ? `"${config.schema}".` : ''
-    this.tablePrefix = config.tablePrefix ?? `${prefix}d8um_chunks`
-    this.hashesTable = config.hashesTable ?? `${prefix}d8um_hashes`
-    this.documentsTable = config.documentsTable ?? `${prefix}d8um_documents`
-    this.bucketsTable = config.bucketsTable ?? `${prefix}d8um_buckets`
-    this.eventsTable = `${prefix}d8um_events`
-    this.policiesTable = `${prefix}d8um_policies`
+    this.tablePrefix = config.tablePrefix ?? `${prefix}typegraph_chunks`
+    this.hashesTable = config.hashesTable ?? `${prefix}typegraph_hashes`
+    this.documentsTable = config.documentsTable ?? `${prefix}typegraph_documents`
+    this.bucketsTable = config.bucketsTable ?? `${prefix}typegraph_buckets`
+    this.eventsTable = `${prefix}typegraph_events`
+    this.policiesTable = `${prefix}typegraph_policies`
     this.registryTable = `${this.tablePrefix}_registry`
     this.hashStore = new PgHashStore(this.sql, this.hashesTable)
     this.documentStore = new PgDocumentStore(this.sql, this.documentsTable)
@@ -115,7 +115,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
       dynamicTables = rows.map(r => r.table_name as string)
     } catch {
       // Registry table may not exist — nothing to undeploy
-      return { success: true, message: 'No d8um tables found.' }
+      return { success: true, message: 'No typegraph tables found.' }
     }
 
     // Check all tables for data
@@ -163,7 +163,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
 
     this.modelTables.clear()
 
-    return { success: true, message: 'All d8um tables dropped.' }
+    return { success: true, message: 'All typegraph tables dropped.' }
   }
 
   async ensureModel(model: string, dimensions: number): Promise<void> {
@@ -404,15 +404,15 @@ export class PgVectorAdapter implements VectorStoreAdapter {
 
   // --- Document record methods ---
 
-  async upsertDocumentRecord(input: UpsertDocumentInput): Promise<d8umDocument> {
+  async upsertDocumentRecord(input: UpsertDocumentInput): Promise<typegraphDocument> {
     return this.documentStore.upsert(input)
   }
 
-  async getDocument(id: string): Promise<d8umDocument | null> {
+  async getDocument(id: string): Promise<typegraphDocument | null> {
     return this.documentStore.get(id)
   }
 
-  async listDocuments(filter: DocumentFilter, pagination?: import('@d8um-ai/core').PaginationOpts): Promise<d8umDocument[] | import('@d8um-ai/core').PaginatedResult<d8umDocument>> {
+  async listDocuments(filter: DocumentFilter, pagination?: import('@typegraph-ai/core').PaginationOpts): Promise<typegraphDocument[] | import('@typegraph-ai/core').PaginatedResult<typegraphDocument>> {
     return this.documentStore.list(filter, pagination)
   }
 
@@ -447,7 +447,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     return count
   }
 
-  async updateDocument(id: string, input: Partial<Pick<d8umDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<d8umDocument> {
+  async updateDocument(id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<typegraphDocument> {
     const doc = await this.documentStore.update(id, input)
     if (!doc) throw new Error(`Document not found: ${id}`)
     return doc
@@ -629,7 +629,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     return rows.length > 0 ? mapRowToBucket(rows[0]!) : null
   }
 
-  async listBuckets(filter?: import('@d8um-ai/core').BucketListFilter, pagination?: import('@d8um-ai/core').PaginationOpts): Promise<Bucket[] | import('@d8um-ai/core').PaginatedResult<Bucket>> {
+  async listBuckets(filter?: import('@typegraph-ai/core').BucketListFilter, pagination?: import('@typegraph-ai/core').PaginationOpts): Promise<Bucket[] | import('@typegraph-ai/core').PaginatedResult<Bucket>> {
     const conditions: string[] = []
     const params: unknown[] = []
     if (filter?.tenantId) { params.push(filter.tenantId); conditions.push(`tenant_id = $${params.length}`) }
@@ -764,7 +764,7 @@ function mapRowToBucket(row: Record<string, unknown>): Bucket {
   }
 }
 
-function mapRowToDocument(row: Record<string, unknown>): d8umDocument {
+function mapRowToDocument(row: Record<string, unknown>): typegraphDocument {
   return {
     id: row.doc_id as string,
     bucketId: row.bucket_id as string,
@@ -777,8 +777,8 @@ function mapRowToDocument(row: Record<string, unknown>): d8umDocument {
     url: (row.doc_url as string) ?? undefined,
     contentHash: row.doc_content_hash as string,
     chunkCount: row.doc_chunk_count as number,
-    status: row.doc_status as d8umDocument['status'],
-    visibility: (row.doc_visibility as d8umDocument['visibility']) ?? undefined,
+    status: row.doc_status as typegraphDocument['status'],
+    visibility: (row.doc_visibility as typegraphDocument['visibility']) ?? undefined,
     documentType: (row.doc_document_type as string) ?? undefined,
     sourceType: (row.doc_source_type as string) ?? undefined,
     indexedAt: new Date(row.doc_indexed_at as string),

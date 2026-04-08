@@ -3,10 +3,10 @@ export type DocumentStatus = 'pending' | 'processing' | 'complete' | 'failed'
 /** Who can access this record. Defines the narrowest identity level that grants access. */
 export type Visibility = 'tenant' | 'group' | 'user' | 'agent' | 'conversation'
 
-export interface d8umDocument {
+export interface typegraphDocument {
   /** UUID primary key. */
   id: string
-  /** The d8um source that produced this document. */
+  /** The typegraph source that produced this document. */
   bucketId: string
   /** Multi-tenant isolation. Maps to organization_id in many apps. */
   tenantId?: string | undefined

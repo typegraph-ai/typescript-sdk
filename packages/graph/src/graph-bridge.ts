@@ -1,15 +1,15 @@
-import type { EmbeddingProvider, d8umIdentity, LLMProvider, d8umEventSink, MemoryRecord, ConversationTurnResult, MemoryHealthReport } from '@d8um-ai/core'
-import type { GraphBridge, EntityDetail, EdgeResult, SubgraphOpts, SubgraphResult, GraphStats } from '@d8um-ai/core'
+import type { EmbeddingProvider, typegraphIdentity, LLMProvider, typegraphEventSink, MemoryRecord, ConversationTurnResult, MemoryHealthReport } from '@typegraph-ai/core'
+import type { GraphBridge, EntityDetail, EdgeResult, SubgraphOpts, SubgraphResult, GraphStats } from '@typegraph-ai/core'
 import type { MemoryStoreAdapter } from './types/adapter.js'
 import type { SemanticEdge } from './types/memory.js'
 import type { ConversationMessage } from './extraction/extractor.js'
-import { d8umMemory } from './d8um-memory.js'
+import { TypegraphMemory } from './typegraph-memory.js'
 import { EmbeddedGraph } from './graph/embedded-graph.js'
 import { EntityResolver } from './extraction/entity-resolver.js'
 import { PredicateNormalizer } from './extraction/predicate-normalizer.js'
 import { createTemporal } from './temporal.js'
 import { scopeKey } from './types/scope.js'
-import { generateId } from '@d8um-ai/core'
+import { generateId } from '@typegraph-ai/core'
 
 // ── Config ──
 
@@ -18,42 +18,42 @@ export interface CreateGraphBridgeConfig {
   embedding: EmbeddingProvider
   llm: LLMProvider
   /** Default scope for addTriple (which has no per-call identity) */
-  scope?: d8umIdentity
-  /** Optional event sink for observability. Passed through to d8umMemory instances. */
-  eventSink?: d8umEventSink
+  scope?: typegraphIdentity
+  /** Optional event sink for observability. Passed through to TypegraphMemory instances. */
+  eventSink?: typegraphEventSink
 }
 
 // ── Factory ──
 
 /**
- * Create a unified GraphBridge that composes d8umMemory + EmbeddedGraph + EntityResolver.
+ * Create a unified GraphBridge that composes TypegraphMemory + EmbeddedGraph + EntityResolver.
  * Implements all required AND optional GraphBridge methods so that neural query mode
  * (PPR graph traversal via GraphRunner) works without silent fallback to hybrid.
  */
 export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge {
   const { memoryStore, embedding, llm } = config
-  const defaultScope: d8umIdentity = config.scope ?? { agentId: 'd8um-graph' }
+  const defaultScope: typegraphIdentity = config.scope ?? { agentId: 'typegraph-graph' }
 
   const graph = new EmbeddedGraph(memoryStore)
   const resolver = new EntityResolver({ store: memoryStore, embedding })
   const predicateNormalizer = new PredicateNormalizer(embedding)
 
-  // Cache d8umMemory instances per identity scope
-  const memoryCache = new Map<string, d8umMemory>()
+  // Cache TypegraphMemory instances per identity scope
+  const memoryCache = new Map<string, TypegraphMemory>()
 
-  function getMemory(identity: d8umIdentity): d8umMemory {
+  function getMemory(identity: typegraphIdentity): TypegraphMemory {
     const key = scopeKey(identity)
     let mem = memoryCache.get(key)
     if (!mem) {
-      mem = new d8umMemory({ memoryStore, embedding, llm, scope: identity, eventSink: config.eventSink })
+      mem = new TypegraphMemory({ memoryStore, embedding, llm, scope: identity, eventSink: config.eventSink })
       memoryCache.set(key, mem)
     }
     return mem
   }
 
-  // ── Required methods (delegate to d8umMemory) ──
+  // ── Required methods (delegate to TypegraphMemory) ──
 
-  async function remember(content: string, identity: d8umIdentity, category?: string, opts?: {
+  async function remember(content: string, identity: typegraphIdentity, category?: string, opts?: {
     importance?: number
     metadata?: Record<string, unknown>
   }): Promise<MemoryRecord> {
@@ -63,26 +63,26 @@ export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge 
     return mem.remember(content, (category as 'episodic' | 'semantic' | 'procedural') ?? 'semantic', opts) as unknown as Promise<MemoryRecord>
   }
 
-  async function forget(id: string, _identity: d8umIdentity): Promise<void> {
+  async function forget(id: string, _identity: typegraphIdentity): Promise<void> {
     // TODO: verify memory belongs to identity before invalidating
     await memoryStore.invalidate(id)
   }
 
-  async function correct(correction: string, identity: d8umIdentity) {
+  async function correct(correction: string, identity: typegraphIdentity) {
     const mem = getMemory(identity)
     return mem.correct(correction)
   }
 
   async function addConversationTurn(
     messages: Array<{ role: string; content: string; timestamp?: Date }>,
-    identity: d8umIdentity,
+    identity: typegraphIdentity,
     conversationId?: string,
   ): Promise<ConversationTurnResult> {
     const mem = getMemory(identity)
     return mem.addConversationTurn(messages as ConversationMessage[], conversationId) as unknown as Promise<ConversationTurnResult>
   }
 
-  async function recall(query: string, identity: d8umIdentity, opts?: {
+  async function recall(query: string, identity: typegraphIdentity, opts?: {
     limit?: number
     types?: string[]
     temporalAt?: Date
@@ -97,7 +97,7 @@ export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge 
     return results as unknown as MemoryRecord[]
   }
 
-  async function recallHybrid(query: string, identity: d8umIdentity, opts?: {
+  async function recallHybrid(query: string, identity: typegraphIdentity, opts?: {
     limit?: number
     types?: string[]
     temporalAt?: Date
@@ -114,7 +114,7 @@ export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge 
 
   // ── Assemble context & health ──
 
-  async function buildMemoryContext(query: string, identity: d8umIdentity, opts?: {
+  async function buildMemoryContext(query: string, identity: typegraphIdentity, opts?: {
     includeWorking?: boolean
     includeFacts?: boolean
     includeEpisodes?: boolean
@@ -126,7 +126,7 @@ export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge 
     return mem.assembleContext(query, opts)
   }
 
-  async function healthCheck(identity: d8umIdentity): Promise<MemoryHealthReport> {
+  async function healthCheck(identity: typegraphIdentity): Promise<MemoryHealthReport> {
     const mem = getMemory(identity)
     return mem.healthCheck() as unknown as Promise<MemoryHealthReport>
   }
@@ -283,7 +283,7 @@ export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge 
    */
   async function searchEntities(
     query: string,
-    identity: d8umIdentity,
+    identity: typegraphIdentity,
     limit: number = 10,
   ): Promise<Array<{ id: string; name: string; entityType: string; similarity?: number }>> {
     if (!memoryStore.searchEntities) return []
@@ -605,7 +605,7 @@ export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge 
     }
   }
 
-  async function getGraphStats(_identity: d8umIdentity): Promise<GraphStats> {
+  async function getGraphStats(_identity: typegraphIdentity): Promise<GraphStats> {
     const totalEntities = memoryStore.countEntities ? await memoryStore.countEntities() : 0
     const totalEdges = memoryStore.countEdges ? await memoryStore.countEdges() : 0
     const topRelations = memoryStore.getRelationTypes ? await memoryStore.getRelationTypes() : []
@@ -622,11 +622,11 @@ export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge 
     }
   }
 
-  async function getRelationTypes(_identity: d8umIdentity): Promise<Array<{ relation: string; count: number }>> {
+  async function getRelationTypes(_identity: typegraphIdentity): Promise<Array<{ relation: string; count: number }>> {
     return memoryStore.getRelationTypes ? memoryStore.getRelationTypes() : []
   }
 
-  async function getEntityTypes(_identity: d8umIdentity): Promise<Array<{ entityType: string; count: number }>> {
+  async function getEntityTypes(_identity: typegraphIdentity): Promise<Array<{ entityType: string; count: number }>> {
     return memoryStore.getEntityTypes ? memoryStore.getEntityTypes() : []
   }
 

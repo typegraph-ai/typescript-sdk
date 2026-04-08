@@ -1,27 +1,27 @@
-# @d8um-ai/adapter-pgvector
+# @typegraph-ai/adapter-pgvector
 
-PostgreSQL + [pgvector](https://github.com/pgvector/pgvector) adapter for d8um. Hybrid search combining vector similarity with keyword matching via `tsvector` and Reciprocal Rank Fusion.
+PostgreSQL + [pgvector](https://github.com/pgvector/pgvector) adapter for TypeGraph. Hybrid search combining vector similarity with keyword matching via `tsvector` and Reciprocal Rank Fusion.
 
 Bring your own Postgres driver -- works with Neon serverless, node-postgres, Drizzle, or anything that can run a parameterized query. Per-model table isolation keeps embedding dimensions and indexes clean.
 
 ## Install
 
 ```bash
-npm install @d8um-ai/adapter-pgvector @d8um-ai/core
+npm install @typegraph-ai/adapter-pgvector @typegraph-ai/core
 ```
 
 ## Usage
 
 ```ts
 import { neon } from '@neondatabase/serverless'
-import { PgVectorAdapter } from '@d8um-ai/adapter-pgvector'
-import { d8um } from '@d8um-ai/core'
+import { PgVectorAdapter } from '@typegraph-ai/adapter-pgvector'
+import { typegraph } from '@typegraph-ai/core'
 
 const sql = neon(process.env.DATABASE_URL!)
 
 const adapter = new PgVectorAdapter({ sql })
 
-const agent = await d8um.initialize({
+const agent = await typegraph.initialize({
   adapter,
   // ... embedding provider, etc.
 })
@@ -60,5 +60,5 @@ const sql: SqlExecutor = (q, p) => pool.query(q, p).then(r => r.rows)
 
 ## Related
 
-- [d8um main repo](../..)
+- [TypeGraph main repo](../..)
 - [Self-Hosted Setup Guide](../../guides/Self%20Hosted/setup.md)

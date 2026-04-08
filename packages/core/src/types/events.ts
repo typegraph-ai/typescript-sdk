@@ -1,8 +1,8 @@
-import type { d8umIdentity } from './identity.js'
+import type { typegraphIdentity } from './identity.js'
 
 // ── Event Types ──
 
-export type d8umEventType =
+export type typegraphEventType =
   // Memory lifecycle
   | 'memory.write'
   | 'memory.read'
@@ -41,13 +41,13 @@ export type d8umEventType =
   | 'policy.delete'
   | 'policy.violation'
 
-export interface d8umEvent {
+export interface typegraphEvent {
   /** Unique event ID (UUID or ULID). */
   id: string
-  /** Event type from the d8umEventType union. */
-  eventType: d8umEventType
+  /** Event type from the typegraphEventType union. */
+  eventType: typegraphEventType
   /** Identity context for who/what triggered the event. */
-  identity: d8umIdentity
+  identity: typegraphIdentity
   /** ID of the target object (memory, entity, edge, document, bucket). */
   targetId?: string | undefined
   /** Type of the target object. */
@@ -76,14 +76,14 @@ export interface TokenUsage {
 }
 
 /**
- * Sink for d8um events. Implementations can write to Postgres, OTel, console, etc.
+ * Sink for typegraph events. Implementations can write to Postgres, OTel, console, etc.
  * All methods are fire-and-forget — errors should be logged, not thrown.
  */
-export interface d8umEventSink {
+export interface typegraphEventSink {
   /** Emit a single event. */
-  emit(event: d8umEvent): void | Promise<void>
+  emit(event: typegraphEvent): void | Promise<void>
   /** Emit a batch of events (optional optimization). */
-  emitBatch?(events: d8umEvent[]): void | Promise<void>
+  emitBatch?(events: typegraphEvent[]): void | Promise<void>
   /** Flush any buffered events. */
   flush?(): Promise<void>
 }

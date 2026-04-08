@@ -1,11 +1,11 @@
-import type { d8umResult } from '../types/query.js'
+import type { typegraphResult } from '../types/query.js'
 
 export interface AssembleOpts {
-  format?: 'xml' | 'markdown' | 'plain' | ((results: d8umResult[]) => string)
+  format?: 'xml' | 'markdown' | 'plain' | ((results: typegraphResult[]) => string)
   citeBuckets?: boolean
 }
 
-export function assemble(results: d8umResult[], opts: AssembleOpts = {}): string {
+export function assemble(results: typegraphResult[], opts: AssembleOpts = {}): string {
   const {
     format = 'xml',
     citeBuckets = true,
@@ -21,7 +21,7 @@ export function assemble(results: d8umResult[], opts: AssembleOpts = {}): string
   }
 }
 
-export function assembleXml(results: d8umResult[], _opts: { citeBuckets: boolean }): string {
+export function assembleXml(results: typegraphResult[], _opts: { citeBuckets: boolean }): string {
   const sources = groupByBucketId(results)
   const parts = Object.entries(sources).map(([bucketId, chunks]) => {
     const first = chunks[0]!
@@ -41,7 +41,7 @@ export function assembleXml(results: d8umResult[], _opts: { citeBuckets: boolean
   return `<context>\n${parts.join('\n')}\n</context>`
 }
 
-export function assembleMarkdown(results: d8umResult[], _opts: { citeBuckets: boolean }): string {
+export function assembleMarkdown(results: typegraphResult[], _opts: { citeBuckets: boolean }): string {
   return results.map(r => {
     const title = r.document.title
     const url = r.document.url
@@ -50,16 +50,16 @@ export function assembleMarkdown(results: d8umResult[], _opts: { citeBuckets: bo
   }).join('\n\n---\n\n')
 }
 
-export function assemblePlain(results: d8umResult[]): string {
+export function assemblePlain(results: typegraphResult[]): string {
   return results.map(r => r.content).join('\n\n')
 }
 
-export function groupByBucketId(results: d8umResult[]): Record<string, d8umResult[]> {
+export function groupByBucketId(results: typegraphResult[]): Record<string, typegraphResult[]> {
   return results.reduce((acc, r) => {
     const key = r.document.bucketId
     ;(acc[key] = acc[key] ?? []).push(r)
     return acc
-  }, {} as Record<string, d8umResult[]>)
+  }, {} as Record<string, typegraphResult[]>)
 }
 
 export function escapeXml(s: string): string {

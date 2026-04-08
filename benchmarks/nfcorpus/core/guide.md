@@ -1,6 +1,6 @@
-# NFCorpus Benchmark — d8um Core (Hybrid Search)
+# NFCorpus Benchmark — TypeGraph Core (Hybrid Search)
 
-Run the full [BEIR NFCorpus](https://www.nfcorpus.org/) benchmark against d8um using hybrid search (vector + BM25 with RRF fusion). This evaluates pure retrieval quality with zero LLM calls at query time.
+Run the full [BEIR NFCorpus](https://www.nfcorpus.org/) benchmark against TypeGraph using hybrid search (vector + BM25 with RRF fusion). This evaluates pure retrieval quality with zero LLM calls at query time.
 
 ## What You'll Measure
 
@@ -32,7 +32,7 @@ NFCorpus (NeurIPS 2021, part of BEIR) is the smallest benchmark in the BEIR suit
 ```bash
 mkdir nfcorpus-benchmark && cd nfcorpus-benchmark
 npm init -y
-npm install @d8um-ai/core @d8um-ai/adapter-sqlite-vec @ai-sdk/gateway ai
+npm install @typegraph-ai/core @typegraph-ai/adapter-sqlite-vec @ai-sdk/gateway ai
 ```
 
 Set your API key:
@@ -45,15 +45,15 @@ export AI_GATEWAY_API_KEY=your-key-here
 
 The script (`run-core.ts`) runs through 7 phases:
 
-### Phase 1: Initialize d8um
+### Phase 1: Initialize TypeGraph
 
 ```typescript
-import { d8umCreate } from '@d8um-ai/core'
-import { SqliteVecAdapter } from '@d8um-ai/adapter-sqlite-vec'
+import { typegraphCreate } from '@typegraph-ai/core'
+import { SqliteVecAdapter } from '@typegraph-ai/adapter-sqlite-vec'
 import { gateway } from '@ai-sdk/gateway'
 
 const adapter = new SqliteVecAdapter({ dbPath: './nfcorpus-core.db' })
-const d = await d8umCreate({
+const d = await typegraphCreate({
   vectorStore: adapter,
   embedding: {
     model: gateway.embeddingModel('openai/text-embedding-3-small'),
@@ -62,7 +62,7 @@ const d = await d8umCreate({
 })
 ```
 
-This creates a d8um instance with:
+This creates a TypeGraph instance with:
 - **SQLite** for local vector storage (no external database)
 - **text-embedding-3-small** (1536 dims) via Vercel AI Gateway
 - **No LLM** — core mode is pure retrieval, no generation needed
@@ -105,7 +105,7 @@ The `corpusId` in metadata is critical — it's how we map retrieval results bac
 
 ### Phase 4: Run Queries
 
-For each of the 323 test queries, call `d8um.query()` in hybrid mode:
+For each of the 323 test queries, call `typegraph.query()` in hybrid mode:
 
 ```typescript
 const response = await d.query(queryText, {
@@ -151,7 +151,7 @@ Expected runtime: depends on embedding API throughput. Ingestion is the bottlene
 
 ```
 ══════════════════════════════════════════════════════
-  NFCorpus Benchmark — d8um Core (Hybrid Search)
+  NFCorpus Benchmark — TypeGraph Core (Hybrid Search)
 ══════════════════════════════════════════════════════
 
   Corpus:        3,633 documents ingested

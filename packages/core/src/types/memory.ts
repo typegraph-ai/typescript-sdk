@@ -1,4 +1,4 @@
-import type { d8umIdentity } from './identity.js'
+import type { typegraphIdentity } from './identity.js'
 
 /** A stored memory record. */
 export interface MemoryRecord {
@@ -6,7 +6,7 @@ export interface MemoryRecord {
   content: string
   category: string
   importance: number
-  identity: d8umIdentity
+  identity: typegraphIdentity
   createdAt: Date
   metadata?: Record<string, unknown> | undefined
 }

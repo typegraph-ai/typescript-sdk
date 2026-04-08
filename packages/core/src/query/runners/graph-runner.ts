@@ -1,5 +1,5 @@
 import type { GraphBridge } from '../../types/graph-bridge.js'
-import type { d8umIdentity } from '../../types/identity.js'
+import type { typegraphIdentity } from '../../types/identity.js'
 import type { NormalizedResult } from '../merger.js'
 
 export class GraphRunner {
@@ -16,7 +16,7 @@ export class GraphRunner {
    */
   async run(
     text: string,
-    identity: d8umIdentity,
+    identity: typegraphIdentity,
     count: number
   ): Promise<NormalizedResult[]> {
     // Requires graph bridge methods for entity search and PPR
@@ -66,7 +66,7 @@ export class GraphRunner {
 
 /**
  * Lightweight PPR implementation for the graph runner.
- * Avoids core depending on @d8um-ai/graph.
+ * Avoids core depending on @typegraph/graph.
  */
 function runLightweightPPR(
   adjacency: Map<string, Array<{ target: string; weight: number }>>,

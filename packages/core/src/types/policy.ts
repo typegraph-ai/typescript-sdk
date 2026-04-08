@@ -1,4 +1,4 @@
-import type { d8umIdentity } from './identity.js'
+import type { typegraphIdentity } from './identity.js'
 
 // ── Policy Types ──
 
@@ -55,7 +55,7 @@ export interface UpdatePolicyInput {
 
 export interface PolicyEvalContext {
   action: PolicyAction
-  identity: d8umIdentity
+  identity: typegraphIdentity
   targetId?: string | undefined
   targetType?: string | undefined
   metadata?: Record<string, unknown> | undefined

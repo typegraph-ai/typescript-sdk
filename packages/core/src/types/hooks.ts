@@ -1,9 +1,9 @@
-import type { d8umResult } from './query.js'
+import type { typegraphResult } from './query.js'
 import type { IndexOpts, IndexResult } from './index-types.js'
 
-export interface d8umHooks {
+export interface typegraphHooks {
   /** Fired after query() returns results. Use for citation tracking. */
-  onQueryResults?: ((query: string, results: d8umResult[]) => void | Promise<void>) | undefined
+  onQueryResults?: ((query: string, results: typegraphResult[]) => void | Promise<void>) | undefined
   /** Fired before indexing starts for a bucket. */
   onIndexStart?: ((bucketId: string, opts: IndexOpts) => void | Promise<void>) | undefined
   /** Fired after indexing completes for a bucket. */

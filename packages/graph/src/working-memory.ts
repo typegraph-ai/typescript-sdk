@@ -1,4 +1,4 @@
-import { generateId } from '@d8um-ai/core'
+import { generateId } from '@typegraph-ai/core'
 
 // ── Working Memory Item ──
 

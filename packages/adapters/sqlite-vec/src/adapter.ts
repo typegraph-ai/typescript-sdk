@@ -1,7 +1,7 @@
-import type { VectorStoreAdapter, SearchOpts, UndeployResult } from '@d8um-ai/core'
-import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from '@d8um-ai/core'
-import type { Bucket, BucketListFilter } from '@d8um-ai/core'
-import { generateId } from '@d8um-ai/core'
+import type { VectorStoreAdapter, SearchOpts, UndeployResult } from '@typegraph-ai/core'
+import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from '@typegraph-ai/core'
+import type { Bucket, BucketListFilter } from '@typegraph-ai/core'
+import { generateId } from '@typegraph-ai/core'
 import Database from 'better-sqlite3'
 import * as sqliteVec from 'sqlite-vec'
 import { SqliteHashStore } from './hash-store.js'
@@ -17,9 +17,9 @@ import {
 export interface SqliteVecAdapterConfig {
   /** Path to the SQLite database file. Defaults to ':memory:'. */
   dbPath?: string | undefined
-  /** Table prefix for chunk tables. Defaults to 'd8um_chunks'. */
+  /** Table prefix for chunk tables. Defaults to 'typegraph_chunks'. */
   tablePrefix?: string | undefined
-  /** Table name for the hash store. Defaults to 'd8um_hashes'. */
+  /** Table name for the hash store. Defaults to 'typegraph_hashes'. */
   hashesTable?: string | undefined
   bucketsTable?: string | undefined
 }
@@ -53,9 +53,9 @@ export class SqliteVecAdapter implements VectorStoreAdapter {
     this.db.pragma('journal_mode = WAL')
     sqliteVec.load(this.db)
 
-    this.tablePrefix = config.tablePrefix ?? 'd8um_chunks'
-    this.hashesTable = config.hashesTable ?? 'd8um_hashes'
-    this.bucketsTable = config.bucketsTable ?? 'd8um_buckets'
+    this.tablePrefix = config.tablePrefix ?? 'typegraph_chunks'
+    this.hashesTable = config.hashesTable ?? 'typegraph_hashes'
+    this.bucketsTable = config.bucketsTable ?? 'typegraph_buckets'
     this.registryTable = `${this.tablePrefix}_registry`
     this.hashStore = new SqliteHashStore(this.db, this.hashesTable)
   }
@@ -63,7 +63,7 @@ export class SqliteVecAdapter implements VectorStoreAdapter {
   private warnOnce(feature: string, message: string): void {
     if (this.warned.has(feature)) return
     this.warned.add(feature)
-    console.warn(`[d8um/sqlite] ${message} Use PostgreSQL (PgVectorAdapter) for full feature support.`)
+    console.warn(`[typegraph/sqlite] ${message} Use PostgreSQL (PgVectorAdapter) for full feature support.`)
   }
 
   async deploy(): Promise<void> {
@@ -99,7 +99,7 @@ export class SqliteVecAdapter implements VectorStoreAdapter {
       }))
     } catch {
       // Registry table doesn't exist — nothing to undeploy
-      return { success: true, message: 'No d8um tables found.' }
+      return { success: true, message: 'No typegraph tables found.' }
     }
 
     // Check all tables for data
@@ -148,7 +148,7 @@ export class SqliteVecAdapter implements VectorStoreAdapter {
 
     this.modelTables.clear()
 
-    return { success: true, message: 'All d8um tables dropped.' }
+    return { success: true, message: 'All typegraph tables dropped.' }
   }
 
   async ensureModel(model: string, dimensions: number): Promise<void> {

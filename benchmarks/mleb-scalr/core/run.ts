@@ -1,9 +1,9 @@
 #!/usr/bin/env npx tsx
 /**
- * MLEB-SCALR Benchmark — d8um Core (Hybrid + Fast)
+ * MLEB-SCALR Benchmark — typegraph Core (Hybrid + Fast)
  *
  * Runs the isaacus/mleb-scalr benchmark (523 docs, 120 queries)
- * using d8um core with both hybrid search and fast (pure vector) search.
+ * using typegraph core with both hybrid search and fast (pure vector) search.
  *
  * Usage:
  *   npx tsx --env-file=.env mleb-scalr/core/run.ts              # query-only
@@ -30,7 +30,7 @@ async function main() {
   printBanner(config, cli)
 
   // Phase 1: Initialize
-  console.log('Phase 1: Initializing d8um with Neon pgvector...')
+  console.log('Phase 1: Initializing typegraph with Neon pgvector...')
   const { d, adapter } = await initCore(config)
   const { bucket } = await resolveBucket(d, config.bucketName, cli.shouldSeed)
   const latency = await measureLatencyProfile(adapter)

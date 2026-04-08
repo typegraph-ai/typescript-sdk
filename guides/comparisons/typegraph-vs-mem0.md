@@ -1,36 +1,36 @@
-# d8um vs Mem0: Comparative SDK Analysis
+# TypeGraph vs Mem0: Comparative SDK Analysis
 
 ## Executive Summary
 
-**d8um** and **Mem0** are both memory-layer SDKs for AI agents, but they occupy different design points. Mem0 is a Python-first "universal memory layer" that later shipped a Node.js/TypeScript SDK (`mem0ai` on npm). d8um is a TypeScript-native SDK that unifies retrieval (RAG) and cognitive memory in a single package. This report compares both TypeScript SDKs head-to-head across architecture, features, infrastructure requirements, and use-case fit.
+**TypeGraph** and **Mem0** are both memory-layer SDKs for AI agents, but they occupy different design points. Mem0 is a Python-first "universal memory layer" that later shipped a Node.js/TypeScript SDK (`mem0ai` on npm). TypeGraph is a TypeScript-native SDK that unifies retrieval (RAG) and cognitive memory in a single package. This report compares both TypeScript SDKs head-to-head across architecture, features, infrastructure requirements, and use-case fit.
 
 ---
 
 ## 1. Origins and Ecosystem
 
-| Dimension | d8um | Mem0 (TypeScript SDK) |
+| Dimension | TypeGraph | Mem0 (TypeScript SDK) |
 |---|---|---|
 | **Primary language** | TypeScript-native | Python-first; TS SDK is a port |
-| **npm package** | `@d8um-ai/core` + composable packages | `mem0ai` (single package) |
+| **npm package** | `@typegraph-ai/core` + composable packages | `mem0ai` (single package) |
 | **GitHub stars** | Early-stage (alpha) | ~51.2K |
 | **Funding** | N/A | $24M (October 2025) |
 | **License** | MIT | Apache 2.0 |
-| **Managed cloud** | d8um Cloud (API key) | Mem0 Platform (Free / Standard $19/mo / Pro $249/mo) |
+| **Managed cloud** | TypeGraph Cloud (API key) | Mem0 Platform (Free / Standard $19/mo / Pro $249/mo) |
 | **Notable adopters** | Early-stage | Netflix, Lemonade, Rocket Money |
 | **Self-hosted** | Yes (Postgres/SQLite) | Yes (bring your own infra) |
 
-**Key takeaway:** Mem0 has a far larger community and ecosystem. d8um is newer but was built from the ground up in TypeScript rather than ported, which shows in API ergonomics and type safety.
+**Key takeaway:** Mem0 has a far larger community and ecosystem. TypeGraph is newer but was built from the ground up in TypeScript rather than ported, which shows in API ergonomics and type safety.
 
 ---
 
 ## 2. Architecture Comparison
 
-### d8um: Unified RAG + Memory
+### TypeGraph: Unified RAG + Memory
 
-d8um treats retrieval and memory as a single continuum. The same `d8um` instance handles document ingestion, hybrid search, knowledge graph traversal, and cognitive memory operations. A shared adapter layer, embedding infrastructure, and job system underlies everything.
+TypeGraph treats retrieval and memory as a single continuum. The same `typegraph` instance handles document ingestion, hybrid search, knowledge graph traversal, and cognitive memory operations. A shared adapter layer, embedding infrastructure, and job system underlies everything.
 
 ```
-d8um instance
+typegraph instance
 ├── Retrieval Engine (indexed / live / cached sources)
 ├── Cognitive Memory (episodic / semantic / procedural / working)
 ├── Knowledge Graph (entity-relation triples, PPR traversal)
@@ -51,7 +51,7 @@ Mem0 Memory instance
 └── History Tracking (SQLite / Supabase)
 ```
 
-**Key takeaway:** d8um is a "retrieval + memory" all-in-one. Mem0 is memory-only and expects you to bring your own RAG pipeline.
+**Key takeaway:** TypeGraph is a "retrieval + memory" all-in-one. Mem0 is memory-only and expects you to bring your own RAG pipeline.
 
 ---
 
@@ -59,7 +59,7 @@ Mem0 Memory instance
 
 ### 3.1 Memory Types
 
-| Memory Type | d8um | Mem0 TS SDK |
+| Memory Type | TypeGraph | Mem0 TS SDK |
 |---|---|---|
 | **Working memory** | Yes - bounded buffer with priority eviction, configurable capacity (maxItems, maxTokens) | No built-in equivalent |
 | **Episodic memory** | Yes - timestamped events with session/sequence tracking, participants, event types | Partially - memories are timestamped but lack structured episode modeling |
@@ -67,11 +67,11 @@ Mem0 Memory instance
 | **Procedural memory** | Yes - trigger-steps pairs with success/failure counters | No |
 | **Memory categories** | Explicit `MemoryCategory` enum with specialized data structures per type | Flat - all memories are stored uniformly |
 
-**Winner: d8um.** The cognitive memory taxonomy (working, episodic, semantic, procedural) is significantly richer than Mem0's flat memory model.
+**Winner: TypeGraph.** The cognitive memory taxonomy (working, episodic, semantic, procedural) is significantly richer than Mem0's flat memory model.
 
 ### 3.2 Memory Lifecycle
 
-| Capability | d8um | Mem0 TS SDK |
+| Capability | TypeGraph | Mem0 TS SDK |
 |---|---|---|
 | **Status state machine** | Yes - pending -> active -> consolidated -> archived -> expired; also invalidated path | No explicit lifecycle states |
 | **Consolidation** | Yes - episodic memories promoted to semantic facts via scheduled jobs | Memory compression (reduces token usage ~80%) |
@@ -80,11 +80,11 @@ Mem0 Memory instance
 | **Bi-temporal model** | Yes - world time (validAt/invalidAt) + system time (createdAt/expiredAt) | No - single timestamp only |
 | **Contradiction handling** | LLM-driven invalidation engine (direct/temporal/superseded classification) | LLM updates existing memories, but no explicit invalidation audit trail |
 
-**Winner: d8um.** The lifecycle management is substantially more sophisticated - bi-temporal tracking, scheduled consolidation/decay, and contradiction handling with full audit trails.
+**Winner: TypeGraph.** The lifecycle management is substantially more sophisticated - bi-temporal tracking, scheduled consolidation/decay, and contradiction handling with full audit trails.
 
 ### 3.3 Retrieval & Search
 
-| Capability | d8um | Mem0 TS SDK |
+| Capability | TypeGraph | Mem0 TS SDK |
 |---|---|---|
 | **Document RAG** | Yes - full indexing, chunking, hybrid search | No - memory search only |
 | **Vector search** | Yes (pgvector HNSW / sqlite-vec KNN) | Yes (25+ vector DB providers) |
@@ -97,11 +97,11 @@ Mem0 Memory instance
 | **Temporal queries** | Yes - point-in-time via `temporalAt` | No |
 | **Source types** | indexed / live / cached with TTL | N/A (no document sources) |
 
-**Winner: d8um** for retrieval breadth. **Mem0** wins on vector store diversity (25+ backends vs 2 adapters).
+**Winner: TypeGraph** for retrieval breadth. **Mem0** wins on vector store diversity (25+ backends vs 2 adapters).
 
 ### 3.4 Knowledge Graph
 
-| Capability | d8um | Mem0 TS SDK |
+| Capability | TypeGraph | Mem0 TS SDK |
 |---|---|---|
 | **Graph storage** | Built into vector store (pgvector/SQLite) - no separate graph DB | Requires external graph DB (Neo4j, Memgraph, Neptune, Kuzu, Apache AGE) |
 | **Entity extraction** | LLM-driven S-P-O triple extraction | LLM-driven entity + relationship extraction |
@@ -111,11 +111,11 @@ Mem0 Memory instance
 | **Infrastructure** | No separate graph DB needed | Requires Neo4j or similar |
 | **TS SDK maturity** | First-class | Known bug: `MemoryGraph.structuredLlm` hardcoded to OpenAI, breaks non-OpenAI providers |
 
-**Winner: d8um** for infrastructure simplicity and deeper graph features. **Mem0** for graph backend diversity (if you already run Neo4j).
+**Winner: TypeGraph** for infrastructure simplicity and deeper graph features. **Mem0** for graph backend diversity (if you already run Neo4j).
 
 ### 3.5 Infrastructure & Storage
 
-| Dimension | d8um | Mem0 TS SDK |
+| Dimension | TypeGraph | Mem0 TS SDK |
 |---|---|---|
 | **Production DB** | PostgreSQL + pgvector | 25+ vector DBs (Qdrant, Pinecone, Milvus, pgvector, Chroma, etc.) |
 | **Local/dev DB** | SQLite + sqlite-vec (zero-infra) | In-memory vector store or local config |
@@ -125,39 +125,39 @@ Mem0 Memory instance
 | **Embedding providers** | 40+ via Vercel AI SDK structural typing | OpenAI, Ollama, Gemini, HuggingFace |
 | **LLM providers** | Any (structural typing) | OpenAI, Anthropic, Groq, Gemini, Ollama |
 
-**Winner: Mem0** for vector store breadth (25+ backends). **d8um** for minimal infrastructure requirements and local-first development.
+**Winner: Mem0** for vector store breadth (25+ backends). **TypeGraph** for minimal infrastructure requirements and local-first development.
 
 ### 3.6 Agent Framework Integration
 
-| Integration | d8um | Mem0 TS SDK |
+| Integration | TypeGraph | Mem0 TS SDK |
 |---|---|---|
-| **MCP server** | Yes (`@d8um-ai/mcp-server`) - 6 tools: remember, recall, recall_facts, forget, correct, add_conversation | OpenMemory MCP Server (local-first, dashboard UI, works with Cursor/VS Code/Claude Desktop) |
-| **Vercel AI SDK** | Yes (`@d8um-ai/vercel-ai-provider`) - memory tools + auto-context middleware | Yes (`@mem0/vercel-ai-provider`) |
+| **MCP server** | Yes (`@typegraph-ai/mcp-server`) - 6 tools: remember, recall, recall_facts, forget, correct, add_conversation | OpenMemory MCP Server (local-first, dashboard UI, works with Cursor/VS Code/Claude Desktop) |
+| **Vercel AI SDK** | Yes (`@typegraph-ai/vercel-ai-provider`) - memory tools + auto-context middleware | Yes (`@mem0/vercel-ai-provider`) |
 | **LangChain** | No built-in integration | Yes (Python; limited TS) |
 | **CrewAI** | No | Yes (Python) |
 | **OpenAI Agents SDK** | No | Yes (Python) |
 
-**Winner: Tie.** d8um has better TypeScript-native integrations (MCP, Vercel AI). Mem0 has broader Python ecosystem integrations.
+**Winner: Tie.** TypeGraph has better TypeScript-native integrations (MCP, Vercel AI). Mem0 has broader Python ecosystem integrations.
 
 ### 3.7 Data Source Integrations
 
-| Capability | d8um | Mem0 TS SDK |
+| Capability | TypeGraph | Mem0 TS SDK |
 |---|---|---|
 | **Built-in connectors** | 11: Slack, Gmail, Google Calendar, Google Drive, HubSpot, Salesforce, Attio, Linear, Gong, Fathom, + integration-core | None - memory-only, no data ingestion connectors |
 | **Web crawling** | Built-in: URL scrape job, domain BFS crawl, HTML-to-markdown | No |
 | **Sync modes** | Full sync + incremental sync per integration | N/A |
 | **Job system** | Yes - schedulable jobs for sync, consolidation, decay, crawl | No job system |
 
-**Winner: d8um.** This is not a close comparison - Mem0 has no data ingestion pipeline at all.
+**Winner: TypeGraph.** This is not a close comparison - Mem0 has no data ingestion pipeline at all.
 
 ### 3.8 API Ergonomics (TypeScript)
 
-**d8um:**
+**TypeGraph:**
 ```ts
-import { d8umCreate } from '@d8um-ai/core'
-import { createGraphBridge } from '@d8um-ai/graph'
+import { typegraphCreate } from '@typegraph-ai/core'
+import { createGraphBridge } from '@typegraph-ai/graph'
 
-const d = await d8umCreate({ vectorStore, embedding, llm, graph })
+const d = await typegraphCreate({ vectorStore, embedding, llm, graph })
 
 // Memory
 await d.remember('Alice prefers PostgreSQL', { userId: 'alice' })
@@ -188,23 +188,23 @@ await memory.update('memory-id', 'Updated content')
 await memory.delete('memory-id')
 ```
 
-**d8um advantages:** Richer API surface (remember, correct, recallFacts, recallEpisodes, recallProcedures, assembleContext). Composable package design. Full TypeScript generics.
+**TypeGraph advantages:** Richer API surface (remember, correct, recallFacts, recallEpisodes, recallProcedures, assembleContext). Composable package design. Full TypeScript generics.
 
 **Mem0 advantages:** Simpler API (add/search/update/delete). Lower learning curve. Single package install.
 
 ### 3.9 Multi-Tenancy & Scoping
 
-| Dimension | d8um | Mem0 TS SDK |
+| Dimension | TypeGraph | Mem0 TS SDK |
 |---|---|---|
 | **Scope levels** | 5: tenantId, groupId, userId, agentId, conversationId | 3: userId, agentId, runId (+ metadata filters) |
 | **Scope model** | Per-call identity (Segment-style), subset filtering | Per-call identity |
 | **Organization isolation** | tenantId + groupId for team-level sharing | organizationId + projectId (platform mode) |
 
-**Winner: d8um.** More granular scoping with 5 hierarchical levels vs 3.
+**Winner: TypeGraph.** More granular scoping with 5 hierarchical levels vs 3.
 
 ---
 
-## 4. What d8um Does That Mem0 Doesn't
+## 4. What TypeGraph Does That Mem0 Doesn't
 
 1. **Unified RAG + Memory** - Document ingestion, chunking, hybrid search, and context assembly alongside memory. Mem0 is memory-only.
 2. **Working memory** - Bounded in-memory buffer with priority eviction for conversation context.
@@ -223,11 +223,11 @@ await memory.delete('memory-id')
 15. **Memory lifecycle state machine** - pending/active/consolidated/archived/expired/invalidated.
 16. **MCP server** - Native Model Context Protocol tools for agent frameworks.
 
-## 5. What Mem0 Does That d8um Doesn't
+## 5. What Mem0 Does That TypeGraph Doesn't
 
-1. **25+ vector store backends** - Qdrant, Pinecone, Milvus, Chroma, Weaviate, Redis, Elasticsearch, MongoDB, Faiss, etc. d8um supports only pgvector and SQLite.
-2. **5+ graph DB backends** - Neo4j, Memgraph, Neptune, Kuzu, Apache AGE. d8um uses its own graph-on-vector approach.
-3. **Managed cloud with tiered pricing** - Free, Standard ($19/mo), Pro ($249/mo) with usage-based scaling. d8um Cloud exists but is less mature.
+1. **25+ vector store backends** - Qdrant, Pinecone, Milvus, Chroma, Weaviate, Redis, Elasticsearch, MongoDB, Faiss, etc. TypeGraph supports only pgvector and SQLite.
+2. **5+ graph DB backends** - Neo4j, Memgraph, Neptune, Kuzu, Apache AGE. TypeGraph uses its own graph-on-vector approach.
+3. **Managed cloud with tiered pricing** - Free, Standard ($19/mo), Pro ($249/mo) with usage-based scaling. TypeGraph Cloud exists but is less mature.
 4. **Batch operations** - `batchUpdate()`, `batchDelete()` for bulk memory management.
 5. **User management API** - `users()`, `deleteUsers()` for platform-level user management.
 6. **Memory compression** - Automatic chat history compression (~80% token reduction).
@@ -244,9 +244,9 @@ await memory.delete('memory-id')
 
 ## 6. Use-Case Recommendations
 
-### Choose d8um when:
+### Choose TypeGraph when:
 
-| Use Case | Why d8um |
+| Use Case | Why TypeGraph |
 |---|---|
 | **TypeScript/Node.js agent stack** | Native TS with full type safety, not a Python port |
 | **RAG + memory in one SDK** | Don't want to stitch together LangChain + Mem0 |
@@ -275,7 +275,7 @@ await memory.delete('memory-id')
 
 ## 7. Maturity & Risk Assessment
 
-| Dimension | d8um | Mem0 TS SDK |
+| Dimension | TypeGraph | Mem0 TS SDK |
 |---|---|---|
 | **Maturity** | Alpha | Production (v2.2+) |
 | **Breaking changes risk** | High (alpha) | Low-medium |
@@ -289,13 +289,13 @@ await memory.delete('memory-id')
 
 ## 8. Summary Verdict
 
-**d8um is the more capable and architecturally ambitious SDK.** It offers unified RAG + memory, richer cognitive memory types, sophisticated lifecycle management, and lighter infrastructure requirements. It is the better choice for TypeScript-native projects that need a comprehensive agent memory and retrieval system.
+**TypeGraph is the more capable and architecturally ambitious SDK.** It offers unified RAG + memory, richer cognitive memory types, sophisticated lifecycle management, and lighter infrastructure requirements. It is the better choice for TypeScript-native projects that need a comprehensive agent memory and retrieval system.
 
 **Mem0 is the safer and more proven choice.** It has a massive community, more storage backends, a mature managed platform, and a simpler API. It is the better choice for teams that want a straightforward memory layer they can integrate into an existing RAG stack.
 
-If you are building in TypeScript and want one SDK for both retrieval and memory with deep cognitive capabilities: **d8um**.
+If you are building in TypeScript and want one SDK for both retrieval and memory with deep cognitive capabilities: **TypeGraph**.
 If you want a battle-tested memory layer with maximum backend flexibility and managed hosting: **Mem0**.
 
 ---
 
-*Analysis generated March 2026. Mem0 TS SDK version ~2.2.x. d8um at alpha stage.*
+*Analysis generated March 2026. Mem0 TS SDK version ~2.2.x. TypeGraph at alpha stage.*

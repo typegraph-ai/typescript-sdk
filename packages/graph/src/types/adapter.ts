@@ -1,4 +1,4 @@
-import type { d8umIdentity, Visibility } from '@d8um-ai/core'
+import type { typegraphIdentity, Visibility } from '@typegraph-ai/core'
 import type {
   MemoryRecord,
   MemoryCategory,
@@ -11,7 +11,7 @@ import type {
 
 export interface MemoryFilter {
   /** Legacy JSONB scope filter (deprecated — use explicit identity fields) */
-  scope?: d8umIdentity | undefined
+  scope?: typegraphIdentity | undefined
   /** Explicit identity fields for filtering */
   tenantId?: string | undefined
   groupId?: string | undefined
@@ -43,7 +43,7 @@ export interface MemorySearchOpts {
 
 // ── Memory Store Adapter ──
 // Persistence layer for memory records. Follows the same adapter pattern
-// as VectorStoreAdapter in @d8um-ai/core.
+// as VectorStoreAdapter in @typegraph-ai/core.
 
 export interface MemoryStoreAdapter {
   initialize(): Promise<void>
@@ -84,8 +84,8 @@ export interface MemoryStoreAdapter {
 
   upsertEntity?(entity: SemanticEntity): Promise<SemanticEntity>
   getEntity?(id: string): Promise<SemanticEntity | null>
-  findEntities?(query: string, scope: d8umIdentity, limit?: number): Promise<SemanticEntity[]>
-  searchEntities?(embedding: number[], scope: d8umIdentity, limit?: number): Promise<SemanticEntity[]>
+  findEntities?(query: string, scope: typegraphIdentity, limit?: number): Promise<SemanticEntity[]>
+  searchEntities?(embedding: number[], scope: typegraphIdentity, limit?: number): Promise<SemanticEntity[]>
 
   // ── Edge Storage (optional - needed for semantic memory graph) ──
 

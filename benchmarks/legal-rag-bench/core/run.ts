@@ -1,9 +1,9 @@
 #!/usr/bin/env npx tsx
 /**
- * Legal RAG Bench — d8um Core (Hybrid + Fast)
+ * Legal RAG Bench — typegraph Core (Hybrid + Fast)
  *
  * Runs the isaacus/legal-rag-bench benchmark (4,876 passages, 100 questions)
- * using d8um core with both hybrid search and fast (pure vector) search.
+ * using typegraph core with both hybrid search and fast (pure vector) search.
  *
  * This dataset uses a custom format (not BEIR):
  * - Corpus: Victorian Criminal Charge Book passages with footnotes
@@ -51,7 +51,7 @@ async function main() {
   printBanner(config, cli)
 
   // Phase 1: Initialize
-  console.log('Phase 1: Initializing d8um with Neon pgvector...')
+  console.log('Phase 1: Initializing typegraph with Neon pgvector...')
   const { d, adapter } = await initCore(config)
   const { bucket } = await resolveBucket(d, config.bucketName, cli.shouldSeed)
   const latency = await measureLatencyProfile(adapter)

@@ -1,9 +1,9 @@
 /**
- * Identity context for all d8um operations.
+ * Identity context for all typegraph operations.
  * Every API call can pass identity fields to scope the operation.
  * This replaces the previous `tenantId`-only model with a full identity hierarchy.
  */
-export interface d8umIdentity {
+export interface typegraphIdentity {
   /** Organization-level isolation. */
   tenantId?: string | undefined
   /** Team, channel, or project shared context. */

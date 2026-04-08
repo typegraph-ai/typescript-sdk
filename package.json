@@ -1,5 +1,5 @@
 {
-  "name": "d8um",
+  "name": "typegraph",
   "private": true,
   "packageManager": "pnpm@10.18.0",
   "workspaces": ["packages/*", "packages/adapters/*"],

@@ -1,9 +1,9 @@
 #!/usr/bin/env npx tsx
 /**
- * Australian Tax Guidance Retrieval Benchmark — d8um Core (Hybrid + Fast)
+ * Australian Tax Guidance Retrieval Benchmark — typegraph Core (Hybrid + Fast)
  *
  * Runs the isaacus/australian-tax-guidance-retrieval benchmark (105 docs, 112 queries)
- * using d8um core with both hybrid search and fast (pure vector) search.
+ * using typegraph core with both hybrid search and fast (pure vector) search.
  *
  * Usage:
  *   npx tsx --env-file=.env australian-tax-guidance-retrieval/core/run.ts              # query-only
@@ -30,7 +30,7 @@ async function main() {
   printBanner(config, cli)
 
   // Phase 1: Initialize
-  console.log('Phase 1: Initializing d8um with Neon pgvector...')
+  console.log('Phase 1: Initializing typegraph with Neon pgvector...')
   const { d, adapter } = await initCore(config)
   const { bucket } = await resolveBucket(d, config.bucketName, cli.shouldSeed)
   const latency = await measureLatencyProfile(adapter)

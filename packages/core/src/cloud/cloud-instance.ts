@@ -1,11 +1,11 @@
-import type { d8umInstance, d8umConfig, BucketsApi, DocumentsApi, JobsApi, GraphApi } from '../d8um.js'
+import type { typegraphInstance, typegraphConfig, BucketsApi, DocumentsApi, JobsApi, GraphApi } from '../typegraph.js'
 import type { Bucket, CreateBucketInput, BucketListFilter } from '../types/bucket.js'
 import type { QueryOpts, QueryResponse } from '../types/query.js'
 import type { IndexOpts, IndexResult } from '../types/index-types.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import type { RawDocument, Chunk } from '../types/connector.js'
-import type { d8umDocument, DocumentFilter } from '../types/d8um-document.js'
-import type { d8umIdentity } from '../types/identity.js'
+import type { typegraphDocument, DocumentFilter } from '../types/typegraph-document.js'
+import type { typegraphIdentity } from '../types/identity.js'
 import type { CreatePolicyInput, UpdatePolicyInput, Policy, PolicyType } from '../types/policy.js'
 import type { UndeployResult } from '../types/adapter.js'
 import type { PaginationOpts, PaginatedResult } from '../types/pagination.js'
@@ -13,26 +13,26 @@ import type { IndexConfig } from '../types/bucket.js'
 import type { MemoryRecord, ConversationTurnResult, MemoryHealthReport } from '../types/memory.js'
 import type { Job, JobFilter } from '../types/job.js'
 import type { EntityResult, EntityDetail, EdgeResult, SubgraphOpts, SubgraphResult, GraphStats } from '../types/graph-bridge.js'
-import { DEFAULT_BUCKET_ID } from '../d8um.js'
+import { DEFAULT_BUCKET_ID } from '../typegraph.js'
 import { HttpClient } from './http-client.js'
 import type { CloudConfig } from './http-client.js'
 
 /**
- * Extended d8um instance for cloud mode.
+ * Extended typegraph instance for cloud mode.
  * Includes document CRUD methods available via the hosted API.
  */
-export interface d8umCloudInstance extends d8umInstance {
-  listDocuments(filter?: DocumentFilter): Promise<d8umDocument[]>
-  getDocument(documentId: string): Promise<d8umDocument>
-  updateDocument(documentId: string, update: Partial<d8umDocument>): Promise<d8umDocument>
+export interface typegraphCloudInstance extends typegraphInstance {
+  listDocuments(filter?: DocumentFilter): Promise<typegraphDocument[]>
+  getDocument(documentId: string): Promise<typegraphDocument>
+  updateDocument(documentId: string, update: Partial<typegraphDocument>): Promise<typegraphDocument>
   deleteDocuments(filter: DocumentFilter): Promise<number>
 }
 
 /**
- * Create a d8um instance backed by the hosted cloud service.
+ * Create a typegraph instance backed by the hosted cloud service.
  * Everything runs server-side — embedding, indexing, storage, memory.
  */
-export function createCloudInstance(config: CloudConfig): d8umCloudInstance {
+export function createCloudInstance(config: CloudConfig): typegraphCloudInstance {
   const client = new HttpClient(config)
   const e = encodeURIComponent
 
@@ -67,17 +67,17 @@ export function createCloudInstance(config: CloudConfig): d8umCloudInstance {
   }
 
   const documents: DocumentsApi = {
-    async get(id: string): Promise<d8umDocument | null> {
-      return client.get<d8umDocument | null>(`/v1/documents/${e(id)}`)
+    async get(id: string): Promise<typegraphDocument | null> {
+      return client.get<typegraphDocument | null>(`/v1/documents/${e(id)}`)
     },
-    async list(filter?: DocumentFilter, pagination?: PaginationOpts): Promise<d8umDocument[] | PaginatedResult<d8umDocument>> {
+    async list(filter?: DocumentFilter, pagination?: PaginationOpts): Promise<typegraphDocument[] | PaginatedResult<typegraphDocument>> {
       if (pagination) {
-        return client.post<PaginatedResult<d8umDocument>>('/v1/documents/list', { ...filter, ...pagination })
+        return client.post<PaginatedResult<typegraphDocument>>('/v1/documents/list', { ...filter, ...pagination })
       }
-      return client.post<d8umDocument[]>('/v1/documents/list', filter)
+      return client.post<typegraphDocument[]>('/v1/documents/list', filter)
     },
-    async update(id: string, input): Promise<d8umDocument> {
-      return client.patch<d8umDocument>(`/v1/documents/${e(id)}`, input)
+    async update(id: string, input): Promise<typegraphDocument> {
+      return client.patch<typegraphDocument>(`/v1/documents/${e(id)}`, input)
     },
     async delete(filter: DocumentFilter): Promise<number> {
       return client.delete<number>('/v1/documents', filter)
@@ -94,7 +94,7 @@ export function createCloudInstance(config: CloudConfig): d8umCloudInstance {
   }
 
   const graph: GraphApi = {
-    async searchEntities(query: string, identity: d8umIdentity, opts?: {
+    async searchEntities(query: string, identity: typegraphIdentity, opts?: {
       limit?: number
       entityType?: string
       minConnections?: number
@@ -114,23 +114,23 @@ export function createCloudInstance(config: CloudConfig): d8umCloudInstance {
     async getSubgraph(opts: SubgraphOpts): Promise<SubgraphResult> {
       return client.post<SubgraphResult>('/v1/graph/subgraph', opts)
     },
-    async stats(identity: d8umIdentity): Promise<GraphStats> {
+    async stats(identity: typegraphIdentity): Promise<GraphStats> {
       return client.post<GraphStats>('/v1/graph/stats', { identity })
     },
-    async getRelationTypes(identity: d8umIdentity): Promise<Array<{ relation: string; count: number }>> {
+    async getRelationTypes(identity: typegraphIdentity): Promise<Array<{ relation: string; count: number }>> {
       return client.post('/v1/graph/relation-types', { identity })
     },
-    async getEntityTypes(identity: d8umIdentity): Promise<Array<{ entityType: string; count: number }>> {
+    async getEntityTypes(identity: typegraphIdentity): Promise<Array<{ entityType: string; count: number }>> {
       return client.post('/v1/graph/entity-types', { identity })
     },
   }
 
-  const instance: d8umCloudInstance = {
-    async deploy(_config: d8umConfig): Promise<d8umCloudInstance> {
+  const instance: typegraphCloudInstance = {
+    async deploy(_config: typegraphConfig): Promise<typegraphCloudInstance> {
       return instance
     },
 
-    async initialize(_config: d8umConfig): Promise<d8umCloudInstance> {
+    async initialize(_config: typegraphConfig): Promise<typegraphCloudInstance> {
       return instance
     },
 
@@ -187,26 +187,26 @@ export function createCloudInstance(config: CloudConfig): d8umCloudInstance {
       return client.post<IndexResult>(`/v1/buckets/${e(bucketId)}/ingest`, { doc, chunks, ...opts })
     },
 
-    async remember(content: string, identity: d8umIdentity, category?: string, opts?: {
+    async remember(content: string, identity: typegraphIdentity, category?: string, opts?: {
       importance?: number
       metadata?: Record<string, unknown>
     }): Promise<MemoryRecord> {
       return client.post<MemoryRecord>('/v1/memory/remember', { content, identity, category, ...opts })
     },
 
-    async forget(id: string, identity: d8umIdentity): Promise<void> {
+    async forget(id: string, identity: typegraphIdentity): Promise<void> {
       await client.post('/v1/memory/forget', { id, identity })
     },
 
-    async correct(correction: string, identity: d8umIdentity): Promise<{ invalidated: number; created: number; summary: string }> {
+    async correct(correction: string, identity: typegraphIdentity): Promise<{ invalidated: number; created: number; summary: string }> {
       return client.post('/v1/memory/correct', { correction, identity })
     },
 
-    async recall(query: string, identity: d8umIdentity, opts?: { limit?: number; types?: string[] }): Promise<MemoryRecord[]> {
+    async recall(query: string, identity: typegraphIdentity, opts?: { limit?: number; types?: string[] }): Promise<MemoryRecord[]> {
       return client.post<MemoryRecord[]>('/v1/memory/recall', { query, identity, ...opts })
     },
 
-    async buildMemoryContext(query: string, identity: d8umIdentity, opts?: {
+    async buildMemoryContext(query: string, identity: typegraphIdentity, opts?: {
       includeWorking?: boolean
       includeFacts?: boolean
       includeEpisodes?: boolean
@@ -217,13 +217,13 @@ export function createCloudInstance(config: CloudConfig): d8umCloudInstance {
       return client.post<string>('/v1/memory/context', { query, identity, ...opts })
     },
 
-    async healthCheck(identity: d8umIdentity): Promise<MemoryHealthReport> {
+    async healthCheck(identity: typegraphIdentity): Promise<MemoryHealthReport> {
       return client.post<MemoryHealthReport>('/v1/memory/health', { identity })
     },
 
     async addConversationTurn(
       messages: Array<{ role: string; content: string; timestamp?: Date }>,
-      identity: d8umIdentity,
+      identity: typegraphIdentity,
       conversationId?: string,
     ): Promise<ConversationTurnResult> {
       return client.post<ConversationTurnResult>('/v1/memory/conversation', { messages, identity, conversationId })
@@ -235,16 +235,16 @@ export function createCloudInstance(config: CloudConfig): d8umCloudInstance {
 
     // ── Document CRUD (cloud-only extensions) ──
 
-    async listDocuments(filter?: DocumentFilter): Promise<d8umDocument[]> {
-      return client.post<d8umDocument[]>('/v1/documents/list', filter)
+    async listDocuments(filter?: DocumentFilter): Promise<typegraphDocument[]> {
+      return client.post<typegraphDocument[]>('/v1/documents/list', filter)
     },
 
-    async getDocument(documentId: string): Promise<d8umDocument> {
-      return client.get<d8umDocument>(`/v1/documents/${e(documentId)}`)
+    async getDocument(documentId: string): Promise<typegraphDocument> {
+      return client.get<typegraphDocument>(`/v1/documents/${e(documentId)}`)
     },
 
-    async updateDocument(documentId: string, update: Partial<d8umDocument>): Promise<d8umDocument> {
-      return client.patch<d8umDocument>(`/v1/documents/${e(documentId)}`, update)
+    async updateDocument(documentId: string, update: Partial<typegraphDocument>): Promise<typegraphDocument> {
+      return client.patch<typegraphDocument>(`/v1/documents/${e(documentId)}`, update)
     },
 
     async deleteDocuments(filter: DocumentFilter): Promise<number> {

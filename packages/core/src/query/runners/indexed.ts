@@ -1,14 +1,14 @@
 import type { VectorStoreAdapter } from '../../types/adapter.js'
 import type { EmbeddingProvider } from '../../embedding/provider.js'
-import type { DocumentFilter } from '../../types/d8um-document.js'
-import type { d8umIdentity } from '../../types/identity.js'
+import type { DocumentFilter } from '../../types/typegraph-document.js'
+import type { typegraphIdentity } from '../../types/identity.js'
 import type { NormalizedResult } from '../merger.js'
-import type { d8umEvent, d8umEventSink } from '../../types/events.js'
+import type { typegraphEvent, typegraphEventSink } from '../../types/events.js'
 
 export class IndexedRunner {
   constructor(
     private adapter: VectorStoreAdapter,
-    private eventSink?: d8umEventSink
+    private eventSink?: typegraphEventSink
   ) {}
 
   /**
@@ -19,7 +19,7 @@ export class IndexedRunner {
     text: string,
     sourcesByModel: Map<string, { embedding: EmbeddingProvider; bucketIds: string[] }>,
     count: number,
-    identity?: d8umIdentity,
+    identity?: typegraphIdentity,
     documentFilter?: DocumentFilter,
     vectorOnly?: boolean,
     traceId?: string,
@@ -130,7 +130,7 @@ export class IndexedRunner {
         const mode = vectorOnly ? 'fast' : 'hybrid'
         for (const bucketId of group.bucketIds) {
           const bucketResultCount = allResults.filter(r => r.bucketId === bucketId).length
-          const event: d8umEvent = {
+          const event: typegraphEvent = {
             id: crypto.randomUUID(),
             eventType: 'query.bucket_result',
             identity: identity ?? {},

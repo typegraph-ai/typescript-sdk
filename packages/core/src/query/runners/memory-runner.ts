@@ -1,5 +1,5 @@
 import type { GraphBridge } from '../../types/graph-bridge.js'
-import type { d8umIdentity } from '../../types/identity.js'
+import type { typegraphIdentity } from '../../types/identity.js'
 import type { NormalizedResult } from '../merger.js'
 
 /** Memory composite score weights */
@@ -22,7 +22,7 @@ export class MemoryRunner {
 
   async run(
     text: string,
-    identity: d8umIdentity,
+    identity: typegraphIdentity,
     count: number,
     opts?: { temporalAt?: Date | undefined; includeInvalidated?: boolean | undefined; useKeyword?: boolean | undefined },
   ): Promise<NormalizedResult[]> {

@@ -23,4 +23,4 @@ npx tsx --env-file=.env license-tldr-retrieval/core/run.ts
 
 - Summary-to-full-text matching (asymmetric retrieval)
 - Small corpus with 1:1 matching — precision-focused
-- Tests whether d8um can bridge the abstraction gap between TLDR and legalese
+- Tests whether TypeGraph can bridge the abstraction gap between TLDR and legalese

@@ -1,9 +1,9 @@
 #!/usr/bin/env npx tsx
 /**
- * Legal RAG Bench — d8um Graph (Neural Search)
+ * Legal RAG Bench — typegraph Graph (Neural Search)
  *
  * Runs the isaacus/legal-rag-bench benchmark (4,876 passages, 100 questions)
- * using d8um graph with neural search (hybrid + memory recall + PPR graph traversal).
+ * using typegraph graph with neural search (hybrid + memory recall + PPR graph traversal).
  *
  * During ingestion, an LLM extracts S-P-O triples from each chunk, building
  * a knowledge graph that powers Personalized PageRank at query time.
@@ -53,7 +53,7 @@ async function main() {
   printBanner(config, cli)
 
   // Phase 1: Initialize with graph bridge
-  console.log('Phase 1: Initializing d8um with graph bridge...')
+  console.log('Phase 1: Initializing typegraph with graph bridge...')
   const { d, adapter } = await initNeural(config)
   console.log(`  LLM: ${LLM_MODEL} (triple extraction during ingest)`)
   const { bucket } = await resolveBucket(d, config.bucketName, cli.shouldSeed)

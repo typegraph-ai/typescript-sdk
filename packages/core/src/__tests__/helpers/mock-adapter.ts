@@ -1,6 +1,6 @@
 import type { VectorStoreAdapter, HashStoreAdapter, SearchOpts, HashRecord, UndeployResult } from '../../types/adapter.js'
 import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from '../../types/document.js'
-import type { d8umDocument, DocumentStatus, DocumentFilter, UpsertDocumentInput } from '../../types/d8um-document.js'
+import type { typegraphDocument, DocumentStatus, DocumentFilter, UpsertDocumentInput } from '../../types/typegraph-document.js'
 import { createHash } from 'crypto'
 
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -88,17 +88,17 @@ export interface MockAdapterCall {
 export function createMockAdapter(): VectorStoreAdapter & {
   calls: MockAdapterCall[]
   _chunks: Map<string, EmbeddedChunk[]>
-  _documents: Map<string, d8umDocument>
+  _documents: Map<string, typegraphDocument>
 } {
   const chunks = new Map<string, EmbeddedChunk[]>()
-  const documents = new Map<string, d8umDocument>()
+  const documents = new Map<string, typegraphDocument>()
   const calls: MockAdapterCall[] = []
   const hashStore = createMockHashStore()
 
   const adapter: VectorStoreAdapter & {
     calls: MockAdapterCall[]
     _chunks: Map<string, EmbeddedChunk[]>
-    _documents: Map<string, d8umDocument>
+    _documents: Map<string, typegraphDocument>
   } = {
     calls,
     _chunks: chunks,
@@ -115,7 +115,7 @@ export function createMockAdapter(): VectorStoreAdapter & {
 
     async undeploy(): Promise<UndeployResult> {
       calls.push({ method: 'undeploy', args: [] })
-      return { success: true, message: 'All d8um tables dropped.' }
+      return { success: true, message: 'All typegraph tables dropped.' }
     },
 
     async destroy() {
@@ -212,7 +212,7 @@ export function createMockAdapter(): VectorStoreAdapter & {
       return store.filter(c => matchesFilter(c, filter)).length
     },
 
-    async upsertDocumentRecord(input: UpsertDocumentInput): Promise<d8umDocument> {
+    async upsertDocumentRecord(input: UpsertDocumentInput): Promise<typegraphDocument> {
       calls.push({ method: 'upsertDocumentRecord', args: [input] })
       const id = createHash('sha256')
         .update(`${input.bucketId}::${input.url ?? input.title}`)
@@ -220,7 +220,7 @@ export function createMockAdapter(): VectorStoreAdapter & {
         .slice(0, 16)
       const now = new Date()
       const existing = documents.get(id)
-      const doc: d8umDocument = {
+      const doc: typegraphDocument = {
         id,
         bucketId: input.bucketId,
         tenantId: input.tenantId,
@@ -245,12 +245,12 @@ export function createMockAdapter(): VectorStoreAdapter & {
       return doc
     },
 
-    async getDocument(id: string): Promise<d8umDocument | null> {
+    async getDocument(id: string): Promise<typegraphDocument | null> {
       calls.push({ method: 'getDocument', args: [id] })
       return documents.get(id) ?? null
     },
 
-    async listDocuments(filter: DocumentFilter): Promise<d8umDocument[]> {
+    async listDocuments(filter: DocumentFilter): Promise<typegraphDocument[]> {
       calls.push({ method: 'listDocuments', args: [filter] })
       return [...documents.values()].filter(d => {
         if (filter.bucketId && d.bucketId !== filter.bucketId) return false

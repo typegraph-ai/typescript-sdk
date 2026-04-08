@@ -1,26 +1,26 @@
-# @d8um-ai/core
+# @typegraph-ai/core
 
 TypeScript SDK and open protocol for supplying context to LLMs.
 
 ## Install
 
 ```bash
-npm install @d8um-ai/core
+npm install @typegraph-ai/core
 ```
 
 ## Usage
 
 ```ts
-import { d8umInit, d8umDeploy } from '@d8um-ai/core'
+import { typegraphInit, typegraphDeploy } from '@typegraph-ai/core'
 
 // One-time setup (creates tables)
-const d = await d8umDeploy({
+const d = await typegraphDeploy({
   vectorStore: myAdapter,
   embedding: embeddingModel,
 })
 
 // Runtime init (no DDL, ready for queries)
-const d = await d8umInit({
+const d = await typegraphInit({
   vectorStore: myAdapter,
   embedding: embeddingModel,
 })
@@ -42,8 +42,8 @@ const { results, context } = await d.query('How does authentication work?', { fo
 
 | Export | Description |
 |--------|-------------|
-| `d8umInit()` | Runtime factory — returns a ready-to-use instance |
-| `d8umDeploy()` | One-time DDL provisioning — creates tables/extensions |
+| `typegraphInit()` | Runtime factory — returns a ready-to-use instance |
+| `typegraphDeploy()` | One-time DDL provisioning — creates tables/extensions |
 
 ### Engines
 
@@ -55,9 +55,9 @@ const { results, context } = await d.query('How does authentication work?', { fo
 
 ### Types
 
-`Bucket`, `VectorStoreAdapter`, `EmbeddingProvider`, `EmbeddingConfig`, `LLMConfig`, `RawDocument`, `Chunk`, `d8umDocument`, `Visibility`, `d8umIdentity`, `QueryOpts`, `QueryResponse`, `QuerySignals`, `IndexOpts`, `IndexResult`, `IndexConfig`, `GraphBridge`, `MemoryRecord`, `Job`, `Policy`
+`Bucket`, `VectorStoreAdapter`, `EmbeddingProvider`, `EmbeddingConfig`, `LLMConfig`, `RawDocument`, `Chunk`, `typegraphDocument`, `Visibility`, `typegraphIdentity`, `QueryOpts`, `QueryResponse`, `QuerySignals`, `IndexOpts`, `IndexResult`, `IndexConfig`, `GraphBridge`, `MemoryRecord`, `Job`, `Policy`
 
 ## Related
 
-- [d8um main repo](../../README.md)
+- [TypeGraph main repo](../../README.md)
 - [Agentic RAG Guide](../../README.md#agentic-rag)

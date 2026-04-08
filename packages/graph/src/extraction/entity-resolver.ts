@@ -1,9 +1,9 @@
-import type { EmbeddingProvider } from '@d8um-ai/core'
-import type { d8umIdentity } from '@d8um-ai/core'
+import type { EmbeddingProvider } from '@typegraph-ai/core'
+import type { typegraphIdentity } from '@typegraph-ai/core'
 import type { SemanticEntity } from '../types/memory.js'
 import type { MemoryStoreAdapter } from '../types/adapter.js'
 import { createTemporal } from '../temporal.js'
-import { generateId } from '@d8um-ai/core'
+import { generateId } from '@typegraph-ai/core'
 
 // ── Entity Resolver ──
 // Deduplicates entities using a 5-phase cascade:
@@ -49,7 +49,7 @@ export class EntityResolver {
     name: string,
     entityType: string,
     aliases: string[],
-    scope: d8umIdentity,
+    scope: typegraphIdentity,
     description?: string,
   ): Promise<{ entity: SemanticEntity; isNew: boolean }> {
     // Phase 0: In-memory cache (instant — catches all prior entities in this session)

@@ -1,8 +1,8 @@
-import type { d8umMemory, d8umEventSink } from '@d8um-ai/graph'
+import type { TypegraphMemory, typegraphEventSink } from '@typegraph-ai/graph'
 
 // ── MCP Tool Definitions ──
 // These define the tools that the MCP server exposes to AI agents.
-// Each tool maps to a d8umMemory method.
+// Each tool maps to a TypegraphMemory method.
 
 export interface MCPToolDefinition {
   name: string
@@ -13,7 +13,7 @@ export interface MCPToolDefinition {
 export function getToolDefinitions(): MCPToolDefinition[] {
   return [
     {
-      name: 'd8um_remember',
+      name: 'typegraph_remember',
       description: 'Store a memory. Accepts text content and an optional category (episodic, semantic, procedural).',
       inputSchema: {
         type: 'object',
@@ -25,7 +25,7 @@ export function getToolDefinitions(): MCPToolDefinition[] {
       },
     },
     {
-      name: 'd8um_recall',
+      name: 'typegraph_recall',
       description: 'Search memories by semantic similarity. Returns the most relevant memories.',
       inputSchema: {
         type: 'object',
@@ -38,7 +38,7 @@ export function getToolDefinitions(): MCPToolDefinition[] {
       },
     },
     {
-      name: 'd8um_recall_facts',
+      name: 'typegraph_recall_facts',
       description: 'Search specifically for semantic facts (extracted knowledge).',
       inputSchema: {
         type: 'object',
@@ -50,7 +50,7 @@ export function getToolDefinitions(): MCPToolDefinition[] {
       },
     },
     {
-      name: 'd8um_forget',
+      name: 'typegraph_forget',
       description: 'Invalidate a memory by ID. The memory is preserved but marked as invalid.',
       inputSchema: {
         type: 'object',
@@ -61,7 +61,7 @@ export function getToolDefinitions(): MCPToolDefinition[] {
       },
     },
     {
-      name: 'd8um_correct',
+      name: 'typegraph_correct',
       description: 'Apply a natural language correction to memories. Example: "Actually, John works at Acme, not Beta Inc"',
       inputSchema: {
         type: 'object',
@@ -72,7 +72,7 @@ export function getToolDefinitions(): MCPToolDefinition[] {
       },
     },
     {
-      name: 'd8um_add_conversation',
+      name: 'typegraph_add_conversation',
       description: 'Ingest conversation messages into memory. Extracts episodic and semantic memories.',
       inputSchema: {
         type: 'object',
@@ -95,7 +95,7 @@ export function getToolDefinitions(): MCPToolDefinition[] {
       },
     },
     {
-      name: 'd8um_health_check',
+      name: 'typegraph_health_check',
       description: 'Check the health and statistics of the memory system. Returns precision, staleness, entity/edge counts.',
       inputSchema: {
         type: 'object',
@@ -106,13 +106,13 @@ export function getToolDefinitions(): MCPToolDefinition[] {
 }
 
 /**
- * Execute an MCP tool call against a d8umMemory instance.
+ * Execute an MCP tool call against a TypegraphMemory instance.
  */
 export async function executeTool(
-  memory: d8umMemory,
+  memory: TypegraphMemory,
   toolName: string,
   args: Record<string, unknown>,
-  eventSink?: d8umEventSink,
+  eventSink?: typegraphEventSink,
 ): Promise<unknown> {
   const identity = memory.identity
 
@@ -131,44 +131,44 @@ export async function executeTool(
   try {
     let result: unknown
     switch (toolName) {
-      case 'd8um_remember':
+      case 'typegraph_remember':
         result = await memory.remember(
           args['content'] as string,
           (args['category'] as 'episodic' | 'semantic' | 'procedural') ?? 'semantic',
         )
         break
 
-      case 'd8um_recall':
+      case 'typegraph_recall':
         result = await memory.recall(args['query'] as string, {
           types: args['types'] as ('episodic' | 'semantic' | 'procedural')[] | undefined,
           limit: args['limit'] as number | undefined,
         })
         break
 
-      case 'd8um_recall_facts':
+      case 'typegraph_recall_facts':
         result = await memory.recallFacts(
           args['query'] as string,
           (args['limit'] as number) ?? 10,
         )
         break
 
-      case 'd8um_forget':
+      case 'typegraph_forget':
         await memory.forget(args['id'] as string)
         result = { success: true }
         break
 
-      case 'd8um_correct':
+      case 'typegraph_correct':
         result = await memory.correct(args['correction'] as string)
         break
 
-      case 'd8um_add_conversation':
+      case 'typegraph_add_conversation':
         result = await memory.addConversationTurn(
           args['messages'] as { role: 'user' | 'assistant' | 'system' | 'tool'; content: string }[],
           args['conversationId'] as string | undefined,
         )
         break
 
-      case 'd8um_health_check':
+      case 'typegraph_health_check':
         result = await memory.healthCheck()
         break
 

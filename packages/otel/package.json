@@ -1,7 +1,7 @@
 {
-  "name": "@d8um-ai/otel",
+  "name": "@typegraph-ai/otel",
   "version": "0.1.0",
-  "description": "OpenTelemetry integration for d8um — maps d8um events to OTel spans",
+  "description": "OpenTelemetry integration for typegraph — maps typegraph events to OTel spans",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,7 +15,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@d8um-ai/core": "workspace:*"
+    "@typegraph-ai/core": "workspace:*"
   },
   "peerDependencies": {
     "@opentelemetry/api": "^1.0.0"
