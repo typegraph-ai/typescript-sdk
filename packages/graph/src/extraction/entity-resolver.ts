@@ -107,9 +107,12 @@ export class EntityResolver {
     }
 
     // Phase 3: Vector similarity (uses pgvector similarity score directly — no re-embedding)
+    // Embed name + description together so entities with different names but similar
+    // descriptions (e.g., "Chris Mullin" vs "Christopher Paul Mullin") can be matched.
     let nameEmbedding: number[] | undefined
     if (this.store.searchEntities) {
-      nameEmbedding = await this.embedding.embed(name)
+      const embedInput = description ? `${name}. ${description}` : name
+      nameEmbedding = await this.embedding.embed(embedInput)
       const similar = await this.store.searchEntities(nameEmbedding, scope, 5)
 
       for (const candidate of similar) {
@@ -129,7 +132,8 @@ export class EntityResolver {
 
     // No match found - create new entity (reuse embedding from Phase 3 if available)
     if (!nameEmbedding) {
-      nameEmbedding = await this.embedding.embed(name)
+      const embedInput = description ? `${name}. ${description}` : name
+      nameEmbedding = await this.embedding.embed(embedInput)
     }
     const entity: SemanticEntity = {
       id: generateId('ent'),

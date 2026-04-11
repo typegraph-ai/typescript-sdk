@@ -47,6 +47,49 @@ describe('EntityResolver', () => {
       expect(entity.embedding).toEqual([0.1, 0.2, 0.3])
     })
 
+    it('embeds name + description together for Phase 3 vector matching', async () => {
+      const existing: SemanticEntity = {
+        id: 'entity-mullin',
+        name: 'Chris Mullin',
+        entityType: 'person',
+        aliases: [],
+        properties: { description: 'American former professional basketball player and coach' },
+        embedding: [0.8, 0.5, 0.3],
+        scope: testScope,
+        temporal: { validAt: new Date(), createdAt: new Date() },
+      }
+
+      const store = mockStore([])
+      // findEntities returns nothing so Phases 1/2/2.5 are skipped
+      // searchEntities returns the existing entity for Phase 3
+      ;(store.searchEntities as ReturnType<typeof vi.fn>).mockResolvedValue([existing])
+
+      const embedding = mockEmbedding()
+      // Return a vector with high cosine similarity to the existing entity's embedding
+      ;(embedding.embed as ReturnType<typeof vi.fn>).mockResolvedValue([0.7, 0.6, 0.3])
+
+      const resolver = new EntityResolver({ store, embedding })
+
+      const description = 'Golden State Warriors player selected for the United States men\'s national basketball team.'
+      const { entity, isNew } = await resolver.resolve(
+        'Christopher Paul Mullin',
+        'person',
+        [],
+        testScope,
+        description,
+      )
+
+      // Should match via Phase 3 vector similarity (cosine ≈ 0.99 > 0.68 threshold)
+      expect(isNew).toBe(false)
+      expect(entity.id).toBe('entity-mullin')
+      expect(entity.aliases).toContain('Christopher Paul Mullin')
+
+      // Verify the embed call includes the description, not just the name
+      expect(embedding.embed).toHaveBeenCalledWith(
+        `Christopher Paul Mullin. ${description}`
+      )
+    })
+
     it('matches existing entity by alias', async () => {
       const existing: SemanticEntity = {
         id: 'entity-1',
