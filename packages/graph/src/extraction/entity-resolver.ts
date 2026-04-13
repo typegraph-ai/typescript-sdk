@@ -35,6 +35,10 @@ const GENERIC_NOUNS = new Set([
   'one', 'ones', 'other', 'others', 'same', 'first', 'last', 'next', 'final',
   'protocol', 'protocols', 'framework', 'frameworks', 'ingredient', 'ingredients',
   'system', 'systems', 'service', 'services', 'project', 'projects',
+  'finals', 'championship', 'championships', 'tournament', 'tournaments',
+  'olympics', 'mvp', 'trophy', 'trophies', 'cup', 'cups',
+  'medal', 'medals', 'title', 'titles', 'record', 'records',
+  'draft', 'drafts', 'round', 'rounds',
 ])
 
 /**
@@ -54,6 +58,9 @@ export function isValidAlias(alias: string): boolean {
   // Reject empty or single-character
   if (trimmed.length < 2) return false
 
+  // Reject overly long aliases (book/article titles, descriptions)
+  if (trimmed.length > 80) return false
+
   const lower = trimmed.toLowerCase()
 
   // Reject pronouns — only when original is all-lowercase (preserves "US", "IT" as abbreviations)
@@ -61,6 +68,11 @@ export function isValidAlias(alias: string): boolean {
 
   // Reject pure numbers (years, counts, etc.)
   if (/^\d+$/.test(trimmed)) return false
+
+  // Reject parenthetical disambiguators (e.g., "Paris (city)", "React (library)")
+  if (/\((?:book|film|movie|album|song|TV\s+series|TV|series|disambiguation|band|comics?|video\s+game)\)/i.test(trimmed)) {
+    return false
+  }
 
   // Reject "the/a/an/this/that + optional adjectives + generic noun" patterns
   // Matches: "the team", "a company", "the final team", "the forthcoming American roster",
@@ -72,14 +84,19 @@ export function isValidAlias(alias: string): boolean {
     if (GENERIC_NOUNS.has(lastWord)) return false
   }
 
-  // Reject bare generic nouns (without article)
-  // e.g., "professional roster", "defending champions"
+  // Reject single-word generic nouns regardless of case
+  // Catches "Finals", "Olympics", "MVP", "draft" etc.
   const words = lower.split(/\s+/)
-  if (words.length <= 2) {
+  if (words.length === 1) {
+    if (GENERIC_NOUNS.has(lower)) return false
+  }
+
+  // Reject bare multi-word generic noun phrases (without article)
+  // e.g., "professional roster", "defending champions"
+  if (words.length === 2) {
     const lastWord = words[words.length - 1]!
     if (GENERIC_NOUNS.has(lastWord) && words.every(w => !w.match(/^[A-Z]/) || GENERIC_NOUNS.has(w) || isCommonAdjective(w))) {
-      // Only reject if ALL words are generic/adjective — keeps "Boston team" → hmm, that's debatable
-      // Be conservative: only reject if the entire string is lowercase (no proper noun capitalization signal)
+      // Only reject if the entire string is lowercase (no proper noun capitalization signal)
       if (trimmed === lower) return false
     }
   }
@@ -160,7 +177,7 @@ export class EntityResolver {
     // Phase 0: In-memory cache (instant — catches all prior entities in this session)
     const normalizedName = normalizeForComparison(name)
     const cached = this.nameCache.get(normalizedName)
-    if (cached) {
+    if (cached && typesCompatible(entityType, cached.entityType)) {
       const merged = await this.merge(cached, { name, entityType, aliases, description })
       this.cacheEntity(merged)
       return { entity: merged, isNew: false }
@@ -169,7 +186,7 @@ export class EntityResolver {
     for (const alias of aliases) {
       if (!isValidAlias(alias)) continue
       const cachedByAlias = this.nameCache.get(normalizeForComparison(alias))
-      if (cachedByAlias) {
+      if (cachedByAlias && typesCompatible(entityType, cachedByAlias.entityType)) {
         const merged = await this.merge(cachedByAlias, { name, entityType, aliases, description })
         this.cacheEntity(merged)
         return { entity: merged, isNew: false }
@@ -179,7 +196,7 @@ export class EntityResolver {
     // Phase 1: Alias matching (cheap — uses ILIKE + ANY index)
     if (this.store.findEntities) {
       const candidates = await this.store.findEntities(name, scope, 10)
-      const aliasMatch = this.findByAlias(name, aliases, candidates)
+      const aliasMatch = this.findByAlias(name, aliases, entityType, candidates)
       if (aliasMatch) {
         const merged = await this.merge(aliasMatch, { name, entityType, aliases, description })
         this.cacheEntity(merged)
@@ -188,6 +205,7 @@ export class EntityResolver {
 
       // Phase 2: Normalized string matching (catches case/punctuation variants)
       for (const candidate of candidates) {
+        if (!typesCompatible(entityType, candidate.entityType)) continue
         if (normalizeForComparison(candidate.name) === normalizedName) {
           const merged = await this.merge(candidate, { name, entityType, aliases, description })
           this.cacheEntity(merged)
@@ -221,6 +239,9 @@ export class EntityResolver {
       // Phase 3: Direct name-embedding match
       for (const candidate of similar) {
         if (!typesCompatible(entityType, candidate.entityType)) continue
+        if (entityType === 'person' && candidate.entityType === 'person') {
+          if (!hasMatchingLastToken(name, candidate.name)) continue
+        }
         if (hasConflictingDistinguishers(name, candidate.name)) continue
         if (!hasSharedNameToken(name, candidate.name)) continue
 
@@ -277,12 +298,14 @@ export class EntityResolver {
   private findByAlias(
     name: string,
     aliases: string[],
+    entityType: string,
     candidates: SemanticEntity[],
   ): SemanticEntity | undefined {
     const nameLower = name.toLowerCase()
     const aliasesLower = aliases.map(a => a.toLowerCase())
 
     for (const candidate of candidates) {
+      if (!typesCompatible(entityType, candidate.entityType)) continue
       const candidateNames = [
         candidate.name.toLowerCase(),
         ...candidate.aliases.map(a => a.toLowerCase()),
@@ -370,6 +393,9 @@ export class EntityResolver {
 
     for (const candidate of candidates) {
       if (!typesCompatible(entityType, candidate.entityType)) continue
+      if (entityType === 'person' && candidate.entityType === 'person') {
+        if (!hasMatchingLastToken(name, candidate.name)) continue
+      }
       const candidateNames = [candidate.name, ...candidate.aliases]
 
       for (const a of incomingNames) {
@@ -399,6 +425,9 @@ export class EntityResolver {
     // Filter to near-miss candidates that have descriptions and stored description embeddings
     const nearMisses = candidates.filter(c => {
       if (!typesCompatible(entityType, c.entityType)) return false
+      if (entityType === 'person' && c.entityType === 'person') {
+        if (!hasMatchingLastToken(name, c.name)) return false
+      }
       if (hasConflictingDistinguishers(name, c.name)) return false
       if (!hasSharedNameToken(name, c.name)) return false
       const nameSim = (c.properties._similarity as number | undefined)
@@ -535,6 +564,75 @@ export function hasSharedNameToken(a: string, b: string): boolean {
   return false
 }
 
+/**
+ * Check if two person names share a matching last token (surname guard).
+ * Only applies when both names have 2+ tokens (first + last structure).
+ * Single-word names bypass the check (e.g., "Madonna", "Chris").
+ *
+ * No suffix stripping: Jr./Sr./III are genuinely distinguishing tokens
+ * that identify different people (father vs son, generational namesakes).
+ *
+ * Examples:
+ *   ("Kevin Durant", "Kevin Love") → false (durant ≠ love)
+ *   ("LeBron James", "James Harden") → false (james ≠ harden)
+ *   ("LeBron James", "LeBron James Jr.") → false (james ≠ jr)
+ *   ("Chris Mullin", "Christopher Paul Mullin") → true (mullin = mullin)
+ *   ("Madonna", "Madonna Louise Ciccone") → true (1 token → bypass)
+ */
+export function hasMatchingLastToken(a: string, b: string): boolean {
+  const tokenize = (s: string): string[] =>
+    s.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length >= 2)
+  const tokensA = tokenize(a)
+  const tokensB = tokenize(b)
+  // Only apply when both names have 2+ tokens (first + last structure)
+  if (tokensA.length < 2 || tokensB.length < 2) return true
+  return tokensA[tokensA.length - 1] === tokensB[tokensB.length - 1]
+}
+
+/**
+ * Domain-agnostic opposing qualifier pairs. If name A contains a token from one
+ * side and name B contains a token from the opposite side, they refer to distinct entities
+ * (e.g., "Western Conference" vs "Eastern Conference").
+ */
+const OPPOSING_PAIRS: [Set<string>, Set<string>][] = [
+  // Spatial / directional
+  [new Set(['eastern', 'east']), new Set(['western', 'west'])],
+  [new Set(['northern', 'north']), new Set(['southern', 'south'])],
+  [new Set(['upper']), new Set(['lower'])],
+  [new Set(['left']), new Set(['right'])],
+  [new Set(['inner', 'interior']), new Set(['outer', 'exterior'])],
+  [new Set(['front']), new Set(['back', 'rear'])],
+  [new Set(['central']), new Set(['peripheral'])],
+  [new Set(['inland']), new Set(['coastal'])],
+  [new Set(['urban']), new Set(['rural'])],
+  [new Set(['domestic']), new Set(['foreign', 'international'])],
+  // Magnitude / ranking
+  [new Set(['major']), new Set(['minor'])],
+  [new Set(['greater', 'grand']), new Set(['lesser'])],
+  [new Set(['senior', 'sr']), new Set(['junior', 'jr'])],
+  [new Set(['primary']), new Set(['secondary'])],
+  [new Set(['maximum', 'max']), new Set(['minimum', 'min'])],
+  // Temporal
+  [new Set(['ancient']), new Set(['modern'])],
+  [new Set(['early']), new Set(['late'])],
+  [new Set(['preceding', 'previous']), new Set(['following', 'subsequent'])],
+  // Relational / categorical
+  [new Set(['internal']), new Set(['external'])],
+  [new Set(['public']), new Set(['private'])],
+  [new Set(['formal']), new Set(['informal'])],
+  [new Set(['active']), new Set(['passive'])],
+  [new Set(['positive']), new Set(['negative'])],
+  [new Set(['offensive', 'offense']), new Set(['defensive', 'defense'])],
+  [new Set(['liberal']), new Set(['conservative'])],
+  [new Set(['progressive']), new Set(['traditional'])],
+  // Gender / demographic
+  [new Set(['male', 'men', 'mens', 'boys']), new Set(['female', 'women', 'womens', 'girls'])],
+  // Science / medical
+  [new Set(['organic']), new Set(['inorganic'])],
+  [new Set(['acute']), new Set(['chronic'])],
+  [new Set(['benign']), new Set(['malignant'])],
+]
+
 export function hasConflictingDistinguishers(a: string, b: string): boolean {
   const yearPattern = /\b(1[89]\d{2}|20\d{2})\b/g
   const versionPattern = /\b(?:v|version)\s*(\d+(?:\.\d+)*)\b/gi
@@ -563,6 +661,27 @@ export function hasConflictingDistinguishers(a: string, b: string): boolean {
       if (setB.has(token)) { hasOverlap = true; break }
     }
     if (!hasOverlap) return true
+  }
+
+  // Opposing qualifier pairs — tokenize both names and check cross-side matches
+  const tokenizeForOpposing = (s: string): Set<string> => {
+    const tokens = new Set<string>()
+    for (const word of s.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/)) {
+      if (word.length >= 2) tokens.add(word)
+    }
+    return tokens
+  }
+  const tokensA = tokenizeForOpposing(a)
+  const tokensB = tokenizeForOpposing(b)
+
+  for (const [sideOne, sideTwo] of OPPOSING_PAIRS) {
+    const aHasSideOne = [...sideOne].some(t => tokensA.has(t))
+    const aHasSideTwo = [...sideTwo].some(t => tokensA.has(t))
+    const bHasSideOne = [...sideOne].some(t => tokensB.has(t))
+    const bHasSideTwo = [...sideTwo].some(t => tokensB.has(t))
+
+    // Conflict: A has one side and B has the other
+    if ((aHasSideOne && bHasSideTwo) || (aHasSideTwo && bHasSideOne)) return true
   }
 
   return false

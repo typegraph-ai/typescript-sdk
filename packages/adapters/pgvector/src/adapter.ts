@@ -113,8 +113,9 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     try {
       const rows = await this.sql(`SELECT table_name FROM ${this.registryTable}`)
       dynamicTables = rows.map(r => r.table_name as string)
-    } catch {
+    } catch (err) {
       // Registry table may not exist — nothing to undeploy
+      console.debug('[typegraph] Registry table check skipped:', err instanceof Error ? err.message : err)
       return { success: true, message: 'No typegraph tables found.' }
     }
 
@@ -135,8 +136,9 @@ export class PgVectorAdapter implements VectorStoreAdapter {
         if ((rows[0]?.count as number) > 0) {
           tablesWithData.push(table)
         }
-      } catch {
+      } catch (err) {
         // Table doesn't exist — skip
+        console.debug('[typegraph] Table check skipped:', err instanceof Error ? err.message : err)
       }
     }
 

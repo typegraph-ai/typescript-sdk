@@ -97,8 +97,9 @@ export class SqliteVecAdapter implements VectorStoreAdapter {
         chunksTable: r.table_name,
         vecTable: `${r.table_name}_vec`,
       }))
-    } catch {
+    } catch (err) {
       // Registry table doesn't exist — nothing to undeploy
+      console.debug('[typegraph] Registry table check skipped:', err instanceof Error ? err.message : err)
       return { success: true, message: 'No typegraph tables found.' }
     }
 
@@ -121,8 +122,9 @@ export class SqliteVecAdapter implements VectorStoreAdapter {
         if (row.count > 0) {
           tablesWithData.push(table)
         }
-      } catch {
+      } catch (err) {
         // Table doesn't exist — skip
+        console.debug('[typegraph] Table check skipped:', err instanceof Error ? err.message : err)
       }
     }
 

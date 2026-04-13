@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { EntityResolver, hasConflictingDistinguishers, hasSharedNameToken, isValidAlias } from '../extraction/entity-resolver.js'
+import { EntityResolver, hasConflictingDistinguishers, hasMatchingLastToken, hasSharedNameToken, isValidAlias } from '../extraction/entity-resolver.js'
 import type { MemoryStoreAdapter } from '../types/adapter.js'
 import type { EmbeddingProvider } from '@typegraph-ai/core'
 import type { SemanticEntity } from '../types/memory.js'
@@ -773,6 +773,418 @@ describe('EntityResolver', () => {
       // "it" and "the team" are garbage → rejected
       expect(merged.aliases).not.toContain('it')
       expect(merged.aliases).not.toContain('the team')
+    })
+
+    it('filters expanded generic nouns during merge', async () => {
+      const resolver = new EntityResolver({
+        store: mockStore(),
+        embedding: mockEmbedding(),
+      })
+
+      const existing: SemanticEntity = {
+        id: 'e-finals',
+        name: 'NBA Finals',
+        entityType: 'event',
+        aliases: [],
+        properties: {},
+        scope: testScope,
+        temporal: { validAt: new Date(), createdAt: new Date() },
+      }
+
+      const merged = await resolver.merge(existing, {
+        name: 'NBA Finals',
+        entityType: 'event',
+        aliases: ['Finals', 'the finals', 'championship', 'the championship'],
+      })
+
+      // All are generic nouns / generic references → rejected
+      expect(merged.aliases).not.toContain('Finals')
+      expect(merged.aliases).not.toContain('the finals')
+      expect(merged.aliases).not.toContain('championship')
+      expect(merged.aliases).not.toContain('the championship')
+    })
+  })
+
+  describe('type compatibility integration', () => {
+    it('Phase 0 cache: blocks cross-type merge for same name', async () => {
+      const resolver = new EntityResolver({
+        store: mockStore([]),
+        embedding: mockEmbedding(),
+      })
+
+      // First resolve: "France" as location → goes into cache
+      const { entity: france } = await resolver.resolve('France', 'location', [], testScope)
+      expect(france.entityType).toBe('location')
+
+      // Second resolve: "France" as organization → cache hit, but type mismatch → should NOT merge
+      const { entity: franceTeam, isNew } = await resolver.resolve(
+        'France', 'organization', ['France men\'s national basketball team'], testScope,
+      )
+      expect(isNew).toBe(true) // Must create new entity, not merge with location
+      expect(franceTeam.entityType).toBe('organization')
+    })
+
+    it('Phase 1 alias: blocks cross-type merge via alias match', async () => {
+      const franceLocation: SemanticEntity = {
+        id: 'entity-france-loc',
+        name: 'France',
+        entityType: 'location',
+        aliases: ['French Republic'],
+        properties: {},
+        scope: testScope,
+        temporal: { validAt: new Date(), createdAt: new Date() },
+      }
+
+      const store = mockStore([franceLocation])
+      ;(store.searchEntities as ReturnType<typeof vi.fn>).mockResolvedValue([])
+
+      const resolver = new EntityResolver({ store, embedding: mockEmbedding() })
+
+      const { isNew } = await resolver.resolve(
+        'France men\'s national basketball team', 'organization', ['France'], testScope,
+      )
+      // "France" alias matches franceLocation, but types are incompatible → no merge
+      expect(isNew).toBe(true)
+    })
+
+    it('Phase 2 normalized: blocks cross-type merge on normalized match', async () => {
+      const franceLocation: SemanticEntity = {
+        id: 'entity-france-loc',
+        name: 'France',
+        entityType: 'location',
+        aliases: [],
+        properties: {},
+        scope: testScope,
+        temporal: { validAt: new Date(), createdAt: new Date() },
+      }
+
+      const store = mockStore([franceLocation])
+      ;(store.searchEntities as ReturnType<typeof vi.fn>).mockResolvedValue([])
+
+      const resolver = new EntityResolver({ store, embedding: mockEmbedding() })
+
+      // "france" normalizes the same as "France" but types differ
+      const { isNew } = await resolver.resolve('france', 'organization', [], testScope)
+      expect(isNew).toBe(true)
+    })
+
+    it('Phase 0/1/2: allows same-type merge', async () => {
+      const acme: SemanticEntity = {
+        id: 'entity-acme',
+        name: 'Acme Corporation',
+        entityType: 'organization',
+        aliases: ['Acme Corp'],
+        properties: {},
+        scope: testScope,
+        temporal: { validAt: new Date(), createdAt: new Date() },
+      }
+
+      const store = mockStore([acme])
+      const resolver = new EntityResolver({ store, embedding: mockEmbedding() })
+
+      const { entity, isNew } = await resolver.resolve(
+        'Acme Corp', 'organization', [], testScope,
+      )
+      expect(isNew).toBe(false)
+      expect(entity.id).toBe('entity-acme')
+    })
+  })
+
+  describe('hasMatchingLastToken', () => {
+    it('blocks different surnames with shared first name', () => {
+      expect(hasMatchingLastToken('Kevin Durant', 'Kevin Love')).toBe(false)
+    })
+
+    it('blocks first-name-as-surname confusion', () => {
+      expect(hasMatchingLastToken('LeBron James', 'James Harden')).toBe(false)
+    })
+
+    it('blocks father vs son (Jr. suffix)', () => {
+      expect(hasMatchingLastToken('LeBron James', 'LeBron James Jr.')).toBe(false)
+    })
+
+    it('blocks generational namesakes (III vs Jr.)', () => {
+      expect(hasMatchingLastToken('Martin Luther King Jr.', 'Martin Luther King III')).toBe(false)
+    })
+
+    it('allows same surname', () => {
+      expect(hasMatchingLastToken('Chris Mullin', 'Christopher Paul Mullin')).toBe(true)
+    })
+
+    it('allows same person different prefix', () => {
+      expect(hasMatchingLastToken('Dr. Martin Luther King Jr.', 'Martin Luther King Jr.')).toBe(true)
+    })
+
+    it('allows different married names (but blocks correctly)', () => {
+      expect(hasMatchingLastToken('Mary Jane Watson', 'Mary Jane Smith')).toBe(false)
+    })
+
+    it('bypasses for single-word names (Madonna)', () => {
+      expect(hasMatchingLastToken('Madonna', 'Madonna Louise Ciccone')).toBe(true)
+    })
+
+    it('bypasses for single-word names (Chris)', () => {
+      expect(hasMatchingLastToken('Chris', 'Christopher Paul Mullin')).toBe(true)
+    })
+
+    it('bypasses when both are single-word', () => {
+      expect(hasMatchingLastToken('Madonna', 'Cher')).toBe(true)
+    })
+
+    it('handles 3+ word names correctly', () => {
+      expect(hasMatchingLastToken('Martin Luther King', 'Coretta Scott King')).toBe(true)
+    })
+
+    it('handles punctuation in names', () => {
+      expect(hasMatchingLastToken('J.K. Rowling', 'Joanne Rowling')).toBe(true)
+    })
+  })
+
+  describe('person surname guard integration', () => {
+    it('Phase 3: blocks Kevin Durant / Kevin Love merge despite high embedding similarity', async () => {
+      const kevinLove: SemanticEntity = {
+        id: 'entity-love',
+        name: 'Kevin Love',
+        entityType: 'person',
+        aliases: [],
+        properties: { _similarity: 0.92 },
+        embedding: [0.9, 0.9, 0.9],
+        scope: testScope,
+        temporal: { validAt: new Date(), createdAt: new Date() },
+      }
+
+      const store = mockStore([])
+      ;(store.findEntities as ReturnType<typeof vi.fn>).mockResolvedValue([])
+      ;(store.searchEntities as ReturnType<typeof vi.fn>).mockResolvedValue([kevinLove])
+
+      const embedding = mockEmbedding()
+      ;(embedding.embed as ReturnType<typeof vi.fn>).mockResolvedValue([0.9, 0.9, 0.9])
+
+      const resolver = new EntityResolver({ store, embedding })
+
+      const { isNew } = await resolver.resolve('Kevin Durant', 'person', [], testScope)
+      expect(isNew).toBe(true) // Must NOT merge — different surnames
+    })
+
+    it('Phase 3: allows Chris Mullin / Christopher Paul Mullin merge', async () => {
+      const chrisMullin: SemanticEntity = {
+        id: 'entity-mullin',
+        name: 'Chris Mullin',
+        entityType: 'person',
+        aliases: [],
+        properties: { _similarity: 0.92 },
+        embedding: [0.9, 0.9, 0.9],
+        scope: testScope,
+        temporal: { validAt: new Date(), createdAt: new Date() },
+      }
+
+      const store = mockStore([])
+      ;(store.findEntities as ReturnType<typeof vi.fn>).mockResolvedValue([])
+      ;(store.searchEntities as ReturnType<typeof vi.fn>).mockResolvedValue([chrisMullin])
+
+      const embedding = mockEmbedding()
+      ;(embedding.embed as ReturnType<typeof vi.fn>).mockResolvedValue([0.9, 0.9, 0.9])
+
+      const resolver = new EntityResolver({ store, embedding })
+
+      const { entity, isNew } = await resolver.resolve(
+        'Christopher Paul Mullin', 'person', [], testScope,
+      )
+      expect(isNew).toBe(false) // Same surname "Mullin" → allowed
+      expect(entity.id).toBe('entity-mullin')
+    })
+
+    it('does not apply surname guard to non-person entities', async () => {
+      // Two organizations with different last tokens but high similarity should still merge
+      const eastern: SemanticEntity = {
+        id: 'entity-eastern-div',
+        name: 'Eastern Division',
+        entityType: 'organization',
+        aliases: [],
+        properties: { _similarity: 0.92 },
+        embedding: [0.9, 0.9, 0.9],
+        scope: testScope,
+        temporal: { validAt: new Date(), createdAt: new Date() },
+      }
+
+      const store = mockStore([])
+      ;(store.findEntities as ReturnType<typeof vi.fn>).mockResolvedValue([])
+      ;(store.searchEntities as ReturnType<typeof vi.fn>).mockResolvedValue([eastern])
+
+      const embedding = mockEmbedding()
+      ;(embedding.embed as ReturnType<typeof vi.fn>).mockResolvedValue([0.9, 0.9, 0.9])
+
+      const resolver = new EntityResolver({ store, embedding })
+
+      // Note: this will be blocked by opposing qualifier guard (eastern vs western),
+      // but the surname guard itself does not apply to organizations
+      const { isNew } = await resolver.resolve(
+        'Eastern Basketball Division', 'organization', [], testScope,
+      )
+      // Same name ("Eastern Division" ≈ "Eastern Basketball Division") — allowed by surname guard
+      // but opposing qualifier guard is NOT triggered (both have "eastern")
+      expect(isNew).toBe(false)
+    })
+  })
+
+  describe('opposing qualifiers in hasConflictingDistinguishers', () => {
+    // Spatial
+    it('detects western vs eastern conflict', () => {
+      expect(hasConflictingDistinguishers('Western Conference', 'Eastern Conference')).toBe(true)
+    })
+
+    it('detects north vs south conflict', () => {
+      expect(hasConflictingDistinguishers('North America', 'South America')).toBe(true)
+    })
+
+    // Magnitude
+    it('detects major vs minor conflict', () => {
+      expect(hasConflictingDistinguishers('Major League Baseball', 'Minor League Baseball')).toBe(true)
+    })
+
+    it('detects senior vs junior conflict', () => {
+      expect(hasConflictingDistinguishers('Senior Open', 'Junior Open')).toBe(true)
+    })
+
+    // Relational
+    it('detects public vs private conflict', () => {
+      expect(hasConflictingDistinguishers('Public University', 'Private University')).toBe(true)
+    })
+
+    it('detects internal vs external conflict', () => {
+      expect(hasConflictingDistinguishers('Internal Affairs', 'External Affairs')).toBe(true)
+    })
+
+    it('detects offensive vs defensive conflict', () => {
+      expect(hasConflictingDistinguishers('Offensive Coordinator', 'Defensive Coordinator')).toBe(true)
+    })
+
+    // Gender / demographic
+    it('detects men vs women conflict', () => {
+      expect(hasConflictingDistinguishers(
+        'France men\'s national basketball team',
+        'France women\'s national basketball team',
+      )).toBe(true)
+    })
+
+    // Medical
+    it('detects acute vs chronic conflict', () => {
+      expect(hasConflictingDistinguishers('Acute bronchitis', 'Chronic bronchitis')).toBe(true)
+    })
+
+    it('detects benign vs malignant conflict', () => {
+      expect(hasConflictingDistinguishers('Benign tumor', 'Malignant tumor')).toBe(true)
+    })
+
+    // Non-conflicts
+    it('allows same-side qualifiers (no conflict)', () => {
+      expect(hasConflictingDistinguishers('Western Division', 'Western Conference')).toBe(false)
+    })
+
+    it('allows when no opposing qualifiers present', () => {
+      expect(hasConflictingDistinguishers('Golden State Warriors', 'Warriors')).toBe(false)
+    })
+
+    it('still detects year conflicts alongside opposing pairs', () => {
+      expect(hasConflictingDistinguishers('2023 Western Conference', '2024 Western Conference')).toBe(true)
+    })
+
+    // Temporal
+    it('detects early vs late conflict', () => {
+      expect(hasConflictingDistinguishers('Early Renaissance', 'Late Renaissance')).toBe(true)
+    })
+
+    it('detects ancient vs modern conflict', () => {
+      expect(hasConflictingDistinguishers('Ancient Rome', 'Modern Rome')).toBe(true)
+    })
+
+    // Progressive / traditional
+    it('detects progressive vs traditional conflict', () => {
+      expect(hasConflictingDistinguishers('Progressive Party', 'Traditional Party')).toBe(true)
+    })
+  })
+
+  describe('expanded isValidAlias', () => {
+    // New generic nouns
+    it('rejects "Finals" (single-word generic, capitalized)', () => {
+      expect(isValidAlias('Finals')).toBe(false)
+    })
+
+    it('rejects "finals" (single-word generic, lowercase)', () => {
+      expect(isValidAlias('finals')).toBe(false)
+    })
+
+    it('rejects "Olympics" (single-word generic)', () => {
+      expect(isValidAlias('Olympics')).toBe(false)
+    })
+
+    it('rejects "MVP" (single-word generic)', () => {
+      expect(isValidAlias('MVP')).toBe(false)
+    })
+
+    it('rejects "championship" (single-word generic)', () => {
+      expect(isValidAlias('championship')).toBe(false)
+    })
+
+    it('rejects "draft" (single-word generic)', () => {
+      expect(isValidAlias('draft')).toBe(false)
+    })
+
+    it('rejects "trophy" (single-word generic)', () => {
+      expect(isValidAlias('trophy')).toBe(false)
+    })
+
+    // Still accepts qualified forms
+    it('accepts "NBA Finals" (qualified)', () => {
+      expect(isValidAlias('NBA Finals')).toBe(true)
+    })
+
+    it('accepts "2024 Olympics" (qualified)', () => {
+      expect(isValidAlias('2024 Olympics')).toBe(true)
+    })
+
+    it('accepts "Larry O\'Brien Trophy" (qualified)', () => {
+      expect(isValidAlias('Larry O\'Brien Trophy')).toBe(true)
+    })
+
+    // Max length guard
+    it('rejects overly long aliases (book titles)', () => {
+      const longTitle = 'The Comprehensive Guide to Modern Basketball Strategy and Team Management in Professional Leagues'
+      expect(longTitle.length).toBeGreaterThan(80)
+      expect(isValidAlias(longTitle)).toBe(false)
+    })
+
+    it('accepts reasonable-length aliases', () => {
+      expect(isValidAlias('National Basketball Association')).toBe(true)
+    })
+
+    // Parenthetical guard
+    it('rejects parenthetical disambiguators — (book)', () => {
+      expect(isValidAlias('Dune (book)')).toBe(false)
+    })
+
+    it('rejects parenthetical disambiguators — (film)', () => {
+      expect(isValidAlias('Dune (film)')).toBe(false)
+    })
+
+    it('rejects parenthetical disambiguators — (TV series)', () => {
+      expect(isValidAlias('House (TV series)')).toBe(false)
+    })
+
+    it('rejects parenthetical disambiguators — (disambiguation)', () => {
+      expect(isValidAlias('Mercury (disambiguation)')).toBe(false)
+    })
+
+    it('rejects parenthetical disambiguators — (video game)', () => {
+      expect(isValidAlias('Doom (video game)')).toBe(false)
+    })
+
+    it('rejects parenthetical disambiguators — (comics)', () => {
+      expect(isValidAlias('Batman (comics)')).toBe(false)
+    })
+
+    it('accepts parenthetical that is not a disambiguator', () => {
+      expect(isValidAlias('Apple (company)')).toBe(true)
     })
   })
 })

@@ -141,7 +141,8 @@ export function createGraphBridge(config: CreateGraphBridgeConfig): GraphBridge 
     try {
       const results = await memoryStore.list({ status: 'active' }, 1)
       memoriesExist = results.length > 0
-    } catch {
+    } catch (err) {
+      console.error('[typegraph] Memory check failed:', err instanceof Error ? err.message : err)
       memoriesExist = false
     }
     memoriesChecked = true

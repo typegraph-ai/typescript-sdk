@@ -135,7 +135,10 @@ export class IndexEngine {
                 }
               }
             } else { failed++ }
-          } catch { failed++ }
+          } catch (err) {
+            failed++
+            console.error('[typegraph] Triple extraction failed for chunk 0:', err instanceof Error ? err.message : err)
+          }
         }
 
         // Phase B: Extract remaining chunks in parallel, seeded with chunk 0's entity context
@@ -153,11 +156,16 @@ export class IndexEngine {
               )
             )
           )
-          const remainingFailed = remainingResults.filter(
-            r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === undefined)
-          ).length
-          succeeded += remainingResults.length - remainingFailed
-          failed += remainingFailed
+          for (const r of remainingResults) {
+            if (r.status === 'rejected') {
+              failed++
+              console.error('[typegraph] Triple extraction failed:', r.reason instanceof Error ? r.reason.message : r.reason)
+            } else if (r.value === undefined) {
+              failed++
+            } else {
+              succeeded++
+            }
+          }
         }
 
         extraction = { succeeded, failed }
@@ -384,7 +392,10 @@ export class IndexEngine {
                 }
               }
             } else { failed++ }
-          } catch { failed++ }
+          } catch (err) {
+            failed++
+            console.error('[typegraph] Triple extraction failed for chunk 0:', err instanceof Error ? err.message : err)
+          }
         }
 
         // Phase B: Extract remaining chunks in parallel, seeded with chunk 0's entity context
@@ -402,11 +413,16 @@ export class IndexEngine {
               )
             )
           )
-          const remainingFailed = remainingResults.filter(
-            r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value === undefined)
-          ).length
-          succeeded += remainingResults.length - remainingFailed
-          failed += remainingFailed
+          for (const r of remainingResults) {
+            if (r.status === 'rejected') {
+              failed++
+              console.error('[typegraph] Triple extraction failed:', r.reason instanceof Error ? r.reason.message : r.reason)
+            } else if (r.value === undefined) {
+              failed++
+            } else {
+              succeeded++
+            }
+          }
         }
 
         if (!result.extraction) result.extraction = { succeeded: 0, failed: 0 }
@@ -458,7 +474,18 @@ export class IndexEngine {
       // unhandled promise rejections from crashing the process when concurrent
       // promises continue running after one fails.
       const safeProcessItem = (item: typeof prepared[number]) =>
-        processItem(item).catch(() => { /* logged via triple extraction errors */ })
+        processItem(item).catch((err) => {
+          console.error('[typegraph] Document processing failed:', err instanceof Error ? err.message : err)
+          this.eventSink?.emit({
+            id: crypto.randomUUID(),
+            eventType: 'index.document',
+            identity: { tenantId, groupId, userId, agentId, conversationId },
+            payload: { bucketId, status: 'failed', error: err instanceof Error ? err.message : String(err) },
+            traceId,
+            spanId,
+            timestamp: new Date(),
+          })
+        })
       const active = new Set<Promise<void>>()
       for (const item of prepared) {
         const p = safeProcessItem(item).then(() => { active.delete(p) })

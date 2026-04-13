@@ -82,12 +82,16 @@ For each entity, provide:
   - Surnames or first names alone (Curry, Obama, Kevin, Marie) — these are ambiguous, not aliases
   - Names of DIFFERENT entities — "FIBA Hall of Fame" and "Naismith Hall of Fame" are SEPARATE entities; "React" and "React Native" are SEPARATE; "Python 2" and "Python 3" are SEPARATE
   - Descriptive phrases (the American team, the defending champions, the former president, the lead researcher, the main ingredient)
+  - Country/city names for their teams — "France" is NOT an alias of "France men's national basketball team"; "Brazil" is NOT an alias of "Brazil national football team"
+  - Shortened generic forms — "Finals" is NOT an alias of "NBA Finals"; "MVP" is NOT an alias of any specific MVP award; "Olympics" is NOT an alias of "2024 Summer Olympics"
 
 Entity rules:
 - Only extract specific named entities — NOT dates, dollar amounts, percentages, or generic descriptions
 - If an entity is referred to by multiple names (e.g., "OpenAI" and "the company"), list the proper name variants as aliases — NOT the generic reference
 - Include entities even if they only appear once
 - For events, awards, seasons, software versions, product generations, or any time/version-specific entities, ALWAYS include the year, version, or edition in the name. Each distinct occurrence is a SEPARATE entity — e.g., "2023 NBA Finals" and "2024 NBA Finals" are different, "Python 2" and "Python 3" are different, "iPhone 15" and "iPhone 16" are different, "HTTP/1.1" and "HTTP/2" are different, "Michelin Guide 2024" and "Michelin Guide 2025" are different.
+- Different awards are ALWAYS separate entities even when they share words — "NBA Finals MVP" and "NBA MVP" are SEPARATE; "Academy Award for Best Picture" and "Academy Award for Best Director" are SEPARATE; "Nobel Peace Prize" and "Nobel Prize in Physics" are SEPARATE
+- Entities with opposing directional or categorical qualifiers are ALWAYS separate — "Western Conference" and "Eastern Conference" are SEPARATE; "North Atlantic Treaty Organization" and "South Asian Association" are SEPARATE; "Upper Egypt" and "Lower Egypt" are SEPARATE
 
 CRITICAL — Aliases vs. Relationships:
 - An ALIAS is a different name for THE SAME entity (e.g., "NYC" is an alias for "New York City")
@@ -181,6 +185,8 @@ For each entity, provide:
   - Surnames or first names alone (Curry, Obama, Kevin, Marie) — these are ambiguous, not aliases
   - Names of DIFFERENT entities — "FIBA Hall of Fame" and "Naismith Hall of Fame" are SEPARATE entities; "React" and "React Native" are SEPARATE; "Python 2" and "Python 3" are SEPARATE
   - Descriptive phrases (the American team, the defending champions, the former president, the lead researcher, the main ingredient)
+  - Country/city names for their teams — "France" is NOT an alias of "France men's national basketball team"; "Brazil" is NOT an alias of "Brazil national football team"
+  - Shortened generic forms — "Finals" is NOT an alias of "NBA Finals"; "MVP" is NOT an alias of any specific MVP award; "Olympics" is NOT an alias of "2024 Summer Olympics"
 
 Rules:
 - Only extract specific named entities — NOT dates, dollar amounts, percentages, or generic descriptions
@@ -188,6 +194,8 @@ Rules:
 - Include entities even if they only appear once
 - Return an empty array if no named entities exist
 - For events, awards, seasons, software versions, product generations, or any time/version-specific entities, ALWAYS include the year, version, or edition in the name. Each distinct occurrence is a SEPARATE entity — e.g., "2023 NBA Finals" and "2024 NBA Finals" are different, "Python 2" and "Python 3" are different, "iPhone 15" and "iPhone 16" are different, "HTTP/1.1" and "HTTP/2" are different, "Michelin Guide 2024" and "Michelin Guide 2025" are different.
+- Different awards are ALWAYS separate entities even when they share words — "NBA Finals MVP" and "NBA MVP" are SEPARATE; "Academy Award for Best Picture" and "Academy Award for Best Director" are SEPARATE; "Nobel Peace Prize" and "Nobel Prize in Physics" are SEPARATE
+- Entities with opposing directional or categorical qualifiers are ALWAYS separate — "Western Conference" and "Eastern Conference" are SEPARATE; "North Atlantic Treaty Organization" and "South Asian Association" are SEPARATE; "Upper Egypt" and "Lower Egypt" are SEPARATE
 
 CRITICAL — Aliases vs. Relationships:
 - An ALIAS is a different name for THE SAME entity (e.g., "NYC" is an alias for "New York City")

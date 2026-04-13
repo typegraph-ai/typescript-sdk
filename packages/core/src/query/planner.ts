@@ -114,7 +114,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
     promise,
     new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback), ms) }),
   ]).then(r => { clearTimeout(timer); return r })
-    .catch(() => { clearTimeout(timer); return fallback })
+    .catch((err) => { clearTimeout(timer); console.error('[typegraph] Query runner failed, using fallback:', err instanceof Error ? err.message : err); return fallback })
 }
 
 export class QueryPlanner {
@@ -353,7 +353,7 @@ export class QueryPlanner {
               ...(opts.temporalAt ? { temporalAt: opts.temporalAt } : {}),
               ...(opts.includeInvalidated != null ? { includeInvalidated: opts.includeInvalidated } : {}),
               useKeyword: signals.keyword,
-            }).catch(() => [] as NormalizedResult[]),
+            }).catch((err) => { console.error('[typegraph] MemoryRunner failed:', err instanceof Error ? err.message : err); return [] as NormalizedResult[] }),
             timeouts.memory,
             [] as NormalizedResult[]
           )

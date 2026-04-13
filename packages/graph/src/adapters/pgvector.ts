@@ -263,8 +263,9 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
       await this.sql(
         `ALTER TABLE ${table} ALTER COLUMN embedding TYPE vector(${this.embeddingDimensions})`
       )
-    } catch {
-      // Column may already be typed — ignore
+    } catch (err) {
+      // Column may already be typed — log at debug level in case it's a real error
+      console.debug('[typegraph] ALTER TABLE embedding type (may already be typed):', err instanceof Error ? err.message : err)
     }
     const idxName = safeIdx(idxPrefix(table), 'embedding_idx')
     try {

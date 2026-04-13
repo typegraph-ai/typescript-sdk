@@ -30,7 +30,7 @@ export class PgEventSink implements typegraphEventSink {
     this.flushIntervalMs = config.flushIntervalMs ?? 100
 
     this.timer = setInterval(() => {
-      this.flush().catch(() => {})
+      this.flush().catch((err) => console.error('[typegraph] Event flush failed:', err instanceof Error ? err.message : err))
     }, this.flushIntervalMs)
 
     // Allow Node.js to exit even if the timer is active
@@ -42,14 +42,14 @@ export class PgEventSink implements typegraphEventSink {
   emit(event: typegraphEvent): void {
     this.buffer.push(event)
     if (this.buffer.length >= this.bufferSize) {
-      this.flush().catch(() => {})
+      this.flush().catch((err) => console.error('[typegraph] Event flush failed:', err instanceof Error ? err.message : err))
     }
   }
 
   emitBatch(events: typegraphEvent[]): void {
     this.buffer.push(...events)
     if (this.buffer.length >= this.bufferSize) {
-      this.flush().catch(() => {})
+      this.flush().catch((err) => console.error('[typegraph] Event flush failed:', err instanceof Error ? err.message : err))
     }
   }
 

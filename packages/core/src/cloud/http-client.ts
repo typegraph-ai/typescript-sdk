@@ -93,7 +93,7 @@ export class HttpClient {
       })
 
       if (!response.ok) {
-        const body = await response.text().catch(() => '')
+        const body = await response.text().catch((err) => { console.error('[typegraph] Failed to read error response body:', err instanceof Error ? err.message : err); return '' })
         throw new TypegraphApiError(
           `typegraph API error: ${response.status} ${response.statusText}`,
           response.status,

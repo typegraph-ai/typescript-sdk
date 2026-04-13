@@ -70,8 +70,8 @@ export class InvalidationEngine {
             reasoning: result.reasoning,
           })
         }
-      } catch {
-        // On LLM failure, skip this comparison
+      } catch (err) {
+        console.error('[typegraph] Contradiction check failed, skipping:', err instanceof Error ? err.message : err)
         continue
       }
     }

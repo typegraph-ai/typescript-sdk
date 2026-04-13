@@ -127,7 +127,8 @@ Identify:
 Respond with only valid JSON:
 {"targetContent": "...", "newContent": "...", "subject": "...", "predicate": "...", "object": "..."}`
       )
-    } catch {
+    } catch (err) {
+      console.error('[typegraph] Memory correction parse failed:', err instanceof Error ? err.message : err)
       return {}
     }
   }
