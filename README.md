@@ -1,26 +1,29 @@
-<p align="center">
-  <img src="typegraph-logo-dark.png" alt="TypeGraph" width="100" />
-</p>
-
 <div align="center">
+  <img src="typegraph-logo-dark.png" alt="TypeGraph" width="50" />
   <h1>TypeGraph</h1>
-</div>
-<div align="center">
-  A TypeScript context layer for AI agents
+  <p>A context layer for AI agents</p>
 </div>
 
-<p align="center">
+<div align="center">
+  <p>
   <img src="https://img.shields.io/badge/MIT%20License-3DA639?logo=opensourceinitiative&logoColor=white" alt="MIT License" />
   <img src="https://img.shields.io/badge/TypeScript%20Native-3178C6?logo=typescript&logoColor=white" alt="TypeScript native" />
   <img src="https://img.shields.io/badge/Vercel%20Native-000000?logo=vercel&logoColor=white" alt="Vercel native" />
   <img src="https://img.shields.io/badge/PostgreSQL%20Native-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL native" />
-</p>
+  </p>
+</div>
 
-[Quick Start](#quick-start)  •  [Cognitive Memory](#cognitive-memory)  •  [How It Works](#how-it-works)  •  [Benchmarks](#benchmarks)  •  [Packages](#packages)  •  [Guides](#guides)  •  [Contributing](#contributing)
+<div align="center">
+  <p>
+  <a href="#how-it-works">How It Works</a>  •  <a href="#benchmarks">Benchmarks</a>  •  <a href="#guides">Guides</a>  •  <a href="#contributing">Contributing</a>
+  </p>
+</div>
 
 **TypeGraph** is a TypeScript SDK that gives AI agents ingest and retrieval for **RAG**, **graph** and **memory** in a single composable package. One SDK, one path, one Postgres database.
 
-## Why TypeGraph?
+<div align="center">
+  <h2>Why TypeGraph?</h2>
+</div>
 
 Building a context layer for AI agents in TypeScript today means cobbling together a vector DB, a graph DB, an embedding API, a caching layer, consolidation logic, and a conversation manager. The leading frameworks ([Graphiti](https://github.com/getzep/graphiti), [Mem0](https://github.com/mem0ai/mem0), [MemOS](https://github.com/MemTensor/MemOS)) are Python-first and do not unify ingest and retrieval accross **RAG**, **graph** and **memory**.
 
@@ -35,50 +38,9 @@ TypeGraph closes that gap:
 
 TypeGraph is a focused primitive - it stores, indexes, and retrieves so you can focus on building.
 
-## Quick Start
-
-**Prerequisites:** A PostgreSQL database with pgvector support. `deploy()` automatically enables the pgvector extension and creates all required tables.
-
-```bash
-npm install @typegraph-ai/sdk @typegraph-ai/adapter-pgvector-neon @ai-sdk/gateway
-```
-
-```ts
-import { TypeGraph } from '@typegraph-ai/sdk'
-import { createNeonAdapter } from '@typegraph-ai/adapter-pgvector-neon'
-import { gateway } from '@ai-sdk/gateway'
-
-const config = {
-  embedding: {
-    model: gateway.embeddingModel('openai/text-embedding-3-small'),
-    dimensions: 1536,
-  },
-  vectorStore: createNeonAdapter(process.env.DATABASE_URL!),
-}
-
-// One-time setup for self hosted - creates tables (run once, e.g. in a setup script or CI)
-await TypeGraph.deploy(config)
-
-// Runtime init - lightweight, no DDL (safe for serverless cold starts)
-await TypeGraph.initialize(config)
-
-// Ingest documents (batched embedding via AI Gateway)
-await TypeGraph.ingest([{
-  title: 'How do I set up SSO?',
-  content: 'Navigate to Settings > Authentication and select your identity provider.',
-  updatedAt: new Date(),
-  metadata: {},
-}])
-
-// Query - semantic search by default, composable signals for more retrieval systems
-// Identity fields (tenantId, groupId, userId, agentId, conversationId) filter results
-const { results } = await TypeGraph.query('how do I configure SSO?')
-
-// Assemble into LLM-ready context
-const context = TypeGraph.assemble(results, { format: 'xml' })
-```
-
-Swap models by changing a string - `'openai/text-embedding-3-small'` → `'cohere/embed-english-v3.0'` - no dependency changes needed.
+<div align="center">
+  <h2>How it works</h2>
+</div>
 
 ### Lifecycle
 
@@ -94,50 +56,6 @@ TypeGraph separates infrastructure provisioning from runtime initialization:
 
 
 > **More setup options:** [Self-Hosted Initialization](https://typegraph.ai/docs/guides/self-hosted-initialization) | [Simple RAG](https://typegraph.ai/docs/guides/simple-rag)
-
-## Cognitive Memory
-
-TypeGraph includes a **cognitive memory system** inspired by human memory. Memory operations live directly on the TypeGraph singleton - identity is per-call, Segment-style:
-
-```ts
-import { TypeGraphCreate, createKnowledgeGraphBridge } from '@typegraph-ai/sdk'
-import { gateway } from '@ai-sdk/gateway'
-
-const embedding = {
-  model: gateway.embeddingModel('openai/text-embedding-3-small'),
-  dimensions: 1536,
-}
-
-const d = await TypeGraphCreate({
-  vectorStore: adapter,
-  embedding,
-  llm: gateway('openai/gpt-5.4-mini'),  // bare AI SDK models are auto-wrapped
-  graph: createKnowledgeGraphBridge({ memoryStore, embedding, llm: gateway('openai/gpt-5.4-mini') }),
-})
-
-// Remember facts - identity is per-call, not ambient
-await d.remember('Alice works at Acme Corp', { userId: 'alice', tenantId: 'org1' })
-
-// Correct knowledge
-await d.correct('Actually, Alice moved to Beta Inc', { userId: 'alice', tenantId: 'org1' })
-
-// Ingest conversations with automatic fact extraction
-await d.addConversationTurn(messages, { userId: 'alice' })
-
-// Recall memories for context
-const memories = await d.recall('Where does Alice work?', { userId: 'alice', tenantId: 'org1' })
-
-// Build formatted memory context for LLM prompts
-const context = await d.assembleContext('Tell me about Alice', { userId: 'alice' }, {
-  includeFacts: true,
-  includeEpisodes: true,
-  format: 'xml',
-})
-```
-
-> **Deep dive:** [Agent Memory](https://typegraph.ai/docs/guides/agent-memory) - memory types, lifecycle, extraction pipeline, landscape analysis
-
-## How It Works
 
 TypeGraph uses **composable query signals** - the caller chooses which retrieval systems to activate:
 
@@ -185,7 +103,9 @@ The extraction pipeline supports configurable LLMs - using a reasoning model for
 
 > **Deep dive:** [Graph RAG Guide](https://typegraph.ai/docs/guides/graph-rag) - hybrid search, per-model fan-out, embedding providers, architecture
 
-## Benchmarks
+<div align="center">
+  <h2>Benchmarks</h2>
+</div>
 
 TypeGraph is evaluated on published academic benchmarks using the exact methodology (chunk sizes, scoring functions, context windows) from each source paper.
 
@@ -222,82 +142,10 @@ Baselines are text-embedding-3-small on the [MLEB Leaderboard](https://huggingfa
 
 TypeGraph overall ACC (58.4%) is statistically significant over HippoRAG2 (56.5%) at 95% confidence [CI: 57.2%, 59.5%]. Full eval: 2,009 queries, GPT-5.4-mini generation. Baselines from arXiv:2506.05690 Table 3 (GPT-4o-mini generation). See `benchmarks/` for methodology and reproduction.
 
-## Packages
 
-
-| Package                                                                          | Description                                                      | Status |
-| -------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------ |
-| **Core**                                                                         |                                                                  |        |
-| `[@typegraph-ai/sdk](packages/sdk)`                                              | Query engine, index engine, knowledge graph, cognitive memory    | Alpha  |
-| `[@typegraph-ai/adapter-pgvector](packages/adapters/pgvector)`                   | PostgreSQL + pgvector storage (base adapter)                     | Alpha  |
-| `[@typegraph-ai/adapter-sqlite-vec](packages/adapters/sqlite-vec)`               | SQLite + sqlite-vec - local dev / edge                           | Alpha  |
-| **Database Providers**                                                           |                                                                  |        |
-| `[@typegraph-ai/adapter-pgvector-neon](packages/adapters/pgvector-neon)`         | [Neon](https://neon.tech) serverless Postgres                    | Alpha  |
-| `[@typegraph-ai/adapter-pgvector-supabase](packages/adapters/pgvector-supabase)` | [Supabase](https://supabase.com) Postgres                        | Alpha  |
-| `[@typegraph-ai/adapter-pgvector-pg](packages/adapters/pgvector-pg)`             | Self-hosted / Docker / Cloud SQL / Azure (node-postgres)         | Alpha  |
-| `[@typegraph-ai/adapter-pgvector-rds](packages/adapters/pgvector-rds)`           | [Amazon RDS](https://aws.amazon.com/rds/) with optional IAM auth | Alpha  |
-| `[@typegraph-ai/adapter-pgvector-nile](packages/adapters/pgvector-nile)`         | [Nile](https://thenile.dev) tenant-aware Postgres                | Alpha  |
-| `[@typegraph-ai/adapter-pgvector-prisma](packages/adapters/pgvector-prisma)`     | [Prisma](https://prisma.io) Postgres                             | Alpha  |
-| **Integrations**                                                                 |                                                                  |        |
-| `[@typegraph-ai/mcp-server](packages/mcp-server)`                                | MCP tools + resources for agent frameworks                       | Alpha  |
-| `[@typegraph-ai/vercel-ai-provider](packages/vercel-ai-provider)`                | Vercel AI SDK memory tools + middleware                          | Alpha  |
-| `[@typegraph-ai/otel](packages/otel)`                                            | OpenTelemetry event sink for tracing TypeGraph operations        | Alpha  |
-
-
-## Database Providers
-
-TypeGraph works with any PostgreSQL provider. Install the adapter for your provider:
-
-```bash
-# Neon (serverless)
-npm install @typegraph-ai/adapter-pgvector-neon
-
-# Supabase
-npm install @typegraph-ai/adapter-pgvector-supabase
-
-# Amazon RDS (with optional IAM auth)
-npm install @typegraph-ai/adapter-pgvector-rds
-
-# Nile (tenant-aware)
-npm install @typegraph-ai/adapter-pgvector-nile
-
-# Prisma Postgres
-npm install @typegraph-ai/adapter-pgvector-prisma
-
-# Self-hosted / Docker / Cloud SQL / Azure
-npm install @typegraph-ai/adapter-pgvector-pg
-```
-
-Each provider package is a one-liner:
-
-```ts
-import { createNeonAdapter } from '@typegraph-ai/adapter-pgvector-neon'
-const adapter = createNeonAdapter(process.env.DATABASE_URL!)
-
-import { createSupabaseAdapter } from '@typegraph-ai/adapter-pgvector-supabase'
-const adapter = createSupabaseAdapter(process.env.DATABASE_URL!)
-
-import { createPgAdapter } from '@typegraph-ai/adapter-pgvector-pg'
-const adapter = createPgAdapter(process.env.DATABASE_URL!)
-
-import { createRdsAdapter } from '@typegraph-ai/adapter-pgvector-rds'
-const adapter = await createRdsAdapter(process.env.DATABASE_URL!)
-
-import { createNileAdapter } from '@typegraph-ai/adapter-pgvector-nile'
-const adapter = createNileAdapter(nileServer)
-
-import { createPrismaAdapter } from '@typegraph-ai/adapter-pgvector-prisma'
-const adapter = createPrismaAdapter(prisma)
-```
-
-For custom drivers, use the base adapter directly with your own `SqlExecutor`:
-
-```ts
-import { PgVectorAdapter } from '@typegraph-ai/adapter-pgvector'
-const adapter = new PgVectorAdapter({ sql: myCustomExecutor })
-```
-
-## Guides
+<div align="center">
+  <h2>Guides</h2>
+</div>
 
 
 | Guide                                                                | What you'll learn                                                  |
@@ -308,17 +156,9 @@ const adapter = new PgVectorAdapter({ sql: myCustomExecutor })
 | [Agentic RAG](guides/Agentic%20RAG/overview.md)                      | Retrieval architecture, embedding providers, landscape analysis    |
 | [Agentic Memory](guides/Agentic%20Memory/overview.md)                | Cognitive memory system, lifecycle, extraction, landscape analysis |
 
-
-## Development
-
-```bash
-pnpm install          # Install dependencies
-pnpm build            # Build all packages (Turborepo)
-pnpm test             # Run tests
-pnpm typecheck        # Type checking
-```
-
-## Contributing
+<div align="center">
+  <h2>Contributing</h2>
+</div>
 
 TypeGraph is open source and contributions are welcome - new integrations, adapters, bug fixes, or documentation.
 
@@ -328,6 +168,19 @@ TypeGraph is open source and contributions are welcome - new integrations, adapt
 4. Run `pnpm build && pnpm typecheck` to verify
 5. Open a PR
 
-## License
+<div align="center">
+  <h2>Development</h2>
+</div>
+
+```bash
+pnpm install          # Install dependencies
+pnpm build            # Build all packages (Turborepo)
+pnpm test             # Run tests
+pnpm typecheck        # Type checking
+```
+
+<div align="center">
+  <h2>License</h2>
+</div>
 
 [MIT](LICENSE)
