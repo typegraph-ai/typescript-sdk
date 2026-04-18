@@ -40,8 +40,6 @@ export interface IndexDefaults {
   chunkOverlap?: number | undefined
   deduplicateBy?: string[] | ((doc: RawDocument) => string) | undefined
   visibility?: import('./typegraph-document.js').Visibility | undefined
-  documentType?: string | undefined
-  sourceType?: string | undefined
   stripMarkdownForEmbedding?: boolean | undefined
   preprocessForEmbedding?: ((content: string) => string) | undefined
   propagateMetadata?: string[] | undefined

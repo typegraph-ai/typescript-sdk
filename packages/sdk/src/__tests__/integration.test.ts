@@ -195,6 +195,48 @@ describe('integration', () => {
       expect(matchingIdentity.results.length).toBeGreaterThan(0)
     })
 
+    it('visibility=undefined (public) returns rows on fully-unscoped queries — the RAG default', async () => {
+      const adapter = createMockAdapter()
+      const embedding = createMockEmbedding()
+      const instance = await typegraphInit({ vectorStore: adapter, embedding })
+
+      const docs = createTestDocuments(1, 'PublicDoc')
+      const { bucket, ingestOptions } = createMockBucket({ documents: docs })
+      registerTestBucket(instance, bucket, embedding)
+
+      // No tenantId, no visibility — the basic RAG case where a developer
+      // just wants to index docs and query them without any identity scoping.
+      await instance.ingest(docs, { ...ingestOptions, bucketId: bucket.id })
+
+      const unscoped = await instance.query('PublicDoc')
+      expect(unscoped.results.length).toBeGreaterThan(0)
+    })
+
+    it('visibility=tenant requires tenantId on the query — unscoped calls cannot see it', async () => {
+      const adapter = createMockAdapter()
+      const embedding = createMockEmbedding()
+      const instance = await typegraphInit({ vectorStore: adapter, embedding })
+
+      const docs = createTestDocuments(1, 'TenantGated')
+      const { bucket, ingestOptions } = createMockBucket({ documents: docs })
+      registerTestBucket(instance, bucket, embedding)
+
+      await instance.ingest(docs, {
+        ...ingestOptions,
+        bucketId: bucket.id,
+        tenantId,
+        visibility: 'tenant',
+      })
+
+      // No tenantId on the query → blocked, even though the doc is 'tenant' visibility.
+      const unscoped = await instance.query('TenantGated')
+      expect(unscoped.results).toHaveLength(0)
+
+      // Wrong tenant → blocked.
+      const wrongTenant = await instance.query('TenantGated', { tenantId: 'tenant-y' })
+      expect(wrongTenant.results).toHaveLength(0)
+    })
+
     it('visibility=tenant returns rows on tenant-only queries (no identity narrowing)', async () => {
       const adapter = createMockAdapter()
       const embedding = createMockEmbedding()

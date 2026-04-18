@@ -79,8 +79,6 @@ export class IndexedRunner {
             // Carry document-level fields if available
             documentStatus: chunk.document?.status,
             documentVisibility: chunk.document?.visibility,
-            documentType: chunk.document?.documentType,
-            sourceType: chunk.document?.sourceType,
             userId: chunk.document?.userId,
             groupId: chunk.document?.groupId,
             agentId: chunk.document?.agentId,

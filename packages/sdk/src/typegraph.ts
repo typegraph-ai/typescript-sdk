@@ -39,6 +39,16 @@ export const DEFAULT_BUCKET_ID = 'bkt_default'
 export const DEFAULT_BUCKET_NAME = 'Default'
 export const DEFAULT_BUCKET_DESCRIPTION = 'System default bucket. All ingested documents without an explicit bucket assignment are stored here. Cannot be deleted.'
 
+// Fills in defaults for optional fields the engine relies on.
+export function normalizeRawDocument<TMeta extends Record<string, unknown>>(doc: RawDocument<TMeta>): RawDocument<TMeta> {
+  if (doc.updatedAt && doc.metadata) return doc
+  return {
+    ...doc,
+    updatedAt: doc.updatedAt ?? new Date(),
+    metadata: doc.metadata ?? ({} as TMeta),
+  }
+}
+
 /** @deprecated Use LLMConfig instead. */
 export type LLMInput = LLMConfig
 
@@ -140,7 +150,7 @@ export interface BucketsApi {
 export interface DocumentsApi {
   get(id: string): Promise<typegraphDocument | null>
   list(filter?: DocumentFilter, pagination?: PaginationOpts): Promise<typegraphDocument[] | PaginatedResult<typegraphDocument>>
-  update(id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>, opts?: TelemetryOpts): Promise<typegraphDocument>
+  update(id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'metadata'>>, opts?: TelemetryOpts): Promise<typegraphDocument>
   delete(filter: DocumentFilter, opts?: TelemetryOpts): Promise<number>
 }
 
@@ -404,7 +414,7 @@ class TypegraphImpl implements typegraphInstance {
       return this.adapter.listDocuments(filter ?? {}, pagination)
     },
 
-    update: async (id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>, opts?: TelemetryOpts): Promise<typegraphDocument> => {
+    update: async (id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'metadata'>>, opts?: TelemetryOpts): Promise<typegraphDocument> => {
       this.assertConfigured()
       if (!this.adapter.updateDocument) {
         throw new ConfigError('Adapter does not support document update operations.')
@@ -698,8 +708,6 @@ class TypegraphImpl implements typegraphInstance {
           chunkOverlap: opts.chunkOverlap ?? defaults.chunkOverlap,
           deduplicateBy: opts.deduplicateBy ?? defaults.deduplicateBy,
           visibility: opts.visibility ?? defaults.visibility,
-          documentType: opts.documentType ?? defaults.documentType,
-          sourceType: opts.sourceType ?? defaults.sourceType,
           stripMarkdownForEmbedding: opts.stripMarkdownForEmbedding ?? defaults.stripMarkdownForEmbedding,
           preprocessForEmbedding: opts.preprocessForEmbedding ?? defaults.preprocessForEmbedding,
           propagateMetadata: opts.propagateMetadata ?? defaults.propagateMetadata,
@@ -749,8 +757,9 @@ class TypegraphImpl implements typegraphInstance {
     const resolvedOpts = this.resolveIngestOptions(opts, bucket)
     const { defaultChunker: chunker } = await import('./index-engine/chunker.js')
     const chunkSize = resolvedOpts.chunkSize ?? 512
-    const chunkOverlap = resolvedOpts.chunkOverlap ?? 0
-    const items = await Promise.all(docs.map(async doc => ({ doc, chunks: await chunker(doc, { chunkSize, chunkOverlap }) })))
+    const chunkOverlap = resolvedOpts.chunkOverlap ?? 64
+    const normalizedDocs = docs.map(doc => normalizeRawDocument(doc))
+    const items = await Promise.all(normalizedDocs.map(async doc => ({ doc, chunks: await chunker(doc, { chunkSize, chunkOverlap }) })))
     const embedding = await this.resolveEmbeddingForBucket(resolvedBucketId)
     const engine = this.createIndexEngine(embedding)
     this.logger?.info('Ingesting documents', { bucketId: resolvedBucketId, count: docs.length })
@@ -774,7 +783,7 @@ class TypegraphImpl implements typegraphInstance {
     const engine = this.createIndexEngine(embedding)
 
     await this.config.hooks?.onIndexStart?.(resolvedBucketId, resolvedOpts)
-    const result = await engine.ingestWithChunks(resolvedBucketId, doc, chunks, resolvedOpts)
+    const result = await engine.ingestWithChunks(resolvedBucketId, normalizeRawDocument(doc), chunks, resolvedOpts)
     result.status = 'complete'
     await this.config.hooks?.onIndexComplete?.(resolvedBucketId, result)
     return result

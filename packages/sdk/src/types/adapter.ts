@@ -82,7 +82,7 @@ export interface VectorStoreAdapter {
   /** Update a document's status and optionally its chunk count. */
   updateDocumentStatus?(id: string, status: DocumentStatus, chunkCount?: number): Promise<void>
   /** Update document metadata fields (title, url, visibility, etc.). Returns updated document. */
-  updateDocument?(id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<typegraphDocument>
+  updateDocument?(id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'metadata'>>): Promise<typegraphDocument>
 
   /** Hybrid search with document-level filtering via JOIN to typegraph_documents. */
   searchWithDocuments?(

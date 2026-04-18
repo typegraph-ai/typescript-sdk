@@ -497,8 +497,6 @@ export class QueryPlanner {
           updatedAt: r.updatedAt ?? new Date(),
           status: r.documentStatus,
           visibility: r.documentVisibility,
-          documentType: r.documentType,
-          sourceType: r.sourceType,
           tenantId: r.tenantId,
           userId: r.userId,
           groupId: r.groupId,

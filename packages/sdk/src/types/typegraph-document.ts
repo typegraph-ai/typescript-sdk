@@ -24,12 +24,13 @@ export interface typegraphDocument {
   contentHash: string
   chunkCount: number
   status: DocumentStatus
-  /** Access visibility. Defines who can see this document. Default: 'tenant'. */
+  /**
+   * Access visibility. Controls which queries can see this document.
+   * `undefined`/NULL means public — visible to any query, including unscoped ones.
+   * A value of `'tenant' | 'group' | 'user' | 'agent' | 'conversation'` restricts
+   * access to queries that supply a matching identity at that level.
+   */
   visibility?: Visibility | undefined
-  /** App-specific document type (e.g. 'pdf', 'csv', 'webpage'). */
-  documentType?: string | undefined
-  /** App-specific source type (e.g. 'upload', 'web_scrape', 'api'). */
-  sourceType?: string | undefined
   /**
    * Whether triple extraction was run against this document during ingestion.
    * Reflects "we ran extraction", not "extraction found entities" — partial failures
@@ -51,8 +52,6 @@ export interface DocumentFilter {
   conversationId?: string | undefined
   status?: DocumentStatus | DocumentStatus[] | undefined
   visibility?: Visibility | Visibility[] | undefined
-  documentType?: string | string[] | undefined
-  sourceType?: string | string[] | undefined
   documentIds?: string[] | undefined
   /** Filter documents by whether triple extraction ran during ingestion. */
   graphExtracted?: boolean | undefined
@@ -73,8 +72,6 @@ export interface UpsertDocumentInput {
   chunkCount: number
   status: DocumentStatus
   visibility?: Visibility | undefined
-  documentType?: string | undefined
-  sourceType?: string | undefined
   /** Whether triple extraction ran against this document. Defaults to false. */
   graphExtracted?: boolean | undefined
   metadata?: Record<string, unknown> | undefined

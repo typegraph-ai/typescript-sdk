@@ -16,7 +16,7 @@ export function resolveIdempotencyKey(
     : spec.map(field => {
         if (field.startsWith('metadata.')) {
           const key = field.slice('metadata.'.length)
-          return String(doc.metadata[key] ?? '')
+          return String(doc.metadata?.[key] ?? '')
         }
         return String((doc as unknown as Record<string, unknown>)[field] ?? '')
       }).join('::')

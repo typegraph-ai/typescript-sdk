@@ -13,7 +13,7 @@ import type { ConversationTurnResult, MemoryHealthReport } from '../types/memory
 import type { MemoryRecord } from '../memory/types/memory.js'
 import type { Job, JobFilter } from '../types/job.js'
 import type { EntityResult, EntityDetail, EdgeResult, SubgraphOpts, SubgraphResult, GraphStats, RecallOpts } from '../types/graph-bridge.js'
-import { DEFAULT_BUCKET_ID } from '../typegraph.js'
+import { DEFAULT_BUCKET_ID, normalizeRawDocument } from '../typegraph.js'
 import { HttpClient } from './http-client.js'
 import type { CloudConfig } from './http-client.js'
 
@@ -194,12 +194,13 @@ export function createCloudInstance(config: CloudConfig): typegraphCloudInstance
 
     async ingest(docs: RawDocument[], opts: IngestOptions = {}): Promise<IndexResult> {
       const bucketId = opts.bucketId || DEFAULT_BUCKET_ID
-      return client.post<IndexResult>(`/v1/buckets/${e(bucketId)}/ingest`, { docs, ...opts })
+      const normalizedDocs = docs.map(normalizeRawDocument)
+      return client.post<IndexResult>(`/v1/buckets/${e(bucketId)}/ingest`, { docs: normalizedDocs, ...opts })
     },
 
     async ingestPreChunked(doc: RawDocument, chunks: Chunk[], opts: IngestOptions = {}): Promise<IndexResult> {
       const bucketId = opts.bucketId || DEFAULT_BUCKET_ID
-      return client.post<IndexResult>(`/v1/buckets/${e(bucketId)}/ingest`, { doc, chunks, ...opts })
+      return client.post<IndexResult>(`/v1/buckets/${e(bucketId)}/ingest`, { doc: normalizeRawDocument(doc), chunks, ...opts })
     },
 
     async remember(content: string, identity: typegraphIdentity, category?: string, opts?: {

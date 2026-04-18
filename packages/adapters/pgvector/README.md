@@ -43,12 +43,12 @@ const sql: SqlExecutor = (q, p) => pool.query(q, p).then(r => r.rows)
 | `PgVectorAdapter` | Main adapter class, implements `VectorStoreAdapter` |
 | `PgHashStore` | Content-hash deduplication store |
 | `PgDocumentStore` | Document record CRUD |
-| `REGISTRY_SQL` | Migration SQL for model registry table |
-| `MODEL_TABLE_SQL` | Migration SQL for per-model chunk tables |
-| `HASH_TABLE_SQL` | Migration SQL for hash deduplication table |
-| `DOCUMENTS_TABLE_SQL` | Migration SQL for documents table |
-| `BUCKETS_TABLE_SQL` | Migration SQL for buckets table |
-| `JOBS_TABLE_SQL` | Migration SQL for jobs table |
+| `REGISTRY_SQL` | DDL for model registry table |
+| `MODEL_TABLE_SQL` | DDL for per-model chunk tables |
+| `HASH_TABLE_SQL` | DDL for hash deduplication table |
+| `DOCUMENTS_TABLE_SQL` | DDL for documents table |
+| `BUCKETS_TABLE_SQL` | DDL for buckets table |
+| `JOBS_TABLE_SQL` | DDL for jobs table |
 | `sanitizeModelKey` | Normalizes model names into safe table suffixes |
 
 ## Types

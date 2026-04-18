@@ -12,8 +12,6 @@ export interface MockSourceOpts {
   stripMarkdownForEmbedding?: boolean
   preprocessForEmbedding?: (content: string) => string
   propagateMetadata?: string[]
-  documentType?: string
-  sourceType?: string
 }
 
 export interface MockSourceResult {
@@ -43,8 +41,6 @@ export function createMockBucket(opts: MockSourceOpts = {}): MockSourceResult {
     stripMarkdownForEmbedding: opts.stripMarkdownForEmbedding,
     preprocessForEmbedding: opts.preprocessForEmbedding,
     propagateMetadata: opts.propagateMetadata,
-    documentType: opts.documentType,
-    sourceType: opts.sourceType,
   }
 
   const chunkOpts: ChunkOpts = { chunkSize, chunkOverlap }

@@ -9,7 +9,7 @@ import type { Visibility } from './typegraph-document.js'
  * - **Bucket-mergeable** (inherit from `bucket.indexDefaults` when unset):
  *   `chunkSize`, `chunkOverlap`, `deduplicateBy`, `propagateMetadata`,
  *   `stripMarkdownForEmbedding`, `preprocessForEmbedding`, `visibility`,
- *   `documentType`, `sourceType`, `graphExtraction`.
+ *   `graphExtraction`.
  *
  * - **Runtime-only** (never inherit from bucket defaults):
  *   `bucketId`, `mode`, `tenantId`, `groupId`, `userId`, `agentId`, `conversationId`,
@@ -35,10 +35,6 @@ export interface IngestOptions {
   // Document properties (bucket-mergeable)
   /** Access visibility for documents from this ingest call. */
   visibility?: Visibility | undefined
-  /** App-specific document type (e.g. 'pdf', 'webpage'). */
-  documentType?: string | undefined
-  /** App-specific source type (e.g. 'upload', 'web_scrape'). */
-  sourceType?: string | undefined
 
   // Processing (bucket-mergeable)
   deduplicateBy?: string[] | ((doc: RawDocument) => string) | undefined

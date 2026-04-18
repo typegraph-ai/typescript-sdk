@@ -68,18 +68,13 @@ export const MODEL_TABLE_SQL = (chunksTable: string, dimensions: number) => {
     embedding_model TEXT NOT NULL,
     chunk_index     INTEGER NOT NULL,
     total_chunks    INTEGER NOT NULL,
-    visibility      TEXT NOT NULL DEFAULT 'tenant'
-                    CHECK (visibility IN ('tenant', 'group', 'user', 'agent', 'conversation')),
+    visibility      TEXT CHECK (visibility IS NULL OR visibility IN ('tenant', 'group', 'user', 'agent', 'conversation')),
     metadata        JSONB NOT NULL DEFAULT '{}',
     indexed_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     search_vector   TSVECTOR GENERATED ALWAYS AS (
       to_tsvector('english', content)
     ) STORED
   );
-
-  ALTER TABLE ${chunksTable}
-    ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'tenant'
-      CHECK (visibility IN ('tenant', 'group', 'user', 'agent', 'conversation'));
 
   CREATE INDEX IF NOT EXISTS ${idx('embedding_idx')}
     ON ${chunksTable} USING hnsw (embedding vector_cosine_ops);
@@ -127,20 +122,6 @@ export const MODEL_TABLE_SQL = (chunksTable: string, dimensions: number) => {
     ON ${chunksTable} (tenant_id, visibility);
 `
 }
-
-/**
- * Backfill chunks.visibility from the parent document's visibility.
- * Idempotent: only updates rows still at the 'tenant' default that came from
- * a document with a non-null visibility. Safe to re-run.
- */
-export const CHUNKS_VISIBILITY_BACKFILL_SQL = (chunksTable: string, documentsTable: string) => `
-  UPDATE ${chunksTable} c
-  SET visibility = d.visibility
-  FROM ${documentsTable} d
-  WHERE c.document_id = d.id
-    AND d.visibility IS NOT NULL
-    AND c.visibility = 'tenant';
-`
 
 /**
  * DDL for the shared hash store table (dimension-agnostic).
@@ -197,8 +178,6 @@ export const DOCUMENTS_TABLE_SQL = (documentsTable: string) => {
     status          TEXT NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending', 'processing', 'complete', 'failed')),
     visibility      TEXT CHECK (visibility IS NULL OR visibility IN ('tenant', 'group', 'user', 'agent', 'conversation')),
-    document_type   TEXT,
-    source_type     TEXT,
     graph_extracted BOOLEAN NOT NULL DEFAULT FALSE,
     indexed_at      TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -217,9 +196,6 @@ export const DOCUMENTS_TABLE_SQL = (documentsTable: string) => {
 
   CREATE INDEX IF NOT EXISTS ${idx('visibility_user_idx')}
     ON ${documentsTable} (visibility, user_id);
-
-  CREATE INDEX IF NOT EXISTS ${idx('type_idx')}
-    ON ${documentsTable} (document_type);
 
   CREATE INDEX IF NOT EXISTS ${idx('graph_extracted_idx')}
     ON ${documentsTable} (graph_extracted);

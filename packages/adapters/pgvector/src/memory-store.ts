@@ -66,8 +66,7 @@ const MEMORIES_DDL = (t: string) => {
     user_id          TEXT,
     agent_id         TEXT,
     conversation_id       TEXT,
-    visibility       TEXT NOT NULL DEFAULT 'user'
-                     CHECK (visibility IN ('tenant', 'group', 'user', 'agent', 'conversation')),
+    visibility       TEXT CHECK (visibility IS NULL OR visibility IN ('tenant', 'group', 'user', 'agent', 'conversation')),
     -- Episodic
     event_type       TEXT,
     participants     TEXT[],
@@ -91,7 +90,9 @@ const MEMORIES_DDL = (t: string) => {
     invalid_at       TIMESTAMPTZ,
     expired_at       TIMESTAMPTZ,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Full-text search for BM25/keyword search against memories
+    search_vector    TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', content)) STORED
   );
 
   CREATE INDEX IF NOT EXISTS ${idx('category_idx')} ON ${t} (category);
@@ -106,10 +107,6 @@ const MEMORIES_DDL = (t: string) => {
   CREATE INDEX IF NOT EXISTS ${idx('agent_idx')} ON ${t} (agent_id);
   CREATE INDEX IF NOT EXISTS ${idx('conversation_idx')} ON ${t} (conversation_id);
   CREATE INDEX IF NOT EXISTS ${idx('visibility_idx')} ON ${t} (visibility);
-
-  -- Full-text search for BM25/keyword search against memories
-  ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS search_vector TSVECTOR
-    GENERATED ALWAYS AS (to_tsvector('english', content)) STORED;
   CREATE INDEX IF NOT EXISTS ${idx('search_vector_idx')} ON ${t} USING gin (search_vector);
 `
 }
@@ -133,8 +130,7 @@ const ENTITIES_DDL = (t: string, dims?: number) => {
     user_id     TEXT,
     agent_id    TEXT,
     conversation_id  TEXT,
-    visibility  TEXT NOT NULL DEFAULT 'tenant'
-                CHECK (visibility IN ('tenant', 'group', 'user', 'agent', 'conversation')),
+    visibility  TEXT CHECK (visibility IS NULL OR visibility IN ('tenant', 'group', 'user', 'agent', 'conversation')),
     valid_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     invalid_at  TIMESTAMPTZ,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -173,8 +169,7 @@ const EDGES_DDL = (t: string) => {
     user_id          TEXT,
     agent_id         TEXT,
     conversation_id       TEXT,
-    visibility       TEXT NOT NULL DEFAULT 'tenant'
-                     CHECK (visibility IN ('tenant', 'group', 'user', 'agent', 'conversation')),
+    visibility       TEXT CHECK (visibility IS NULL OR visibility IN ('tenant', 'group', 'user', 'agent', 'conversation')),
     evidence         TEXT[] DEFAULT '{}',
     valid_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     invalid_at       TIMESTAMPTZ,
@@ -327,7 +322,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
         record.scope.userId ?? null,
         record.scope.agentId ?? null,
         record.scope.conversationId ?? null,
-        record.visibility ?? 'user',
+        record.visibility ?? null,
         // Episodic
         (record as any).eventType ?? null,
         (record as any).participants ?? null,
@@ -558,11 +553,12 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
         entity.scope.userId ?? null,
         entity.scope.agentId ?? null,
         entity.scope.conversationId ?? null,
-        entity.visibility ?? 'tenant',
+        entity.visibility ?? null,
         entity.temporal.validAt.toISOString(),
         entity.temporal.invalidAt?.toISOString() ?? null,
       ]
     )
+
 
     // Lazily create HNSW index after first entity with embedding is persisted
     if (embeddingStr && !this.hnswEntityIndexCreated) {
@@ -666,7 +662,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
         edge.scope.userId ?? null,
         edge.scope.agentId ?? null,
         edge.scope.conversationId ?? null,
-        edge.visibility ?? 'tenant',
+        edge.visibility ?? null,
         edge.evidence,
         edge.temporal.validAt.toISOString(),
         edge.temporal.invalidAt?.toISOString() ?? null,
@@ -814,7 +810,7 @@ function mapRowToMemory(row: Record<string, unknown>): MemoryRecord {
     lastAccessedAt: new Date(row.last_accessed_at as string),
     metadata,
     scope,
-    visibility: (row.visibility as MemoryRecord['visibility']) ?? 'user',
+    visibility: (row.visibility as MemoryRecord['visibility']) ?? undefined,
     validAt: new Date(row.valid_at as string),
     invalidAt: row.invalid_at ? new Date(row.invalid_at as string) : undefined,
     createdAt: new Date(row.created_at as string),
@@ -866,7 +862,7 @@ function mapRowToEntity(row: Record<string, unknown>): SemanticEntity {
     embedding: undefined,
     descriptionEmbedding: parseVectorString(row.description_embedding),
     scope: rowToIdentity(row),
-    visibility: (row.visibility as SemanticEntity['visibility']) ?? 'tenant',
+    visibility: (row.visibility as SemanticEntity['visibility']) ?? undefined,
     temporal: {
       validAt: new Date(row.valid_at as string),
       invalidAt: row.invalid_at ? new Date(row.invalid_at as string) : undefined,
@@ -885,7 +881,7 @@ function mapRowToEdge(row: Record<string, unknown>): SemanticEdge {
     weight: row.weight as number,
     properties: parseJson(row.properties),
     scope: rowToIdentity(row),
-    visibility: (row.visibility as SemanticEdge['visibility']) ?? 'tenant',
+    visibility: (row.visibility as SemanticEdge['visibility']) ?? undefined,
     evidence: row.evidence as string[] ?? [],
     temporal: {
       validAt: new Date(row.valid_at as string),

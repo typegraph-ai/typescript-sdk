@@ -18,8 +18,6 @@ export interface NormalizedResult {
   // Document-level fields (populated when searchWithDocuments is used)
   documentStatus?: string | undefined
   documentVisibility?: string | undefined
-  documentType?: string | undefined
-  sourceType?: string | undefined
   userId?: string | undefined
   groupId?: string | undefined
   agentId?: string | undefined

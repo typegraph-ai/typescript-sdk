@@ -46,7 +46,7 @@ export class IndexEngine {
     chunks: Chunk[],
     opts: IngestOptions = {},
   ): Promise<IndexResult> {
-    const { tenantId, groupId, userId, agentId, conversationId, visibility, documentType, sourceType, dryRun = false } = opts
+    const { tenantId, groupId, userId, agentId, conversationId, visibility, dryRun = false } = opts
     const shouldExtract = !!this.tripleExtractor && !dryRun && !!opts.graphExtraction
 
     const modelId = embeddingModelKey(this.embedding)
@@ -76,10 +76,8 @@ export class IndexEngine {
         chunkCount: chunks.length,
         status: 'processing',
         visibility,
-        documentType,
-        sourceType,
         graphExtracted: shouldExtract,
-        metadata: doc.metadata,
+        metadata: doc.metadata ?? {},
       })
     }
 
@@ -235,7 +233,7 @@ export class IndexEngine {
     items: Array<{ doc: RawDocument; chunks: Chunk[] }>,
     opts: IngestOptions = {},
   ): Promise<IndexResult> {
-    const { tenantId, groupId, userId, agentId, conversationId, visibility, documentType, sourceType, dryRun = false, traceId, spanId } = opts
+    const { tenantId, groupId, userId, agentId, conversationId, visibility, dryRun = false, traceId, spanId } = opts
     const shouldExtract = !!this.tripleExtractor && !dryRun && !!opts.graphExtraction
     const modelId = embeddingModelKey(this.embedding)
     const startMs = Date.now()
@@ -334,10 +332,8 @@ export class IndexEngine {
           chunkCount: chunks.length,
           status: 'processing',
           visibility,
-          documentType,
-          sourceType,
           graphExtracted: shouldExtract,
-          metadata: doc.metadata,
+          metadata: doc.metadata ?? {},
         })
       }
 
@@ -593,7 +589,7 @@ export class IndexEngine {
     for (const field of fields) {
       if (field.startsWith('metadata.')) {
         const key = field.slice('metadata.'.length)
-        out[key] = doc.metadata[key]
+        out[key] = doc.metadata?.[key]
       } else {
         out[field] = (doc as unknown as Record<string, unknown>)[field]
       }

@@ -16,8 +16,6 @@ function mapDocRow(row: Record<string, unknown>): typegraphDocument {
     chunkCount: row.chunk_count as number,
     status: row.status as typegraphDocument['status'],
     visibility: (row.visibility as typegraphDocument['visibility']) ?? undefined,
-    documentType: (row.document_type as string) ?? undefined,
-    sourceType: (row.source_type as string) ?? undefined,
     graphExtracted: (row.graph_extracted as boolean) ?? false,
     indexedAt: new Date(row.indexed_at as string),
     createdAt: new Date(row.created_at as string),
@@ -37,8 +35,8 @@ export class PgDocumentStore {
       `INSERT INTO ${this.tableName}
         (id, bucket_id, tenant_id, group_id, user_id, agent_id, conversation_id,
          title, url, content_hash, chunk_count, status,
-         visibility, document_type, source_type, graph_extracted, metadata, indexed_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+         visibility, graph_extracted, metadata, indexed_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())
        ON CONFLICT (bucket_id, COALESCE(tenant_id, ''), content_hash)
          DO UPDATE SET
            title = EXCLUDED.title,
@@ -50,8 +48,6 @@ export class PgDocumentStore {
            user_id = EXCLUDED.user_id,
            agent_id = EXCLUDED.agent_id,
            conversation_id = EXCLUDED.conversation_id,
-           document_type = EXCLUDED.document_type,
-           source_type = EXCLUDED.source_type,
            graph_extracted = EXCLUDED.graph_extracted,
            metadata = EXCLUDED.metadata,
            indexed_at = NOW(),
@@ -71,8 +67,6 @@ export class PgDocumentStore {
         input.chunkCount,
         input.status,
         input.visibility ?? null,
-        input.documentType ?? null,
-        input.sourceType ?? null,
         input.graphExtracted ?? false,
         JSON.stringify(input.metadata ?? {}),
       ]
@@ -125,14 +119,12 @@ export class PgDocumentStore {
     return { count: rows.length, ids: rows.map(r => r.id as string) }
   }
 
-  async update(id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<typegraphDocument | null> {
+  async update(id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'metadata'>>): Promise<typegraphDocument | null> {
     const setClauses: string[] = ['updated_at = NOW()']
     const params: unknown[] = []
     if (input.title !== undefined) { params.push(input.title); setClauses.push(`title = $${params.length}`) }
     if (input.url !== undefined) { params.push(input.url); setClauses.push(`url = $${params.length}`) }
     if (input.visibility !== undefined) { params.push(input.visibility); setClauses.push(`visibility = $${params.length}`) }
-    if (input.documentType !== undefined) { params.push(input.documentType); setClauses.push(`document_type = $${params.length}`) }
-    if (input.sourceType !== undefined) { params.push(input.sourceType); setClauses.push(`source_type = $${params.length}`) }
     if (input.metadata !== undefined) { params.push(JSON.stringify(input.metadata)); setClauses.push(`metadata = $${params.length}::jsonb`) }
     params.push(id)
     const rows = await this.sql(
@@ -205,24 +197,6 @@ function buildDocWhere(filter: DocumentFilter): { where: string; params: unknown
     } else {
       params.push(filter.visibility)
       conditions.push(`visibility = $${params.length}`)
-    }
-  }
-  if (filter.documentType != null) {
-    if (Array.isArray(filter.documentType)) {
-      params.push(filter.documentType)
-      conditions.push(`document_type = ANY($${params.length}::text[])`)
-    } else {
-      params.push(filter.documentType)
-      conditions.push(`document_type = $${params.length}`)
-    }
-  }
-  if (filter.sourceType != null) {
-    if (Array.isArray(filter.sourceType)) {
-      params.push(filter.sourceType)
-      conditions.push(`source_type = ANY($${params.length}::text[])`)
-    } else {
-      params.push(filter.sourceType)
-      conditions.push(`source_type = $${params.length}`)
     }
   }
   if (filter.documentIds != null && filter.documentIds.length > 0) {

@@ -53,8 +53,6 @@ export interface typegraphResult {
     updatedAt: Date
     status?: string | undefined
     visibility?: string | undefined
-    documentType?: string | undefined
-    sourceType?: string | undefined
     tenantId?: string | undefined
     groupId?: string | undefined
     userId?: string | undefined

@@ -54,7 +54,11 @@ export interface MemoryRecord extends TemporalRecord {
   metadata: Record<string, unknown>
   /** Who this memory belongs to */
   scope: typegraphIdentity
-  /** Access visibility. Default: 'user' (most restrictive). */
+  /**
+   * Access visibility. `undefined` / NULL means public — any recall can match.
+   * Set to `'user'` / `'tenant'` / etc. to restrict access to callers that
+   * supply a matching identity at that level.
+   */
   visibility?: Visibility | undefined
 }
 
@@ -93,7 +97,10 @@ export interface SemanticEntity {
   /** Embedding of the entity description for Phase 3.5 near-miss matching */
   descriptionEmbedding?: number[] | undefined
   scope: typegraphIdentity
-  /** Access visibility. Default: 'tenant' (entities are typically shared within org). */
+  /**
+   * Access visibility. `undefined` / NULL means public. Set to a named level
+   * to require the corresponding identity at recall time.
+   */
   visibility?: Visibility | undefined
   temporal: TemporalRecord
 }
@@ -112,7 +119,10 @@ export interface SemanticEdge {
   /** Arbitrary typed properties */
   properties: Record<string, unknown>
   scope: typegraphIdentity
-  /** Access visibility. Default: 'tenant' (edges are typically shared within org). */
+  /**
+   * Access visibility. `undefined` / NULL means public. Set to a named level
+   * to require the corresponding identity at recall time.
+   */
   visibility?: Visibility | undefined
   temporal: TemporalRecord
   /** Memory IDs that provide evidence for this edge */

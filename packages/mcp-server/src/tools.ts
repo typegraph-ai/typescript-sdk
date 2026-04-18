@@ -134,7 +134,7 @@ export async function executeTool(
       case 'typegraph_remember':
         result = await memory.remember(
           args['content'] as string,
-          (args['category'] as 'episodic' | 'semantic' | 'procedural') ?? 'semantic',
+          { category: (args['category'] as 'episodic' | 'semantic' | 'procedural') ?? 'semantic' },
         )
         break
 

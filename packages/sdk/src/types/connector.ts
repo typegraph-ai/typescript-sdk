@@ -2,14 +2,14 @@ export interface RawDocument<TMeta extends Record<string, unknown> = Record<stri
   id?: string | undefined
   content: string
   title: string
-  updatedAt: Date
+  updatedAt?: Date | undefined
 
   url?: string | undefined
   createdAt?: Date | undefined
   mimeType?: string | undefined
   language?: string | undefined
 
-  metadata: TMeta
+  metadata?: TMeta | undefined
 }
 
 export interface ChunkOpts {

@@ -6,7 +6,6 @@ import { generateId, DEFAULT_BUCKET_ID } from '@typegraph-ai/sdk'
 import {
   REGISTRY_SQL, MODEL_TABLE_SQL, HASH_TABLE_SQL, DOCUMENTS_TABLE_SQL,
   BUCKETS_TABLE_SQL, EVENTS_TABLE_SQL, POLICIES_TABLE_SQL,
-  CHUNKS_VISIBILITY_BACKFILL_SQL,
   sanitizeModelKey,
 } from './migrations.js'
 import { PgHashStore } from './hash-store.js'
@@ -99,19 +98,6 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     await this.execStatements(EVENTS_TABLE_SQL(this.eventsTable))
     await this.execStatements(POLICIES_TABLE_SQL(this.policiesTable))
     await this.hashStore.initialize()
-
-    // Ensure any pre-existing model tables have the new visibility column +
-    // indexes, and backfill from documents. The MODEL_TABLE_SQL ALTER TABLE
-    // is idempotent on fresh tables — safe to re-run at deploy time.
-    const registryRows = await this.sql(
-      `SELECT table_name, dimensions FROM ${this.registryTable}`
-    )
-    for (const row of registryRows) {
-      const tableName = row.table_name as string
-      const dimensions = row.dimensions as number
-      await this.execStatements(MODEL_TABLE_SQL(tableName, dimensions))
-      await this.execStatements(CHUNKS_VISIBILITY_BACKFILL_SQL(tableName, this.documentsTable))
-    }
   }
 
   async connect(): Promise<void> {
@@ -188,9 +174,6 @@ export class PgVectorAdapter implements VectorStoreAdapter {
 
     const tableName = `${this.tablePrefix}_${key}`
     await this.execStatements(MODEL_TABLE_SQL(tableName, dimensions))
-    // Backfill visibility from parent documents for pre-existing rows that
-    // defaulted to 'tenant' after the column was added. Idempotent.
-    await this.execStatements(CHUNKS_VISIBILITY_BACKFILL_SQL(tableName, this.documentsTable))
     await this.sql(
       `INSERT INTO ${this.registryTable} (model_key, model_id, table_name, dimensions)
        VALUES ($1, $2, $3, $4)
@@ -259,7 +242,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     const embeddingModels: string[] = []
     const chunkIndices: number[] = []
     const totalChunks: number[] = []
-    const visibilities: string[] = []
+    const visibilities: (string | null)[] = []
     const metadatas: string[] = []
     const indexedAts: string[] = []
 
@@ -278,7 +261,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
       embeddingModels.push(chunk.embeddingModel)
       chunkIndices.push(chunk.chunkIndex)
       totalChunks.push(chunk.totalChunks)
-      visibilities.push(chunk.visibility ?? 'tenant')
+      visibilities.push(chunk.visibility ?? null)
       metadatas.push(JSON.stringify(chunk.metadata))
       indexedAts.push(chunk.indexedAt.toISOString())
     }
@@ -517,7 +500,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     return count
   }
 
-  async updateDocument(id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'documentType' | 'sourceType' | 'metadata'>>): Promise<typegraphDocument> {
+  async updateDocument(id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'metadata'>>): Promise<typegraphDocument> {
     const doc = await this.documentStore.update(id, input)
     if (!doc) throw new Error(`Document not found: ${id}`)
     // Cascade visibility changes onto all chunk rows for this document. Chunks
@@ -637,7 +620,6 @@ export class PgVectorAdapter implements VectorStoreAdapter {
                d.status AS doc_status, d.visibility AS doc_visibility,
                d.group_id AS doc_group_id, d.user_id AS doc_user_id,
                d.agent_id AS doc_agent_id, d.conversation_id AS doc_conversation_id,
-               d.document_type AS doc_document_type, d.source_type AS doc_source_type,
                d.graph_extracted AS doc_graph_extracted,
                d.indexed_at AS doc_indexed_at, d.created_at AS doc_created_at,
                d.updated_at AS doc_updated_at, d.metadata AS doc_metadata
@@ -771,6 +753,7 @@ function buildWhere(filter?: ChunkFilter): { where: string; params: unknown[] } 
   const conditions: string[] = []
   const params: unknown[] = []
 
+  let tenantParam: string | null = null
   let groupParam: string | null = null
   let userParam: string | null = null
   let agentParam: string | null = null
@@ -786,7 +769,8 @@ function buildWhere(filter?: ChunkFilter): { where: string; params: unknown[] } 
   }
   if (filter?.tenantId != null) {
     params.push(filter.tenantId)
-    conditions.push(`tenant_id = $${params.length}`)
+    tenantParam = `$${params.length}`
+    conditions.push(`tenant_id = ${tenantParam}`)
   }
   if (filter?.groupId != null) {
     params.push(filter.groupId)
@@ -819,9 +803,12 @@ function buildWhere(filter?: ChunkFilter): { where: string; params: unknown[] } 
 
   // Visibility gate — denormalized onto chunks so unscoped queries cannot
   // leak narrowly-visible rows even when identity fields are omitted.
-  // A row matches only when visibility is 'tenant' OR the caller provided
-  // a matching identity. Missing identity → that branch is absent.
-  const visBranches: string[] = [`visibility = 'tenant'`]
+  // NULL visibility = public (no scoping). Every other visibility level
+  // requires the caller to have supplied a matching identity field; if the
+  // corresponding identity is absent, that branch is not emitted, so rows
+  // at that level remain hidden.
+  const visBranches: string[] = [`visibility IS NULL`]
+  if (tenantParam) visBranches.push(`(visibility = 'tenant' AND tenant_id = ${tenantParam})`)
   if (groupParam) visBranches.push(`(visibility = 'group' AND group_id = ${groupParam})`)
   if (userParam) visBranches.push(`(visibility = 'user' AND user_id = ${userParam})`)
   if (agentParam) visBranches.push(`(visibility = 'agent' AND agent_id = ${agentParam})`)
@@ -898,8 +885,6 @@ function mapRowToDocument(row: Record<string, unknown>): typegraphDocument {
     chunkCount: row.doc_chunk_count as number,
     status: row.doc_status as typegraphDocument['status'],
     visibility: (row.doc_visibility as typegraphDocument['visibility']) ?? undefined,
-    documentType: (row.doc_document_type as string) ?? undefined,
-    sourceType: (row.doc_source_type as string) ?? undefined,
     graphExtracted: (row.doc_graph_extracted as boolean) ?? false,
     indexedAt: new Date(row.doc_indexed_at as string),
     createdAt: new Date(row.doc_created_at as string),

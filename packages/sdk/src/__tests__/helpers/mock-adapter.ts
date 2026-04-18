@@ -33,9 +33,11 @@ function matchesFilter(chunk: EmbeddedChunk, filter: ChunkFilter): boolean {
   }
 
   // Visibility gate — must mirror PgVectorAdapter.buildWhere() behavior.
-  // 'tenant' always visible; narrower visibilities require matching identity.
-  const vis = chunk.visibility ?? 'tenant'
-  if (vis === 'tenant') return true
+  // NULL/undefined visibility = public (always visible). Every other level
+  // requires the caller to supply a matching identity at that level.
+  const vis = chunk.visibility
+  if (vis == null) return true
+  if (vis === 'tenant') return filter.tenantId != null && chunk.tenantId === filter.tenantId
   if (vis === 'group') return filter.groupId != null && chunk.groupId === filter.groupId
   if (vis === 'user') return filter.userId != null && chunk.userId === filter.userId
   if (vis === 'agent') return filter.agentId != null && chunk.agentId === filter.agentId
@@ -248,8 +250,6 @@ export function createMockAdapter(): VectorStoreAdapter & {
         userId: input.userId,
         agentId: input.agentId,
         conversationId: input.conversationId,
-        documentType: input.documentType,
-        sourceType: input.sourceType,
         indexedAt: now,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
