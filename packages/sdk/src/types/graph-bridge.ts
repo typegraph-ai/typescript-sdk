@@ -109,8 +109,8 @@ export interface KnowledgeGraphBridge {
   /** Get adjacency list for PPR. */
   getAdjacencyList?(entityIds: string[]): Promise<Map<string, Array<{ target: string; weight: number }>>>
 
-  /** Get chunk content associated with entities. */
-  getChunksForEntities?(entityIds: string[], limit?: number, pprScores?: Map<string, number>): Promise<Array<{ content: string; bucketId: string; score: number; documentId?: string; chunkIndex?: number; metadata?: Record<string, unknown> }>>
+  /** Get chunk content associated with entities. Optionally scoped to specific buckets via `bucketIds`. */
+  getChunksForEntities?(entityIds: string[], limit?: number, pprScores?: Map<string, number>, bucketIds?: string[]): Promise<Array<{ content: string; bucketId: string; score: number; documentId?: string; chunkIndex?: number; metadata?: Record<string, unknown> }>>
 
   // ── Graph exploration methods ──
 
@@ -168,8 +168,6 @@ export interface EdgeResult {
   targetEntityName: string
   relation: string
   weight: number
-  bucketId?: string | undefined
-  documentId?: string | undefined
   properties?: Record<string, unknown> | undefined
 }
 

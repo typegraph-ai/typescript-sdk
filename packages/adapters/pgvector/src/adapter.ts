@@ -2,14 +2,16 @@ import type { VectorStoreAdapter, SearchOpts, ScoredChunkWithDocument, UndeployR
 import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from '@typegraph-ai/sdk'
 import type { typegraphDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from '@typegraph-ai/sdk'
 import type { Bucket } from '@typegraph-ai/sdk'
+import type { Job, JobFilter, UpsertJobInput, JobStatusPatch, PaginationOpts, PaginatedResult } from '@typegraph-ai/sdk'
 import { generateId, DEFAULT_BUCKET_ID } from '@typegraph-ai/sdk'
 import {
   REGISTRY_SQL, MODEL_TABLE_SQL, HASH_TABLE_SQL, DOCUMENTS_TABLE_SQL,
-  BUCKETS_TABLE_SQL, EVENTS_TABLE_SQL, POLICIES_TABLE_SQL,
+  BUCKETS_TABLE_SQL, EVENTS_TABLE_SQL, POLICIES_TABLE_SQL, JOBS_TABLE_SQL,
   sanitizeModelKey,
 } from './migrations.js'
 import { PgHashStore } from './hash-store.js'
 import { PgDocumentStore, buildDocWhere } from './document-store.js'
+import { PgJobStore } from './job-store.js'
 
 /**
  * A function that runs a parameterized SQL query and returns rows.
@@ -43,6 +45,7 @@ export interface PgVectorAdapterConfig {
   hashesTable?: string | undefined
   documentsTable?: string | undefined
   bucketsTable?: string | undefined
+  jobsTable?: string | undefined
 }
 
 export class PgVectorAdapter implements VectorStoreAdapter {
@@ -50,6 +53,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
   private transaction?: PgVectorAdapterConfig['transaction']
   readonly hashStore: PgHashStore
   readonly documentStore: PgDocumentStore
+  readonly jobStore: PgJobStore
   private tablePrefix: string
   private hashesTable: string
   private documentsTable: string
@@ -57,6 +61,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
   private bucketsTable: string
   private eventsTable: string
   private policiesTable: string
+  private jobsTable: string
 
   /** model key → table name */
   private modelTables = new Map<string, string>()
@@ -74,9 +79,11 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     this.bucketsTable = config.bucketsTable ?? `${prefix}typegraph_buckets`
     this.eventsTable = `${prefix}typegraph_events`
     this.policiesTable = `${prefix}typegraph_policies`
+    this.jobsTable = config.jobsTable ?? `${prefix}typegraph_jobs`
     this.registryTable = `${this.tablePrefix}_registry`
     this.hashStore = new PgHashStore(this.sql, this.hashesTable)
     this.documentStore = new PgDocumentStore(this.sql, this.documentsTable)
+    this.jobStore = new PgJobStore(this.sql, this.jobsTable)
   }
 
   private async execStatements(ddl: string): Promise<void> {
@@ -97,6 +104,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     await this.execStatements(BUCKETS_TABLE_SQL(this.bucketsTable))
     await this.execStatements(EVENTS_TABLE_SQL(this.eventsTable))
     await this.execStatements(POLICIES_TABLE_SQL(this.policiesTable))
+    await this.execStatements(JOBS_TABLE_SQL(this.jobsTable))
     await this.hashStore.initialize()
   }
 
@@ -127,6 +135,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
       `${this.hashesTable}_run_times`,
       this.documentsTable,
       this.bucketsTable,
+      this.jobsTable,
     ]
 
     const tablesWithData: string[] = []
@@ -183,7 +192,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     this.modelTables.set(key, tableName)
   }
 
-  private async getTable(model: string): Promise<string> {
+  async getTable(model: string): Promise<string> {
     const key = sanitizeModelKey(model)
     const cached = this.modelTables.get(key)
     if (cached) return cached
@@ -519,6 +528,28 @@ export class PgVectorAdapter implements VectorStoreAdapter {
 
   async updateDocumentStatus(id: string, status: DocumentStatus, chunkCount?: number): Promise<void> {
     return this.documentStore.updateStatus(id, status, chunkCount)
+  }
+
+  // --- Job record methods ---
+
+  async upsertJob(input: UpsertJobInput): Promise<Job> {
+    return this.jobStore.upsert(input)
+  }
+
+  async getJob(id: string): Promise<Job | null> {
+    return this.jobStore.get(id)
+  }
+
+  async listJobs(filter: JobFilter, pagination?: PaginationOpts): Promise<Job[] | PaginatedResult<Job>> {
+    return this.jobStore.list(filter, pagination)
+  }
+
+  async updateJobStatus(id: string, patch: JobStatusPatch): Promise<void> {
+    return this.jobStore.updateStatus(id, patch)
+  }
+
+  async incrementJobProgress(id: string, processedDelta: number): Promise<void> {
+    return this.jobStore.incrementProgress(id, processedDelta)
   }
 
   // --- Search with document JOIN ---

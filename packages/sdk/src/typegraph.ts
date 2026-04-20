@@ -22,7 +22,7 @@ import type { PolicyStoreAdapter, CreatePolicyInput, UpdatePolicyInput, Policy, 
 import type { ConversationTurnResult, MemoryHealthReport } from './types/memory.js'
 import type { MemoryRecord } from './memory/types/memory.js'
 import type { typegraphLogger } from './types/logger.js'
-import type { Job, JobFilter } from './types/job.js'
+import type { Job, JobFilter, UpsertJobInput, JobStatusPatch } from './types/job.js'
 import type { PaginationOpts, PaginatedResult } from './types/pagination.js'
 import { PolicyEngine, PolicyViolationError } from './governance/policy-engine.js'
 import type { AISDKLLMInput } from './llm/ai-sdk-adapter.js'
@@ -157,6 +157,12 @@ export interface DocumentsApi {
 export interface JobsApi {
   get(id: string): Promise<Job | null>
   list(filter?: JobFilter): Promise<Job[]>
+  /** Create or replace a job row (caller-provided id). Writers use this from background workers. */
+  upsert(input: UpsertJobInput): Promise<Job>
+  /** Apply a partial status/result/error/progress patch. */
+  updateStatus(id: string, patch: JobStatusPatch): Promise<void>
+  /** Atomically increment the `progress_processed` counter. */
+  incrementProgress(id: string, processedDelta: number): Promise<void>
 }
 
 export interface GraphApi {
@@ -237,6 +243,13 @@ export interface typegraphInstance {
     update(id: string, input: UpdatePolicyInput, opts?: TelemetryOpts): Promise<Policy>
     delete(id: string, opts?: TelemetryOpts): Promise<void>
   }
+
+  /**
+   * Drain any buffered telemetry events to the event sink. Safe to call from
+   * the end of a request handler or before a short-lived script exits to
+   * avoid losing fire-and-forget events that are still in-buffer.
+   */
+  flush(): Promise<void>
 
   destroy(): Promise<void>
 }
@@ -441,14 +454,37 @@ class TypegraphImpl implements typegraphInstance {
   // ── Jobs ──
 
   jobs: JobsApi = {
-    get: async (_id: string): Promise<Job | null> => {
+    get: async (id: string): Promise<Job | null> => {
       this.assertConfigured()
-      // Jobs are primarily a cloud-mode feature. Self-hosted returns null.
-      return null
+      if (!this.adapter.getJob) return null
+      return this.adapter.getJob(id)
     },
-    list: async (_filter?: JobFilter): Promise<Job[]> => {
+    list: async (filter?: JobFilter): Promise<Job[]> => {
       this.assertConfigured()
-      return []
+      if (!this.adapter.listJobs) return []
+      const res = await this.adapter.listJobs(filter ?? {})
+      return Array.isArray(res) ? res : res.items
+    },
+    upsert: async (input: UpsertJobInput): Promise<Job> => {
+      this.assertConfigured()
+      if (!this.adapter.upsertJob) {
+        throw new ConfigError('Adapter does not support job persistence.')
+      }
+      return this.adapter.upsertJob(input)
+    },
+    updateStatus: async (id: string, patch: JobStatusPatch): Promise<void> => {
+      this.assertConfigured()
+      if (!this.adapter.updateJobStatus) {
+        throw new ConfigError('Adapter does not support job persistence.')
+      }
+      return this.adapter.updateJobStatus(id, patch)
+    },
+    incrementProgress: async (id: string, processedDelta: number): Promise<void> => {
+      this.assertConfigured()
+      if (!this.adapter.incrementJobProgress) {
+        throw new ConfigError('Adapter does not support job persistence.')
+      }
+      return this.adapter.incrementJobProgress(id, processedDelta)
     },
   }
 
@@ -973,7 +1009,22 @@ class TypegraphImpl implements typegraphInstance {
     },
   }
 
+  async flush(): Promise<void> {
+    const sink = this.config?.eventSink
+    if (sink?.flush) {
+      await sink.flush()
+    }
+  }
+
   async destroy(): Promise<void> {
+    const sink = this.config?.eventSink as
+      | (typegraphEventSink & { destroy?: () => Promise<void> })
+      | undefined
+    if (sink?.destroy) {
+      await sink.destroy()
+    } else if (sink?.flush) {
+      await sink.flush()
+    }
     await this.adapter?.destroy?.()
   }
 

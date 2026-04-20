@@ -1,10 +1,10 @@
-const DEFAULT_BASE_URL = 'https://api.typegraph.dev'
+const DEFAULT_BASE_URL = 'https://typegraph.ai/api'
 const DEFAULT_TIMEOUT = 30_000
 
 export interface CloudConfig {
   /** API key for the typegraph cloud service. */
   apiKey: string
-  /** Base URL for the cloud API. Defaults to 'https://api.typegraph.dev'. */
+  /** Base URL for the cloud API. Defaults to 'https://typegraph.ai/api'. */
   baseUrl?: string | undefined
   /** Default tenant ID for all operations. */
   tenantId?: string | undefined
@@ -63,7 +63,8 @@ export class HttpClient {
   }
 
   private buildUrl(path: string, params?: Record<string, string>): string {
-    const url = new URL(path, this.baseUrl + '/')
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`
+    const url = new URL(`${this.baseUrl}${normalizedPath}`)
     if (params) {
       for (const [k, v] of Object.entries(params)) {
         url.searchParams.set(k, v)

@@ -119,4 +119,6 @@ export type {
   JobType,
   JobStatus,
   JobFilter,
+  UpsertJobInput,
+  JobStatusPatch,
 } from './job.js'

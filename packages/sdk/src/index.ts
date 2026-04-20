@@ -82,6 +82,8 @@ export type {
   JobType,
   JobStatus,
   JobFilter,
+  UpsertJobInput,
+  JobStatusPatch,
 } from './types/index.js'
 /** @deprecated Use EmbeddingConfig instead. */
 export type { EmbeddingInput } from './types/index.js'

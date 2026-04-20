@@ -38,9 +38,28 @@ function makeEdge(
   }
 }
 
+interface MockMention {
+  entityId: string
+  documentId: string
+  chunkIndex: number
+  bucketId: string
+  mentionType: 'subject' | 'object' | 'co_occurrence'
+  confidence?: number | undefined
+}
+
+interface MockChunk {
+  entityId: string
+  documentId: string
+  chunkIndex: number
+  bucketId: string
+  content: string
+}
+
 function mockStore(
   entities: Map<string, SemanticEntity> = new Map(),
   edges: SemanticEdge[] = [],
+  mentions: MockMention[] = [],
+  chunkContent: Map<string, MockChunk> = new Map(),
 ) {
   const store: MemoryStoreAdapter = {
     initialize: vi.fn(),
@@ -88,6 +107,40 @@ function mockStore(
     }),
     findEdges: vi.fn().mockResolvedValue([]),
     invalidateEdge: vi.fn(),
+    upsertEntityChunkMentions: vi.fn().mockImplementation(async (rows: MockMention[]) => {
+      mentions.push(...rows)
+    }),
+    getChunksForEntitiesViaJunction: vi.fn().mockImplementation(
+      async (entityIds: string[], opts: { bucketIds?: string[]; limit?: number }) => {
+        const matched = mentions
+          .filter(m => entityIds.includes(m.entityId))
+          .filter(m => !opts.bucketIds || opts.bucketIds.includes(m.bucketId))
+          .map(m => {
+            const key = `${m.documentId}:${m.chunkIndex}`
+            const c = chunkContent.get(key)
+            if (!c) return null
+            return {
+              content: c.content,
+              bucketId: c.bucketId,
+              documentId: c.documentId,
+              chunkIndex: c.chunkIndex,
+              entityId: m.entityId,
+              confidence: m.confidence ?? null,
+            }
+          })
+          .filter((r): r is NonNullable<typeof r> => r !== null)
+        // Dedupe on (documentId, chunkIndex) — same as the real SQL DISTINCT ON
+        const seen = new Set<string>()
+        const out: typeof matched = []
+        for (const r of matched) {
+          const k = `${r.documentId}:${r.chunkIndex}`
+          if (seen.has(k)) continue
+          seen.add(k)
+          out.push(r)
+        }
+        return out.slice(0, opts.limit ?? 20)
+      }
+    ),
   }
   return store
 }
@@ -116,10 +169,11 @@ function mockEmbedding() {
 
 describe('createKnowledgeGraphBridge', () => {
   describe('addTriple', () => {
-    it('creates entities and an edge from a triple', async () => {
+    it('creates entities, edge, and entity↔chunk mentions from a triple', async () => {
       const entities = new Map<string, SemanticEntity>()
       const edges: SemanticEdge[] = []
-      const store = mockStore(entities, edges)
+      const mentions: MockMention[] = []
+      const store = mockStore(entities, edges, mentions)
       const bridge = createKnowledgeGraphBridge({
         memoryStore: store,
         embedding: mockEmbedding(),
@@ -131,7 +185,8 @@ describe('createKnowledgeGraphBridge', () => {
         predicate: 'prevents',
         object: 'osteoporosis',
         content: 'Vitamin D prevents osteoporosis in elderly patients.',
-        bucketId: 'doc-1',
+        bucketId: 'bucket-1',
+        documentId: 'doc-1',
         chunkIndex: 0,
       })
 
@@ -139,15 +194,21 @@ describe('createKnowledgeGraphBridge', () => {
       expect(store.upsertEntity).toHaveBeenCalledTimes(2)
       expect(entities.size).toBe(2)
 
-      // One edge created
+      // One edge created — content is NOT embedded in properties anymore
       expect(store.upsertEdge).toHaveBeenCalledTimes(1)
       expect(edges).toHaveLength(1)
 
       const edge = edges[0]!
       expect(edge.relation).toBe('PREVENTS')
-      expect(edge.properties.content).toBe('Vitamin D prevents osteoporosis in elderly patients.')
-      expect(edge.properties.bucketId).toBe('doc-1')
-      expect(edge.properties.chunkIndex).toBe(0)
+      expect(edge.properties.content).toBeUndefined()
+      expect(edge.properties.bucketId).toBeUndefined()
+      expect(edge.properties.chunkIndex).toBeUndefined()
+
+      // Two mentions written to the junction (subject + object for the same chunk)
+      expect(store.upsertEntityChunkMentions).toHaveBeenCalled()
+      expect(mentions).toHaveLength(2)
+      expect(mentions.every(m => m.documentId === 'doc-1' && m.chunkIndex === 0 && m.bucketId === 'bucket-1')).toBe(true)
+      expect(mentions.map(m => m.mentionType).sort()).toEqual(['object', 'subject'])
     })
 
     it('normalizes predicate to SCREAMING_SNAKE_CASE', async () => {
@@ -300,23 +361,45 @@ describe('createKnowledgeGraphBridge', () => {
   })
 
   describe('getChunksForEntities', () => {
-    it('extracts chunk content from edge properties', async () => {
-      const edges = [
-        makeEdge('e1', 'a', 'b', 'PREVENTS', {
-          content: 'Vitamin D prevents osteoporosis.',
-          bucketId: 'doc-1',
-        }),
-        makeEdge('e2', 'a', 'c', 'SUPPORTS', {
-          content: 'Vitamin D supports bone health.',
-          bucketId: 'doc-2',
-        }),
-      ]
-      const store = mockStore(new Map(), edges)
+    function setupJunctionBridge(
+      entityIds: string[],
+      chunksPerEntity: Array<{ entityId: string; documentId: string; chunkIndex: number; bucketId: string; content: string }>,
+    ) {
+      const edges: SemanticEdge[] = entityIds.flatMap((e, i) =>
+        i > 0 ? [makeEdge(`e${i}`, entityIds[0]!, e, 'REL')] : [],
+      )
+      const mentions: MockMention[] = chunksPerEntity.map(c => ({
+        entityId: c.entityId,
+        documentId: c.documentId,
+        chunkIndex: c.chunkIndex,
+        bucketId: c.bucketId,
+        mentionType: 'subject',
+      }))
+      const chunkContent = new Map<string, MockChunk>()
+      for (const c of chunksPerEntity) {
+        chunkContent.set(`${c.documentId}:${c.chunkIndex}`, {
+          entityId: c.entityId,
+          documentId: c.documentId,
+          chunkIndex: c.chunkIndex,
+          bucketId: c.bucketId,
+          content: c.content,
+        })
+      }
+      const store = mockStore(new Map(), edges, mentions, chunkContent)
       const bridge = createKnowledgeGraphBridge({
         memoryStore: store,
         embedding: mockEmbedding(),
         scope: testScope,
+        resolveChunksTable: () => 'typegraph_chunks_mock',
       })
+      return { bridge, store }
+    }
+
+    it('retrieves chunks for entities via the junction', async () => {
+      const { bridge } = setupJunctionBridge(['a', 'b', 'c'], [
+        { entityId: 'a', documentId: 'doc-1', chunkIndex: 0, bucketId: 'bucket-1', content: 'Vitamin D prevents osteoporosis.' },
+        { entityId: 'a', documentId: 'doc-2', chunkIndex: 0, bucketId: 'bucket-2', content: 'Vitamin D supports bone health.' },
+      ])
 
       const chunks = await bridge.getChunksForEntities!(['a'], 10)
 
@@ -326,60 +409,51 @@ describe('createKnowledgeGraphBridge', () => {
         bucketId: expect.any(String),
         score: expect.any(Number),
       }))
-      // Score is degree-penalized: edge weight / sqrt(entity degree)
       expect(chunks[0]!.score).toBeGreaterThan(0)
-      expect(chunks[0]!.score).toBeLessThanOrEqual(1.0)
     })
 
-    it('deduplicates chunks by content', async () => {
-      const edges = [
-        makeEdge('e1', 'a', 'b', 'REL1', { content: 'Same content.', bucketId: 'doc-1' }),
-        makeEdge('e2', 'a', 'c', 'REL2', { content: 'Same content.', bucketId: 'doc-1' }),
-      ]
-      const store = mockStore(new Map(), edges)
-      const bridge = createKnowledgeGraphBridge({
-        memoryStore: store,
-        embedding: mockEmbedding(),
-        scope: testScope,
-      })
+    it('deduplicates chunks by (documentId, chunkIndex)', async () => {
+      const { bridge } = setupJunctionBridge(['a', 'b', 'c'], [
+        { entityId: 'a', documentId: 'doc-1', chunkIndex: 0, bucketId: 'bucket-1', content: 'Same chunk.' },
+        { entityId: 'a', documentId: 'doc-1', chunkIndex: 0, bucketId: 'bucket-1', content: 'Same chunk.' },
+      ])
 
       const chunks = await bridge.getChunksForEntities!(['a'], 10)
       expect(chunks).toHaveLength(1)
     })
 
     it('respects limit parameter', async () => {
-      const edges = Array.from({ length: 10 }, (_, i) =>
-        makeEdge(`e${i}`, 'a', `t${i}`, 'REL', {
-          content: `Content ${i}`,
-          bucketId: `doc-${i}`,
-        }),
-      )
-      const store = mockStore(new Map(), edges)
-      const bridge = createKnowledgeGraphBridge({
-        memoryStore: store,
-        embedding: mockEmbedding(),
-        scope: testScope,
-      })
+      const chunksSeed = Array.from({ length: 10 }, (_, i) => ({
+        entityId: 'a', documentId: `doc-${i}`, chunkIndex: 0, bucketId: `bucket-${i}`, content: `Content ${i}`,
+      }))
+      const { bridge } = setupJunctionBridge(['a'], chunksSeed)
 
       const chunks = await bridge.getChunksForEntities!(['a'], 3)
       expect(chunks).toHaveLength(3)
     })
 
-    it('skips edges without chunk provenance', async () => {
-      const edges = [
-        makeEdge('e1', 'a', 'b', 'KNOWS', {}), // no content/bucketId
-        makeEdge('e2', 'a', 'c', 'WORKS_AT', { content: 'Has content.', bucketId: 'doc-1' }),
-      ]
-      const store = mockStore(new Map(), edges)
+    it('filters by bucketIds when provided', async () => {
+      const { bridge } = setupJunctionBridge(['a'], [
+        { entityId: 'a', documentId: 'doc-1', chunkIndex: 0, bucketId: 'bucket-1', content: 'In bucket 1.' },
+        { entityId: 'a', documentId: 'doc-2', chunkIndex: 0, bucketId: 'bucket-2', content: 'In bucket 2.' },
+      ])
+
+      const chunks = await bridge.getChunksForEntities!(['a'], 10, undefined, ['bucket-1'])
+      expect(chunks).toHaveLength(1)
+      expect(chunks[0]!.bucketId).toBe('bucket-1')
+    })
+
+    it('returns empty when resolveChunksTable is not configured', async () => {
+      const store = mockStore()
       const bridge = createKnowledgeGraphBridge({
         memoryStore: store,
         embedding: mockEmbedding(),
         scope: testScope,
+        // no resolveChunksTable
       })
 
       const chunks = await bridge.getChunksForEntities!(['a'], 10)
-      expect(chunks).toHaveLength(1)
-      expect(chunks[0]!.content).toBe('Has content.')
+      expect(chunks).toEqual([])
     })
   })
 })

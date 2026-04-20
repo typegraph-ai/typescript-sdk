@@ -28,3 +28,23 @@ export interface JobFilter {
   type?: JobType | undefined
   identity?: typegraphIdentity | undefined
 }
+
+/** Input for creating or replacing a job row. `id` is caller-provided (e.g. an Inngest run id). */
+export interface UpsertJobInput {
+  id: string
+  type: JobType
+  status?: JobStatus | undefined
+  bucketId?: string | undefined
+  progressTotal?: number | undefined
+  progressProcessed?: number | undefined
+}
+
+/** Partial update applied to an existing job row. `completedAt` is auto-set for terminal statuses when omitted. */
+export interface JobStatusPatch {
+  status?: JobStatus | undefined
+  result?: Job['result'] | undefined
+  error?: string | undefined
+  progressProcessed?: number | undefined
+  progressTotal?: number | undefined
+  completedAt?: Date | undefined
+}

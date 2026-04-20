@@ -16,6 +16,13 @@ export interface CreateKnowledgeGraphBridgeConfig {
   embedding: EmbeddingConfig
   /** Default scope for addTriple (which has no per-call identity). */
   scope?: typegraphIdentity
+  /**
+   * Resolves an embedding model key to the Postgres chunks table that holds
+   * its embeddings. Required for `getChunksForEntities` — the bridge JOINs
+   * the entity↔chunk junction to the per-model chunks table to retrieve
+   * source text. Typically wired to `vectorAdapter.getTable(model)`.
+   */
+  resolveChunksTable?: (model: string) => string | Promise<string>
 }
 
 // ── Knowledge Graph Bridge Factory ──
@@ -84,25 +91,54 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
 
     const weight = triple.confidence ?? 1.0
 
+    // Edges are deduplicated on (source, target, relation) at storage; chunk text
+    // and provenance move to the entity↔chunk junction. Keep triple metadata in
+    // properties only if the caller supplied it (not auto-generated content).
     const edge: SemanticEdge = {
       id: generateId('edge'),
       sourceEntityId: subjectResult.entity.id,
       targetEntityId: objectResult.entity.id,
       relation,
       weight,
-      properties: {
-        content: triple.content,
-        bucketId: triple.bucketId,
-        ...(triple.chunkIndex !== undefined ? { chunkIndex: triple.chunkIndex } : {}),
-        ...(triple.documentId ? { documentId: triple.documentId } : {}),
-        ...(triple.metadata ? { metadata: triple.metadata } : {}),
-      },
+      properties: triple.metadata ? { metadata: triple.metadata } : {},
       scope,
       temporal: createTemporal(),
       evidence: [],
     }
 
     await graph.addEdge(edge)
+
+    // Record entity↔chunk mentions in the junction (provenance).
+    // Skipped if documentId/chunkIndex aren't provided — triple lacks a source anchor.
+    const mentions: Array<{
+      entityId: string
+      documentId: string
+      chunkIndex: number
+      bucketId: string
+      mentionType: 'subject' | 'object' | 'co_occurrence'
+      confidence?: number | undefined
+    }> = []
+    if (triple.documentId && triple.chunkIndex !== undefined) {
+      mentions.push({
+        entityId: subjectResult.entity.id,
+        documentId: triple.documentId,
+        chunkIndex: triple.chunkIndex,
+        bucketId: triple.bucketId,
+        mentionType: 'subject',
+        confidence: triple.confidence,
+      })
+      mentions.push({
+        entityId: objectResult.entity.id,
+        documentId: triple.documentId,
+        chunkIndex: triple.chunkIndex,
+        bucketId: triple.bucketId,
+        mentionType: 'object',
+        confidence: triple.confidence,
+      })
+      if (memoryStore.upsertEntityChunkMentions) {
+        await memoryStore.upsertEntityChunkMentions(mentions)
+      }
+    }
 
     const pairKey = [subjectResult.entity.id, objectResult.entity.id].sort().join(':')
     directEdgePairs.add(pairKey)
@@ -131,11 +167,21 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
               targetEntityId: linkTo,
               relation: 'CO_OCCURS',
               weight: 0.3,
-              properties: { bucketId: triple.bucketId },
+              properties: {},
               scope,
               temporal: createTemporal(),
               evidence: [],
             })
+            // Record the co-occurrence mention on the newly-linked entity
+            if (memoryStore.upsertEntityChunkMentions && triple.documentId && triple.chunkIndex !== undefined) {
+              await memoryStore.upsertEntityChunkMentions([{
+                entityId: newId,
+                documentId: triple.documentId,
+                chunkIndex: triple.chunkIndex,
+                bucketId: triple.bucketId,
+                mentionType: 'co_occurrence',
+              }])
+            }
           }
         }
       }
@@ -218,45 +264,53 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     entityIds: string[],
     limit: number = 20,
     pprScores?: Map<string, number>,
+    bucketIds?: string[],
   ): Promise<Array<{ content: string; bucketId: string; score: number; documentId?: string; chunkIndex?: number; metadata?: Record<string, unknown> }>> {
-    const seen = new Set<string>()
-    const chunks: Array<{ content: string; bucketId: string; score: number; documentId?: string; chunkIndex?: number; metadata?: Record<string, unknown> }> = []
+    if (!memoryStore.getChunksForEntitiesViaJunction || !config.resolveChunksTable) {
+      return []
+    }
 
+    // Degree from edges (for PPR/degree normalization — same formula as before).
     const allEdges = await graph.getEdgesBatch(entityIds, 'both')
-
     const entityDegree = new Map<string, number>()
     for (const edge of allEdges) {
       entityDegree.set(edge.sourceEntityId, (entityDegree.get(edge.sourceEntityId) ?? 0) + 1)
       entityDegree.set(edge.targetEntityId, (entityDegree.get(edge.targetEntityId) ?? 0) + 1)
     }
 
-    const entityIdSet = new Set(entityIds)
-    for (const edge of allEdges) {
-      const content = edge.properties.content as string | undefined
-      const bucketId = edge.properties.bucketId as string | undefined
+    const chunksTable = await config.resolveChunksTable(embedding.model)
+    const opts: {
+      chunksTable: string
+      bucketIds?: string[] | undefined
+      limit?: number | undefined
+    } = { chunksTable, limit: limit * 2 }
+    if (bucketIds && bucketIds.length > 0) opts.bucketIds = bucketIds
 
-      if (content && bucketId) {
-        const key = `${bucketId}:${content.slice(0, 100)}`
-        if (!seen.has(key)) {
-          seen.add(key)
-          const linkedEntityId = entityIdSet.has(edge.sourceEntityId) ? edge.sourceEntityId : edge.targetEntityId
-          const rawPPR = pprScores?.get(linkedEntityId) ?? edge.weight
-          const degree = entityDegree.get(linkedEntityId) ?? 1
-          const score = rawPPR / Math.sqrt(degree)
-          const edgeDocId = edge.properties.documentId as string | undefined
-          const chunkIdx = edge.properties.chunkIndex as number | undefined
-          const edgeMeta = edge.properties.metadata as Record<string, unknown> | undefined
-          const chunk: { content: string; bucketId: string; score: number; documentId?: string; chunkIndex?: number; metadata?: Record<string, unknown> } = { content, bucketId, score }
-          if (edgeDocId) chunk.documentId = edgeDocId
-          if (chunkIdx !== undefined) chunk.chunkIndex = chunkIdx
-          if (edgeMeta) chunk.metadata = edgeMeta
-          chunks.push(chunk)
-        }
+    const rows = await memoryStore.getChunksForEntitiesViaJunction(entityIds, opts)
+
+    const scored = rows.map(row => {
+      const rawPPR = pprScores?.get(row.entityId) ?? 1.0
+      const degree = entityDegree.get(row.entityId) ?? 1
+      const score = rawPPR / Math.sqrt(degree)
+      const chunk: {
+        content: string
+        bucketId: string
+        score: number
+        documentId?: string
+        chunkIndex?: number
+        metadata?: Record<string, unknown>
+      } = {
+        content: row.content,
+        bucketId: row.bucketId,
+        score,
+        documentId: row.documentId,
+        chunkIndex: row.chunkIndex,
       }
-    }
+      return chunk
+    })
 
-    chunks.sort((a, b) => b.score - a.score)
-    return chunks.slice(0, limit)
+    scored.sort((a, b) => b.score - a.score)
+    return scored.slice(0, limit)
   }
 
   // ── Graph Exploration ──
@@ -287,8 +341,6 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
         targetEntityName: nameMap.get(e.targetEntityId) ?? e.targetEntityId,
         relation: e.relation,
         weight: e.weight,
-        bucketId: e.properties.bucketId as string | undefined,
-        documentId: e.properties.documentId as string | undefined,
         properties: e.properties,
       }))
 
@@ -335,8 +387,6 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       targetEntityName: nameMap.get(e.targetEntityId) ?? e.targetEntityId,
       relation: e.relation,
       weight: e.weight,
-      bucketId: e.properties.bucketId as string | undefined,
-      documentId: e.properties.documentId as string | undefined,
       properties: e.properties,
     }))
   }
@@ -414,8 +464,6 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
         targetEntityName: nameMap.get(e.targetEntityId) ?? e.targetEntityId,
         relation: e.relation,
         weight: e.weight,
-        bucketId: e.properties.bucketId as string | undefined,
-        documentId: e.properties.documentId as string | undefined,
         properties: e.properties,
         thickness: Math.max(1, Math.round((e.weight / maxWeight) * 5)),
       })),

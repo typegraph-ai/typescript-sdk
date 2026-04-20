@@ -97,8 +97,8 @@ export interface IndexProgressEvent {
 }
 
 export interface IndexResult {
-  /** Job ID for tracking async operations (present in cloud mode). */
-  jobId?: string | undefined
+  /** Job run ID for tracking async operations (present in cloud mode). */
+  jobRunId?: string | undefined
   bucketId: string
   tenantId?: string | undefined
   mode: 'upsert' | 'replace'

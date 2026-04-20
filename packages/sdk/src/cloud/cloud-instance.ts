@@ -91,6 +91,15 @@ export function createCloudInstance(config: CloudConfig): typegraphCloudInstance
     async list(filter?: JobFilter): Promise<Job[]> {
       return client.post<Job[]>('/v1/jobs/list', filter)
     },
+    async upsert(): Promise<Job> {
+      throw new Error('jobs.upsert() is a server-side primitive and is not available in cloud mode.')
+    },
+    async updateStatus(): Promise<void> {
+      throw new Error('jobs.updateStatus() is a server-side primitive and is not available in cloud mode.')
+    },
+    async incrementProgress(): Promise<void> {
+      throw new Error('jobs.incrementProgress() is a server-side primitive and is not available in cloud mode.')
+    },
   }
 
   const graph: GraphApi = {
@@ -230,6 +239,10 @@ export function createCloudInstance(config: CloudConfig): typegraphCloudInstance
       conversationId?: string,
     ): Promise<ConversationTurnResult> {
       return client.post<ConversationTurnResult>('/v1/memory/conversation', { messages, identity, conversationId })
+    },
+
+    async flush(): Promise<void> {
+      // No-op in cloud mode — the cloud server is responsible for its own telemetry flushing.
     },
 
     async destroy(): Promise<void> {

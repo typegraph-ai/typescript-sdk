@@ -7,6 +7,7 @@
  */
 
 import type { MemoryStoreAdapter, MemoryFilter, MemorySearchOpts, MemoryRecord, SemanticEntity, SemanticEdge, typegraphIdentity } from '@typegraph-ai/sdk'
+import { generateId } from '@typegraph-ai/sdk'
 
 type SqlExecutor = (
   query: string,
@@ -20,6 +21,7 @@ export interface PgMemoryAdapterConfig {
   memoriesTable?: string | undefined
   entitiesTable?: string | undefined
   edgesTable?: string | undefined
+  chunkMentionsTable?: string | undefined
   /** Embedding vector dimensions (e.g. 1536 for text-embedding-3-small). Used for HNSW index creation. */
   embeddingDimensions?: number | undefined
 }
@@ -174,7 +176,8 @@ const EDGES_DDL = (t: string) => {
     valid_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     invalid_at       TIMESTAMPTZ,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT ${safeIdx(i, 'rel_uniq')} UNIQUE (source_entity_id, target_entity_id, relation)
   );
 
   CREATE INDEX IF NOT EXISTS ${idx('source_idx')} ON ${t} (source_entity_id);
@@ -192,6 +195,30 @@ const EDGES_DDL = (t: string) => {
 `
 }
 
+const CHUNK_MENTIONS_DDL = (t: string) => {
+  const i = idxPrefix(t)
+  const idx = (suffix: string) => safeIdx(i, suffix)
+  return `
+  CREATE TABLE IF NOT EXISTS ${t} (
+    id              TEXT PRIMARY KEY,
+    entity_id       TEXT NOT NULL,
+    document_id     TEXT NOT NULL,
+    chunk_index     INTEGER NOT NULL,
+    bucket_id       TEXT NOT NULL,
+    mention_type    TEXT NOT NULL
+                    CHECK (mention_type IN ('subject', 'object', 'co_occurrence')),
+    confidence      REAL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT ${safeIdx(i, 'mention_uniq')}
+      UNIQUE (entity_id, document_id, chunk_index, mention_type)
+  );
+
+  CREATE INDEX IF NOT EXISTS ${idx('entity_idx')} ON ${t} (entity_id);
+  CREATE INDEX IF NOT EXISTS ${idx('chunk_idx')} ON ${t} (document_id, chunk_index);
+  CREATE INDEX IF NOT EXISTS ${idx('bucket_entity_idx')} ON ${t} (bucket_id, entity_id);
+`
+}
+
 // ── Adapter Implementation ──
 
 /** Strip schema prefix from a qualified table name for use in ON CONFLICT column refs. */
@@ -202,6 +229,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
   private memoriesTable: string
   private entitiesTable: string
   private edgesTable: string
+  private chunkMentionsTable: string
   private schema: string | undefined
   private hnswEntityIndexCreated = false
   private hnswMemoryIndexCreated = false
@@ -214,6 +242,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     this.memoriesTable = config.memoriesTable ?? `${prefix}typegraph_memories`
     this.entitiesTable = config.entitiesTable ?? `${prefix}typegraph_semantic_entities`
     this.edgesTable = config.edgesTable ?? `${prefix}typegraph_semantic_edges`
+    this.chunkMentionsTable = config.chunkMentionsTable ?? `${prefix}typegraph_entity_chunk_mentions`
     this.embeddingDimensions = config.embeddingDimensions ?? 1536
   }
 
@@ -230,6 +259,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
 
       ENTITIES_DDL(this.entitiesTable, this.embeddingDimensions),
       EDGES_DDL(this.edgesTable),
+      CHUNK_MENTIONS_DDL(this.chunkMentionsTable),
     ]
     for (const ddl of allDdl) {
       const statements = ddl
@@ -246,6 +276,29 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     // In that case, created lazily after first entity/memory with embedding is inserted.
     await this.ensureHnswIndex('entity')
     await this.ensureHnswIndex('memory')
+  }
+
+  /**
+   * SQL executor with auto-recovery on missing tables. On PG error 42P01
+   * (undefined_table), calls initialize() to create the missing table and
+   * retries the query once. Adds one try/catch on the happy path — no
+   * existence checks — so hot paths remain unaffected.
+   */
+  private async sqlWithRetry(
+    query: string,
+    params?: unknown[]
+  ): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.sql(query, params)
+    } catch (err) {
+      const code = (err as { code?: string })?.code
+      const msg = err instanceof Error ? err.message : String(err)
+      if (code === '42P01' || /relation .* does not exist/i.test(msg)) {
+        await this.initialize()
+        return await this.sql(query, params)
+      }
+      throw err
+    }
   }
 
   private async ensureHnswIndex(target: 'entity' | 'memory'): Promise<void> {
@@ -636,22 +689,20 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
   // ── Edge Storage ──
 
   async upsertEdge(edge: SemanticEdge): Promise<SemanticEdge> {
-    const rows = await this.sql(
+    // Edges are now deduplicated on (source_entity_id, target_entity_id, relation).
+    // On conflict, weight accumulates (sum of confidences across extractions) and
+    // valid_at takes the earliest. Everything else stays from the first writer
+    // so provenance (scope/identity/visibility) doesn't churn across extractions.
+    const rows = await this.sqlWithRetry(
       `INSERT INTO ${this.edgesTable}
         (id, source_entity_id, target_entity_id, relation, weight, properties,
          scope, tenant_id, group_id, user_id, agent_id, conversation_id, visibility,
          evidence, valid_at, invalid_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         source_entity_id = EXCLUDED.source_entity_id,
-         target_entity_id = EXCLUDED.target_entity_id,
-         relation = EXCLUDED.relation, weight = EXCLUDED.weight,
-         properties = EXCLUDED.properties, scope = EXCLUDED.scope,
-         tenant_id = EXCLUDED.tenant_id, group_id = EXCLUDED.group_id,
-         user_id = EXCLUDED.user_id, agent_id = EXCLUDED.agent_id,
-         conversation_id = EXCLUDED.conversation_id, visibility = EXCLUDED.visibility,
-         evidence = EXCLUDED.evidence, valid_at = EXCLUDED.valid_at,
-         invalid_at = EXCLUDED.invalid_at, updated_at = NOW()
+       ON CONFLICT (source_entity_id, target_entity_id, relation) DO UPDATE SET
+         weight = ${unqualified(this.edgesTable)}.weight + EXCLUDED.weight,
+         valid_at = LEAST(${unqualified(this.edgesTable)}.valid_at, EXCLUDED.valid_at),
+         updated_at = NOW()
        RETURNING *`,
       [
         edge.id, edge.sourceEntityId, edge.targetEntityId,
@@ -681,7 +732,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     } else {
       query = `SELECT * FROM ${this.edgesTable} WHERE (source_entity_id = $1 OR target_entity_id = $1) AND invalid_at IS NULL`
     }
-    const rows = await this.sql(query, params)
+    const rows = await this.sqlWithRetry(query, params)
     return rows.map(mapRowToEdge)
   }
 
@@ -699,7 +750,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
                UNION ALL
                SELECT * FROM ${this.edgesTable} WHERE target_entity_id = ANY($1::text[]) AND invalid_at IS NULL`
     }
-    const rows = await this.sql(query, [entityIds])
+    const rows = await this.sqlWithRetry(query, [entityIds])
     return rows.map(mapRowToEdge)
   }
 
@@ -724,6 +775,102 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     )
   }
 
+  // ── Entity ↔ Chunk Junction ──
+
+  async upsertEntityChunkMentions(
+    mentions: Array<{
+      entityId: string
+      documentId: string
+      chunkIndex: number
+      bucketId: string
+      mentionType: 'subject' | 'object' | 'co_occurrence'
+      confidence?: number
+    }>
+  ): Promise<void> {
+    if (mentions.length === 0) return
+
+    // Build a single multi-row INSERT. ON CONFLICT updates confidence if provided
+    // (last writer wins on confidence — rare: only if the same triple re-extracts
+    // with a different score). Idempotent on (entity_id, document_id, chunk_index, mention_type).
+    const values: string[] = []
+    const params: unknown[] = []
+    for (const m of mentions) {
+      const base = params.length
+      values.push(`($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7})`)
+      params.push(
+        generateId('mention'),
+        m.entityId,
+        m.documentId,
+        m.chunkIndex,
+        m.bucketId,
+        m.mentionType,
+        m.confidence ?? null,
+      )
+    }
+
+    await this.sqlWithRetry(
+      `INSERT INTO ${this.chunkMentionsTable}
+         (id, entity_id, document_id, chunk_index, bucket_id, mention_type, confidence)
+       VALUES ${values.join(',')}
+       ON CONFLICT (entity_id, document_id, chunk_index, mention_type) DO UPDATE SET
+         confidence = COALESCE(EXCLUDED.confidence, ${unqualified(this.chunkMentionsTable)}.confidence)`,
+      params
+    )
+  }
+
+  async getChunksForEntitiesViaJunction(
+    entityIds: string[],
+    opts: {
+      chunksTable: string
+      bucketIds?: string[] | undefined
+      limit?: number | undefined
+    }
+  ): Promise<Array<{
+    content: string
+    bucketId: string
+    documentId: string
+    chunkIndex: number
+    entityId: string
+    confidence: number | null
+  }>> {
+    if (entityIds.length === 0) return []
+
+    const params: unknown[] = [entityIds]
+    let bucketClause = ''
+    if (opts.bucketIds && opts.bucketIds.length > 0) {
+      params.push(opts.bucketIds)
+      bucketClause = `AND m.bucket_id = ANY($${params.length}::text[])`
+    }
+    params.push(opts.limit ?? 20)
+    const limitParam = `$${params.length}`
+
+    // DISTINCT ON collapses duplicate (document, chunk) rows when one chunk
+    // mentions multiple of the requested entities — we keep one per chunk and
+    // let the caller re-associate to entities via the returned entity_id.
+    const rows = await this.sqlWithRetry(
+      `SELECT DISTINCT ON (c.document_id, c.chunk_index)
+              c.content, c.bucket_id, c.document_id, c.chunk_index,
+              m.entity_id, m.confidence
+         FROM ${this.chunkMentionsTable} m
+         JOIN ${opts.chunksTable} c
+           ON m.document_id = c.document_id AND m.chunk_index = c.chunk_index
+        WHERE m.entity_id = ANY($1::text[])
+          ${bucketClause}
+        ORDER BY c.document_id, c.chunk_index
+        LIMIT ${limitParam}`,
+      params
+    )
+
+    return rows.map(r => ({
+      content: r.content as string,
+      bucketId: r.bucket_id as string,
+      documentId: r.document_id as string,
+      chunkIndex: r.chunk_index as number,
+      entityId: r.entity_id as string,
+      confidence: (r.confidence as number | null) ?? null,
+    }))
+  }
+
   // ── Counts ──
 
   async countMemories(filter?: MemoryFilter): Promise<number> {
@@ -744,14 +891,14 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
   }
 
   async countEdges(): Promise<number> {
-    const rows = await this.sql(
+    const rows = await this.sqlWithRetry(
       `SELECT COUNT(*)::integer AS n FROM ${this.edgesTable} WHERE invalid_at IS NULL`
     )
     return (rows[0]?.['n'] as number) ?? 0
   }
 
   async getRelationTypes(): Promise<Array<{ relation: string; count: number }>> {
-    const rows = await this.sql(
+    const rows = await this.sqlWithRetry(
       `SELECT relation, COUNT(*)::integer AS count FROM ${this.edgesTable}
        WHERE invalid_at IS NULL
        GROUP BY relation ORDER BY count DESC`
@@ -760,7 +907,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
   }
 
   async getEntityTypes(): Promise<Array<{ entityType: string; count: number }>> {
-    const rows = await this.sql(
+    const rows = await this.sqlWithRetry(
       `SELECT entity_type, COUNT(*)::integer AS count FROM ${this.entitiesTable}
        WHERE invalid_at IS NULL
        GROUP BY entity_type ORDER BY count DESC`
@@ -769,7 +916,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
   }
 
   async getDegreeDistribution(): Promise<Array<{ degree: number; count: number }>> {
-    const rows = await this.sql(
+    const rows = await this.sqlWithRetry(
       `SELECT degree, COUNT(*)::integer AS count FROM (
          SELECT source_entity_id AS eid, COUNT(*)::integer AS degree FROM ${this.edgesTable} WHERE invalid_at IS NULL GROUP BY source_entity_id
          UNION ALL

@@ -333,6 +333,41 @@ export const POLICIES_TABLE_SQL = (policiesTable: string) => {
 }
 
 /**
+ * DDL for the jobs table - tracks async operations dispatched to background workers.
+ * Row id is caller-provided (e.g. the Inngest run id) so clients can poll by the same id
+ * the dispatcher returned.
+ */
+export const JOBS_TABLE_SQL = (jobsTable: string) => {
+  const idx = (suffix: string) => safeIdx(jobsTable, suffix)
+  return `
+  CREATE TABLE IF NOT EXISTS ${jobsTable} (
+    id                  TEXT PRIMARY KEY,
+    type                TEXT NOT NULL
+                        CHECK (type IN ('ingest', 'remember', 'conversation_turn', 'correct', 'forget')),
+    status              TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'processing', 'complete', 'failed')),
+    bucket_id           TEXT,
+    progress_processed  INTEGER NOT NULL DEFAULT 0,
+    progress_total      INTEGER,
+    result              JSONB,
+    error               TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at        TIMESTAMPTZ
+  );
+
+  CREATE INDEX IF NOT EXISTS ${idx('status_created_idx')}
+    ON ${jobsTable} (status, created_at DESC);
+
+  CREATE INDEX IF NOT EXISTS ${idx('bucket_idx')}
+    ON ${jobsTable} (bucket_id);
+
+  CREATE INDEX IF NOT EXISTS ${idx('type_status_idx')}
+    ON ${jobsTable} (type, status);
+`
+}
+
+/**
  * Sanitize a model identifier into a valid SQL table name suffix.
  * e.g., "openai/text-embedding-3-small" → "openai_text_embedding_3_small"
  */

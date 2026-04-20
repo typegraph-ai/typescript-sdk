@@ -97,6 +97,41 @@ export interface MemoryStoreAdapter {
   findEdges?(sourceId: string, targetId: string, relation?: string): Promise<SemanticEdge[]>
   invalidateEdge?(id: string, invalidAt?: Date): Promise<void>
 
+  // ── Entity ↔ Chunk Junction (optional - needed for graph-augmented retrieval) ──
+  // Records which chunks mentioned which entities during extraction. Enables
+  // entity → chunk lookup without storing chunk text in edge properties.
+
+  /** Record one or more (entity, chunk, bucket) mentions. Idempotent on
+   *  (entityId, documentId, chunkIndex, mentionType). */
+  upsertEntityChunkMentions?(
+    mentions: Array<{
+      entityId: string
+      documentId: string
+      chunkIndex: number
+      bucketId: string
+      mentionType: 'subject' | 'object' | 'co_occurrence'
+      confidence?: number | undefined
+    }>
+  ): Promise<void>
+
+  /** Get chunks that mention any of the given entities, optionally bucket-scoped.
+   *  Requires a caller-provided chunks table (resolved per embedding model). */
+  getChunksForEntitiesViaJunction?(
+    entityIds: string[],
+    opts: {
+      chunksTable: string
+      bucketIds?: string[] | undefined
+      limit?: number | undefined
+    }
+  ): Promise<Array<{
+    content: string
+    bucketId: string
+    documentId: string
+    chunkIndex: number
+    entityId: string
+    confidence: number | null
+  }>>
+
   // ── Counts & Aggregates (optional - used for health checks and graph exploration) ──
 
   /** Count memory records matching an optional filter. */

@@ -2,6 +2,7 @@ import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from './document.js'
 import type { typegraphDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from './typegraph-document.js'
 import type { Bucket, BucketListFilter } from './bucket.js'
 import type { PaginationOpts, PaginatedResult } from './pagination.js'
+import type { Job, JobFilter, UpsertJobInput, JobStatusPatch } from './job.js'
 
 export interface SearchOpts {
   count: number
@@ -83,6 +84,19 @@ export interface VectorStoreAdapter {
   updateDocumentStatus?(id: string, status: DocumentStatus, chunkCount?: number): Promise<void>
   /** Update document metadata fields (title, url, visibility, etc.). Returns updated document. */
   updateDocument?(id: string, input: Partial<Pick<typegraphDocument, 'title' | 'url' | 'visibility' | 'metadata'>>): Promise<typegraphDocument>
+
+  // --- Job record methods (optional - adapters that persist job state implement these) ---
+
+  /** Create or replace a job row. Callers provide the id (e.g. an Inngest run id). */
+  upsertJob?(input: UpsertJobInput): Promise<Job>
+  /** Fetch a job by id. */
+  getJob?(id: string): Promise<Job | null>
+  /** List jobs matching a filter, ordered by created_at DESC. */
+  listJobs?(filter: JobFilter, pagination?: PaginationOpts): Promise<Job[] | PaginatedResult<Job>>
+  /** Apply a partial status/result/error/progress patch to a job. */
+  updateJobStatus?(id: string, patch: JobStatusPatch): Promise<void>
+  /** Atomically add to a job's progress_processed counter. Safe under concurrent workers. */
+  incrementJobProgress?(id: string, processedDelta: number): Promise<void>
 
   /** Hybrid search with document-level filtering via JOIN to typegraph_documents. */
   searchWithDocuments?(
