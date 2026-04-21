@@ -269,7 +269,8 @@ CRITICAL — Aliases vs. Relationships:
   {"name": "Edmund Ashworth", "type": "person", "description": "President of The Geographical Society, married to Margaret", "aliases": ["Edmund"]},
   {"name": "The Geographical Society", "type": "organization", "description": "Academic society led by Edmund Ashworth", "aliases": ["the Society"]},
   {"name": "Cairo", "type": "location", "description": "City where Margaret met Helena Voss", "aliases": []},
-  {"name": "Oxford", "type": "location", "description": "City where Margaret lived and Helena once taught", "aliases": []},
+  {"name": "Oxford", "type": "location", "description": "City where Margaret had lived", "aliases": []},
+  {"name": "Oxford", "type": "organization", "description": "Academic organization where Helena had once taught", "aliases": []},
   {"name": "Helena Voss", "type": "person", "description": "Renowned cartographer and Margaret's intellectual ally", "aliases": ["Helena"]},
   {"name": "Principles of Navigation", "type": "work_of_art", "description": "Book written by Margaret Ashworth", "aliases": []}]
 
@@ -343,7 +344,16 @@ For each relationship, provide:
 
   <EXAMPLE_ENTITIES_FOUND_IN_THE_EXAMPLE_TEXT_STRING>
 
-    Entities: [{"name": "Margaret Ashworth", "type": "person"}, {"name": "Edmund Ashworth", "type": "person"}, {"name": "The Geographical Society", "type": "organization"}, {"name": "Cairo, Egypt", "type": "location"}, {"name": "Oxford, United Kingdom", "type": "location"}, {"name": "Helena Voss", "type": "person"}, {"name": "Principles of Navigation", "type": "work_of_art"}]
+    Entities found in the example text string:
+    
+    [{"name": "Margaret Ashworth", "type": "person", "description": "Author of Principles of Navigation, influenced by Helena Voss", "aliases": []},
+    {"name": "Edmund Ashworth", "type": "person", "description": "President of The Geographical Society, married to Margaret", "aliases": ["Edmund"]},
+    {"name": "The Geographical Society", "type": "organization", "description": "Academic society led by Edmund Ashworth", "aliases": ["the Society"]},
+    {"name": "Cairo", "type": "location", "description": "City where Margaret met Helena Voss", "aliases": []},
+    {"name": "Oxford", "type": "location", "description": "City where Margaret had lived", "aliases": []},
+    {"name": "Oxford", "type": "organization", "description": "Academic organization where Helena had once taught", "aliases": []},
+    {"name": "Helena Voss", "type": "person", "description": "Renowned cartographer and Margaret's intellectual ally", "aliases": ["Helena"]},
+    {"name": "Principles of Navigation", "type": "work_of_art", "description": "Book written by Margaret Ashworth", "aliases": []}]
 
   </EXAMPLE_ENTITIES_FOUND_IN_THE_EXAMPLE_TEXT_STRING>
 
