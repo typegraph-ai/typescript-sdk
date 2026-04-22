@@ -1,0 +1,144 @@
+import { describe, it, expect, vi } from 'vitest'
+import { TripleExtractor } from '../index-engine/triple-extractor.js'
+import type { KnowledgeGraphBridge, LLMProvider } from '../types/index.js'
+
+function mockLLM(output: unknown): LLMProvider {
+  return {
+    generateText: vi.fn().mockResolvedValue(''),
+    generateJSON: vi.fn().mockResolvedValue(output),
+  }
+}
+
+describe('TripleExtractor', () => {
+  it('preserves complete person surface forms as aliases and entity mentions', async () => {
+    const graph: KnowledgeGraphBridge = {
+      addEntityMentions: vi.fn().mockResolvedValue(undefined),
+      addTriple: vi.fn().mockResolvedValue(undefined),
+    }
+    const extractor = new TripleExtractor({
+      llm: mockLLM({
+        entities: [
+          {
+            name: 'Cæsar Simon',
+            type: 'person',
+            description: 'The true name of the character referred to as Conway.',
+            aliases: ['Conway', 'Cousin Cæsar'],
+          },
+          {
+            name: 'Steve Sharp',
+            type: 'person',
+            description: 'Partner of Cole Conway.',
+            aliases: ['Sharp'],
+          },
+        ],
+        relationships: [
+          { subject: 'Cæsar Simon', predicate: 'collaborated_with', object: 'Steve Sharp', confidence: 0.9 },
+        ],
+      }),
+      graph,
+    })
+
+    await extractor.extractFromChunk(
+      'At twenty years of age Cousin Cæsar was in Paducah, Kentucky, calling himself Cole Conway, in company with one Steve Sharp.',
+      'bucket-1',
+      0,
+      'doc-1',
+    )
+
+    expect(graph.addEntityMentions).toHaveBeenCalled()
+    const mentions = vi.mocked(graph.addEntityMentions).mock.calls[0]![0]
+    expect(mentions[0]).toEqual(expect.objectContaining({
+      name: 'Cæsar Simon',
+      aliases: expect.arrayContaining(['Cole Conway', 'Conway', 'Cousin Cæsar']),
+    }))
+    expect(graph.addTriple).toHaveBeenCalledWith(expect.objectContaining({
+      subject: 'Cæsar Simon',
+      subjectAliases: expect.arrayContaining(['Cole Conway']),
+      object: 'Steve Sharp',
+    }))
+  })
+
+  it('filters sentence-fragment person aliases and promotes full location spans', async () => {
+    const graph: KnowledgeGraphBridge = {
+      addEntityMentions: vi.fn().mockResolvedValue(undefined),
+      addTriple: vi.fn().mockResolvedValue(undefined),
+    }
+    const extractor = new TripleExtractor({
+      llm: mockLLM({
+        entities: [
+          {
+            name: 'Cousin Cæsar',
+            type: 'person',
+            description: 'A man who uses the pseudonym Cole Conway.',
+            aliases: [
+              'Cousin Caeser',
+              'Cæsar',
+              'Caeser',
+              'Cole Conway',
+              'Conway',
+              'When Cousin Cæsar',
+              'And Cousin Cæsar',
+              'Iuka. Cousin Cæsar',
+              'Chicago. Young Simon',
+              'West Indies.--Young Simon',
+              'Cæsar. Cæsar Simon',
+            ],
+          },
+          {
+            name: 'Paducah',
+            type: 'location',
+            description: 'City where Cousin Cæsar used the name Cole Conway.',
+            aliases: [],
+          },
+        ],
+        relationships: [],
+      }),
+      graph,
+    })
+
+    await extractor.extractFromChunk(
+      'When Cousin Cæsar reached Iuka. Cousin Cæsar later appeared in Paducah, Kentucky, calling himself Cole Conway. And Cousin Cæsar met Conway there.',
+      'bucket-1',
+      0,
+      'doc-1',
+    )
+
+    const mentions = vi.mocked(graph.addEntityMentions).mock.calls[0]![0]
+    const caesar = mentions.find(m => m.name === 'Cousin Cæsar')!
+    expect(caesar.aliases).toEqual(expect.arrayContaining([
+      'Cousin Caeser',
+      'Cæsar',
+      'Caeser',
+      'Cole Conway',
+      'Conway',
+    ]))
+    expect(caesar.aliases).not.toEqual(expect.arrayContaining([
+      'When Cousin Cæsar',
+      'And Cousin Cæsar',
+      'Iuka. Cousin Cæsar',
+      'Chicago. Young Simon',
+      'West Indies.--Young Simon',
+      'Cæsar. Cæsar Simon',
+    ]))
+
+    const paducah = mentions.find(m => m.name === 'Paducah, Kentucky')!
+    expect(paducah.aliases).toContain('Paducah')
+  })
+
+  it('propagates extraction errors to the index engine', async () => {
+    const graph: KnowledgeGraphBridge = {
+      addEntityMentions: vi.fn().mockResolvedValue(undefined),
+      addTriple: vi.fn().mockResolvedValue(undefined),
+    }
+    const extractor = new TripleExtractor({
+      llm: {
+        generateText: vi.fn().mockResolvedValue(''),
+        generateJSON: vi.fn().mockRejectedValue(new Error('No output generated.')),
+      },
+      graph,
+    })
+
+    await expect(extractor.extractFromChunk('Alice met Bob.', 'bucket-1', 0, 'doc-1'))
+      .rejects.toThrow('No output generated.')
+  })
+})

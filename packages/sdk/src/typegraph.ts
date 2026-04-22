@@ -498,14 +498,15 @@ class TypegraphImpl implements typegraphInstance {
     } & TelemetryOpts): Promise<EntityResult[]> => {
       const kg = this.requireKnowledgeGraph()
       if (!kg.searchEntities) throw new ConfigError('Knowledge graph bridge does not support entity search.')
-      const results = await kg.searchEntities(query, identity, opts?.limit)
-      // The bridge returns a simpler format; enrich it
-      return results.map(r => ({
-        ...r,
-        aliases: [],
-        edgeCount: 0,
-        ...r,
-      }))
+      let results = await kg.searchEntities(query, identity, opts?.limit)
+      if (opts?.entityType) {
+        results = results.filter(r => r.entityType === opts.entityType)
+      }
+      if (opts?.minConnections !== undefined) {
+        const minConnections = opts.minConnections
+        results = results.filter(r => r.edgeCount >= minConnections)
+      }
+      return results
     },
 
     getEntity: async (id: string): Promise<EntityDetail | null> => {

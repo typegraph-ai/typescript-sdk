@@ -103,8 +103,22 @@ export interface KnowledgeGraphBridge {
     metadata?: Record<string, unknown>
   }): Promise<void>
 
-  /** Search entities by embedding similarity. Used during graph-augmented retrieval. */
-  searchEntities?(query: string, identity: typegraphIdentity, limit?: number): Promise<Array<{ id: string; name: string; entityType: string; similarity?: number }>>
+  /** Store extracted entities and their source mentions even when no relationship was found. */
+  addEntityMentions?(mentions: Array<{
+    name: string
+    type?: string | undefined
+    aliases?: string[] | undefined
+    description?: string | undefined
+    content: string
+    bucketId: string
+    chunkIndex?: number | undefined
+    documentId?: string | undefined
+    metadata?: Record<string, unknown> | undefined
+    confidence?: number | undefined
+  }>): Promise<void>
+
+  /** Search entities by embedding similarity. Used during graph-augmented retrieval and graph exploration. */
+  searchEntities?(query: string, identity: typegraphIdentity, limit?: number): Promise<EntityResult[]>
 
   /** Get adjacency list for PPR. */
   getAdjacencyList?(entityIds: string[]): Promise<Map<string, Array<{ target: string; weight: number }>>>

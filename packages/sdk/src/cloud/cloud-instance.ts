@@ -204,12 +204,12 @@ export function createCloudInstance(config: CloudConfig): typegraphCloudInstance
     async ingest(docs: RawDocument[], opts: IngestOptions = {}): Promise<IndexResult> {
       const bucketId = opts.bucketId || DEFAULT_BUCKET_ID
       const normalizedDocs = docs.map(normalizeRawDocument)
-      return client.post<IndexResult>(`/v1/buckets/${e(bucketId)}/ingest`, { docs: normalizedDocs, ...opts })
+      return client.post<IndexResult>(`/v1/buckets/${e(bucketId)}/ingest`, { docs: normalizedDocs, opts })
     },
 
     async ingestPreChunked(doc: RawDocument, chunks: Chunk[], opts: IngestOptions = {}): Promise<IndexResult> {
       const bucketId = opts.bucketId || DEFAULT_BUCKET_ID
-      return client.post<IndexResult>(`/v1/buckets/${e(bucketId)}/ingest`, { doc: normalizeRawDocument(doc), chunks, ...opts })
+      return client.post<IndexResult>(`/v1/buckets/${e(bucketId)}/ingest`, { doc: normalizeRawDocument(doc), chunks, opts })
     },
 
     async remember(content: string, identity: typegraphIdentity, category?: string, opts?: {

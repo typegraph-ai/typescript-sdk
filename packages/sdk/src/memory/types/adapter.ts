@@ -5,6 +5,7 @@ import type {
   MemoryCategory,
   MemoryStatus,
   SemanticEntity,
+  SemanticEntityMention,
   SemanticEdge,
 } from './memory.js'
 
@@ -88,6 +89,7 @@ export interface MemoryStoreAdapter {
   getEntitiesBatch?(ids: string[]): Promise<SemanticEntity[]>
   findEntities?(query: string, scope: typegraphIdentity, limit?: number): Promise<SemanticEntity[]>
   searchEntities?(embedding: number[], scope: typegraphIdentity, limit?: number): Promise<SemanticEntity[]>
+  searchEntitiesHybrid?(query: string, embedding: number[], scope: typegraphIdentity, limit?: number): Promise<SemanticEntity[]>
 
   // ── Edge Storage (optional - needed for semantic memory graph) ──
 
@@ -102,16 +104,9 @@ export interface MemoryStoreAdapter {
   // entity → chunk lookup without storing chunk text in edge properties.
 
   /** Record one or more (entity, chunk, bucket) mentions. Idempotent on
-   *  (entityId, documentId, chunkIndex, mentionType). */
+   *  (entityId, documentId, chunkIndex, mentionType, normalizedSurfaceText). */
   upsertEntityChunkMentions?(
-    mentions: Array<{
-      entityId: string
-      documentId: string
-      chunkIndex: number
-      bucketId: string
-      mentionType: 'subject' | 'object' | 'co_occurrence'
-      confidence?: number | undefined
-    }>
+    mentions: SemanticEntityMention[]
   ): Promise<void>
 
   /** Get chunks that mention any of the given entities, optionally bucket-scoped.
@@ -129,6 +124,9 @@ export interface MemoryStoreAdapter {
     documentId: string
     chunkIndex: number
     entityId: string
+    surfaceText?: string | undefined
+    normalizedSurfaceText?: string | undefined
+    mentionType?: SemanticEntityMention['mentionType'] | undefined
     confidence: number | null
   }>>
 

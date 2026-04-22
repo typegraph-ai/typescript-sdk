@@ -105,6 +105,21 @@ export interface SemanticEntity {
   temporal: TemporalRecord
 }
 
+export type EntityMentionType = 'subject' | 'object' | 'co_occurrence' | 'entity' | 'alias'
+
+export interface SemanticEntityMention {
+  entityId: string
+  documentId: string
+  chunkIndex: number
+  bucketId: string
+  mentionType: EntityMentionType
+  /** Exact text form observed in the source chunk. */
+  surfaceText?: string | undefined
+  /** Normalized lookup key for exact alias/mention search. */
+  normalizedSurfaceText?: string | undefined
+  confidence?: number | undefined
+}
+
 // ── Semantic Memory - Edges ──
 // Relationships between entities - "how things relate"
 

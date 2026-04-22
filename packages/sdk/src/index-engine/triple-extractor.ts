@@ -72,11 +72,239 @@ const singlePassSchema = z.object({
   relationships: relationshipSchema,
 })
 
+function sanitizeText(value: string): string {
+  return sanitizeInvalidSurrogates(value
+    .replace(/\u0000/g, '')
+    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g, ' '))
+}
+
+function sanitizeInvalidSurrogates(value: string): string {
+  let out = ''
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      const next = value.charCodeAt(i + 1)
+      if (next >= 0xDC00 && next <= 0xDFFF) {
+        out += value.charAt(i) + value.charAt(i + 1)
+        i++
+      } else {
+        out += '\uFFFD'
+      }
+    } else if (code >= 0xDC00 && code <= 0xDFFF) {
+      out += '\uFFFD'
+    } else {
+      out += value[i]
+    }
+  }
+  return out
+}
+
+function sanitizeField(value: string): string {
+  return sanitizeText(value).replace(/\s+/g, ' ').trim()
+}
+
+function normalizeName(value: string): string {
+  return sanitizeField(value)
+    .replace(/[Ææ]/g, 'ae')
+    .replace(/[Œœ]/g, 'oe')
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function wordCount(value: string): number {
+  const normalized = normalizeName(value)
+  return normalized ? normalized.split(/\s+/).length : 0
+}
+
+function lastToken(value: string): string {
+  const tokens = normalizeName(value).split(/\s+/).filter(Boolean)
+  return tokens[tokens.length - 1] ?? ''
+}
+
+const COMMON_FIRST_NAMES = new Set([
+  'alice', 'anne', 'anna', 'bertha', 'bill', 'bob', 'charles', 'david', 'edmund',
+  'elizabeth', 'frank', 'george', 'harry', 'henry', 'jack', 'james', 'john',
+  'mary', 'michael', 'nancy', 'paul', 'peter', 'rose', 'sam', 'sarah', 'steve',
+  'thomas', 'william',
+])
+
+const MONONYM_ALLOWLIST = new Set([
+  'aristotle', 'caesar', 'cicero', 'homer', 'madonna', 'napoleon', 'plato',
+  'socrates', 'voltaire',
+])
+
+const ALIAS_LEADING_FRAGMENT_WORDS = new Set([
+  'a', 'an', 'and', 'as', 'at', 'because', 'before', 'but', 'by', 'for',
+  'from', 'if', 'in', 'now', 'of', 'on', 'or', 'since', 'so', 'that', 'then',
+  'there', 'therefore', 'these', 'this', 'those', 'though', 'to', 'when',
+  'where', 'while', 'with',
+])
+
+function hasSentenceBoundaryInsideAlias(value: string): boolean {
+  const withoutInitials = value.replace(/\b[A-Z]\.\s*/g, '')
+  return /[.!?]|--|—|–/.test(withoutInitials)
+}
+
+function isModeratePersonAlias(alias: string): boolean {
+  const cleaned = sanitizeField(alias)
+  if (!cleaned || cleaned.length > 80) return false
+  if (hasSentenceBoundaryInsideAlias(cleaned)) return false
+
+  const tokens = normalizeName(cleaned).split(/\s+/).filter(Boolean)
+  if (tokens.length === 0 || tokens.length > 5) return false
+  if (ALIAS_LEADING_FRAGMENT_WORDS.has(tokens[0]!)) return false
+  return true
+}
+
+function extractCapitalizedSurfaceForms(content: string): string[] {
+  const forms = new Set<string>()
+  const token = String.raw`(?:[A-Z]\.|[A-Z][\p{L}'’]*(?:-[A-Z][\p{L}'’]*)?)`
+  const re = new RegExp(String.raw`(?<![\p{L}])${token}(?:[ \t]+${token}){0,4}(?![\p{L}])`, 'gu')
+  for (const match of content.matchAll(re)) {
+    const value = sanitizeField(match[0])
+    if (value.length > 2 && value.length <= 80) forms.add(value)
+  }
+  return [...forms]
+}
+
+function extractLocationSurfaceForms(content: string): string[] {
+  const forms = new Set<string>()
+  const re = /\b([A-Z][\p{L}'’.-]+(?:\s+[A-Z][\p{L}'’.-]+){0,2},\s+[A-Z][\p{L}'’.-]+(?:\s+[A-Z][\p{L}'’.-]+){0,2})\b/gu
+  for (const match of content.matchAll(re)) {
+    const value = sanitizeField(match[1]!)
+    if (value.length > 2 && value.length <= 80) forms.add(value)
+  }
+  return [...forms]
+}
+
+function addUniqueAlias(aliases: string[], alias: string, canonicalName: string): void {
+  const cleaned = sanitizeField(alias)
+  if (!cleaned || cleaned.length > 80) return
+  if (normalizeName(cleaned) === normalizeName(canonicalName)) return
+  if (aliases.some(a => normalizeName(a) === normalizeName(cleaned))) return
+  aliases.push(cleaned)
+}
+
+function augmentPersonAliases(entity: ExtractedEntity, content: string): void {
+  const knownLastTokens = new Set([entity.name, ...entity.aliases].map(lastToken).filter(Boolean))
+  if (knownLastTokens.size === 0) return
+
+  for (const form of extractCapitalizedSurfaceForms(content)) {
+    const formLast = lastToken(form)
+    if (!formLast || !knownLastTokens.has(formLast)) continue
+    if (!isModeratePersonAlias(form)) continue
+    addUniqueAlias(entity.aliases, form, entity.name)
+  }
+}
+
+function augmentLocationAliases(entity: ExtractedEntity, content: string): void {
+  if (wordCount(entity.name) !== 1) return
+  const entityKey = normalizeName(entity.name)
+  for (const form of extractLocationSurfaceForms(content)) {
+    if (normalizeName(form).startsWith(`${entityKey} `)) {
+      addUniqueAlias(entity.aliases, form, entity.name)
+    }
+  }
+}
+
+function promoteOrRejectEntity(entity: ExtractedEntity): ExtractedEntity | undefined {
+  if (entity.type === 'person' && wordCount(entity.name) === 1) {
+    const key = normalizeName(entity.name)
+    const betterAlias = entity.aliases
+      .filter(a => wordCount(a) >= 2 && normalizeName(a).split(/\s+/).includes(key))
+      .sort((a, b) => b.length - a.length)[0]
+    if (betterAlias) {
+      const oldName = entity.name
+      entity.name = betterAlias
+      entity.aliases = entity.aliases.filter(a => normalizeName(a) !== normalizeName(betterAlias))
+      addUniqueAlias(entity.aliases, oldName, entity.name)
+    } else if (COMMON_FIRST_NAMES.has(key) && !MONONYM_ALLOWLIST.has(key)) {
+      return undefined
+    }
+  }
+
+  if (entity.type === 'location' && wordCount(entity.name) === 1) {
+    const key = normalizeName(entity.name)
+    const betterAlias = entity.aliases
+      .filter(a => normalizeName(a).startsWith(`${key} `) && /,/.test(a))
+      .sort((a, b) => b.length - a.length)[0]
+    if (betterAlias) {
+      const oldName = entity.name
+      entity.name = betterAlias
+      entity.aliases = entity.aliases.filter(a => normalizeName(a) !== normalizeName(betterAlias))
+      addUniqueAlias(entity.aliases, oldName, entity.name)
+    }
+  }
+
+  return entity
+}
+
+function postProcessExtraction(
+  entities: ExtractedEntity[],
+  relationships: ExtractedRelationship[],
+  content: string,
+): ExtractionResult {
+  const nameMap = new Map<string, string>()
+  const processed: ExtractedEntity[] = []
+
+  for (const raw of entities) {
+    const originalNames = [raw.name, ...(Array.isArray(raw.aliases) ? raw.aliases : [])]
+    const entity: ExtractedEntity = {
+      name: sanitizeField(raw.name ?? ''),
+      type: sanitizeField(raw.type ?? ''),
+      description: sanitizeField(raw.description ?? ''),
+      aliases: Array.isArray(raw.aliases) ? raw.aliases.map(sanitizeField).filter(Boolean) : [],
+    }
+    if (!entity.name || !VALID_ENTITY_TYPES.has(entity.type)) continue
+
+    if (entity.type === 'person') {
+      entity.aliases = entity.aliases.filter(isModeratePersonAlias)
+    }
+
+    if (entity.type === 'person') augmentPersonAliases(entity, content)
+    if (entity.type === 'location') augmentLocationAliases(entity, content)
+
+    const promoted = promoteOrRejectEntity(entity)
+    if (!promoted) continue
+
+    promoted.aliases = [...new Map(promoted.aliases.map(a => [normalizeName(a), a])).values()]
+      .filter(alias => normalizeName(alias) !== normalizeName(promoted.name))
+
+    processed.push(promoted)
+    for (const name of originalNames) {
+      const key = normalizeName(name)
+      if (key) nameMap.set(key, promoted.name)
+    }
+    nameMap.set(normalizeName(promoted.name), promoted.name)
+    for (const alias of promoted.aliases) nameMap.set(normalizeName(alias), promoted.name)
+  }
+
+  const sanitizedRelationships: ExtractedRelationship[] = []
+  for (const rel of relationships) {
+    const subject = nameMap.get(normalizeName(rel.subject ?? ''))
+    const object = nameMap.get(normalizeName(rel.object ?? ''))
+    const predicate = sanitizeField(rel.predicate ?? '')
+    if (!subject || !object || !predicate) continue
+    sanitizedRelationships.push({
+      subject,
+      predicate,
+      object,
+      confidence: typeof rel.confidence === 'number' ? rel.confidence : 1,
+    })
+  }
+
+  return { entities: processed, relationships: sanitizedRelationships }
+}
+
 // ── Single-pass prompt (default) ──
 
 function buildSinglePassPrompt(content: string, entityContext?: EntityContext[], documentTitle?: string): string {
   const contextSection = entityContext?.length
-    ? `\nPreviously identified entities in this document:\n${entityContext.map(e => `- ${e.name} (${e.type})`).join('\n')}\n\nUse these names when the text refers to these entities by pronoun, abbreviation, or epithet.\n`
+    ? `\nPreviously identified entities in this document:\n${entityContext.map(e => `- ${e.name} (${e.type})`).join('\n')}\n\nUse these names as canonical entities when the text refers to them by pronoun, abbreviation, surname, title, epithet, or pseudonym. Preserve any newly observed surface form as an alias instead of creating a duplicate entity.\n`
     : ''
   const titleSection = documentTitle
     ? `\nThe text string is from a document titled: "${documentTitle}". Entities referenced in the title should be extracted as primary entities using their full formal names.\n`
@@ -89,30 +317,30 @@ ${contextSection}${titleSection}
 ## Step 1: Entity Extraction
 
 For each entity, provide:
-- "name": The most complete, formal name of the entity. Always use full proper names — NOT surnames, nicknames, shortened forms, or abbreviations alone. Examples across domains:
-  People: "Stephen Curry" not "Curry"; "Barack Obama" not "Obama"; "Marie Curie" not "Curie"; "Ada Lovelace" not "Lovelace"
+- "name": The most complete, formal name of the entity that is supported by the text or prior entity context. Always use full proper names — NOT surnames, first names, nicknames, shortened forms, or abbreviations alone. Examples across domains:
+  People: "Stephen Curry" not "Curry"; "Barack Obama" not "Obama"; "Marie Curie" not "Curie"; "Ada Lovelace" not "Lovelace"; "Cole Conway" not "Conway" when the full form appears
   Organizations: "Goldman Sachs Group" not "Goldman"; "European Central Bank" not "ECB"; "Massachusetts Institute of Technology" not "MIT"; "World Health Organization" not "WHO"
   Technology: "Amazon Web Services" not "AWS"; "React Native" not "React"; "PostgreSQL" not "Postgres"; "Large Language Model" not "LLM" (when first introduced)
-  Locations: "San Francisco Bay Area" not "Bay Area"; "United Kingdom" not "UK"; "Silicon Valley" not "the Valley"; "Cape Town" not "the Cape"
+  Locations: "San Francisco Bay Area" not "Bay Area"; "United Kingdom" not "UK"; "Silicon Valley" not "the Valley"; "Paducah, Kentucky" not "Paducah" when the full form appears; do not invent a state/country if the text does not provide one
   Events: "2024 United States presidential election" not "the election"; "1984 Summer Olympics" not "1984 games"; "CES 2025" not "CES"; "World War II" not "the war"
   Legal/Science: "General Data Protection Regulation" not "GDPR"; "Clean Air Act of 1970" not "Clean Air Act"; "Hubble Space Telescope" not "Hubble"; "CRISPR-Cas9" not "CRISPR"
   Products: "iPhone 16 Pro Max" not "iPhone"; "Tesla Model 3" not "Model 3"; "GPT-4" not "GPT"
   Culture: "Naismith Memorial Basketball Hall of Fame" not "Hall of Fame"; "Academy Award for Best Picture" not "Best Picture"; "The Great Gatsby" not "Gatsby"
 - "type": One of: ${ENTITY_TYPES_LIST}
 - "description": A one-sentence description of what this entity IS — its defining attributes, NOT its relationships to other entities
-- "aliases": Other proper names, abbreviations, or widely-recognized nicknames for THIS SAME entity in the text (array of strings).
-  Valid aliases: "NYC" for "New York City", "WHO" for "World Health Organization", "The Iron Lady" for "Margaret Thatcher", "Python" for "Python programming language"
+- "aliases": Other proper names, abbreviations, pseudonyms, titles, or stable short references for THIS SAME entity in the text (array of strings). Preserve the exact surface forms that appear in the source text.
+  Valid aliases: "NYC" for "New York City", "WHO" for "World Health Organization", "The Iron Lady" for "Margaret Thatcher", "Python" for "Python programming language", "Cole Conway" and "Conway" for "Cousin Cæsar" when the text says he is calling himself Cole Conway and later refers to him as Conway
   NEVER include as aliases:
   - Pronouns or pronoun phrases (he, she, it, they, them, we, his, her, its)
   - Generic references (the team, the roster, the company, the city, the league, the organization, the event, the protocol, the framework, the ingredient)
-  - Surnames or first names alone (Curry, Obama, Kevin, Marie) — these are ambiguous, not aliases
+  - Surnames or first names alone as canonical entity names (Curry, Obama, Kevin, Marie). A bare surname may be an alias only when the same passage or prior context clearly ties it to a full person entity, e.g. "Conway" after "Cole Conway"
   - Names of DIFFERENT entities — "FIBA Hall of Fame" and "Naismith Hall of Fame" are SEPARATE entities; "React" and "React Native" are SEPARATE; "Python 2" and "Python 3" are SEPARATE
   - Descriptive phrases (the American team, the defending champions, the former president, the lead researcher, the main ingredient)
   - Country/city names for their teams — "France" is NOT an alias of "France men's national basketball team"; "Brazil" is NOT an alias of "Brazil national football team"
   - Shortened generic forms — "Finals" is NOT an alias of "NBA Finals"; "MVP" is NOT an alias of any specific MVP award; "Olympics" is NOT an alias of "2024 Summer Olympics"
 
 Entity rules:
-- Extract a MAXIMUM of 12 entities. When the text contains more potential entities, prioritize:
+- Extract a MAXIMUM of 15 entities. When the text contains more potential entities, prioritize:
   1. Primary subjects — entities the text is primarily ABOUT, not merely mentioned
   2. Entities with explicit relationships — entities that have stated connections to other entities in the text
   3. Specific over generic — prefer "2006 FIBA World Championship" over "basketball"
@@ -121,6 +349,13 @@ Entity rules:
 - Only extract specific named entities — NOT dates, dollar amounts, percentages, or generic descriptions
 - If an entity is referred to by multiple names (e.g., "OpenAI" and "the company"), list the proper name variants as aliases — NOT the generic reference
 - Include important entities even if they only appear once
+- Preserve complete person surface forms exactly when present. If the text says a person is "calling himself Cole Conway" or "known as Cole Conway", include "Cole Conway" as the entity name or alias — not only "Conway".
+- For people, prefer complete first+last names, titled names, and pseudonyms over bare first names or surnames.
+- Never create a standalone PERSON entity from a bare first name or surname when a fuller person name appears in the text or prior context. Promote it to the fuller entity and store the bare form as an alias only if it is clearly used as a reference.
+- Treat "called", "calling himself", "known as", "alias", "under the name", "styled himself", and "went by" constructions as alias evidence for the same entity unless the text clearly describes two different people.
+- Do not add a shared family surname as an alias when several related people use that surname. For example, "Simon" alone is not a safe alias for "Cæsar Simon" when "S. S. Simon" or "Young Simon" may also appear.
+- For locations, use the fullest location span stated in the text. If the source says "Paducah, Kentucky" or "Cairo, Egypt", the entity name should include the qualifier; the bare city may be an alias. Do not invent missing qualifiers.
+- Reject generic, low-information entities such as "Bill", "Bertha", "Coffee", "College Avenue", "the Queen", "the city", or "the old man" unless the text clearly establishes that exact phrase as a specific named entity.
 - For events, awards, seasons, software versions, product generations, or any time/version-specific entities, ALWAYS include the year, version, or edition in the name. Each distinct occurrence is a SEPARATE entity — e.g., "2023 NBA Finals" and "2024 NBA Finals" are different, "Python 2" and "Python 3" are different, "iPhone 15" and "iPhone 16" are different, "HTTP/1.1" and "HTTP/2" are different, "Michelin Guide 2024" and "Michelin Guide 2025" are different.
 - Different awards are ALWAYS separate entities even when they share words — "NBA Finals MVP" and "NBA MVP" are SEPARATE; "Academy Award for Best Picture" and "Academy Award for Best Director" are SEPARATE; "Nobel Peace Prize" and "Nobel Prize in Physics" are SEPARATE
 - Entities with opposing directional or categorical qualifiers are ALWAYS separate — "Western Conference" and "Eastern Conference" are SEPARATE; "North Atlantic Treaty Organization" and "South Asian Association" are SEPARATE; "Upper Egypt" and "Lower Egypt" are SEPARATE
@@ -129,6 +364,7 @@ CRITICAL — Aliases vs. Relationships:
 - An ALIAS is a different name for THE SAME entity (e.g., "NYC" is an alias for "New York City")
 - A RELATIONSHIP connects TWO DIFFERENT entities (e.g., "NBA" and "Los Angeles Lakers" are connected by MEMBER_OF — "Lakers" is NOT an alias of "NBA")
 - NEVER list a related entity as an alias. If "Kevin Durant" appears in text about "Brooklyn Nets", they are SEPARATE entities connected by a relationship
+- NEVER create a relationship between an entity and its own alias. If "Cousin Cæsar" is "calling himself Cole Conway", put "Cole Conway" in aliases; do not emit "Cousin Cæsar KNOWN_AS Cole Conway" as a relationship between two entity nodes.
 - Test: Could you replace one name with the other in any sentence and preserve meaning? If yes → alias. If no → separate entities with a relationship
 
 ## Step 2: Relationship Extraction
@@ -147,32 +383,29 @@ Relationship rules:
 - Never create compound predicates (e.g., "MENTIONED_COOKING_IN")
 - Use the most specific predicate that accurately captures the relationship
 - Extract relationships that are explicitly stated or strongly implied in the text
+- Do not emit self-relationships or alias relationships. Relationships are only for two different entities after alias resolution.
 
 ## Example
 
-Text: "Margaret Ashworth had lived in Oxford since her marriage to Edmund, who served as president of The Geographical Society. It was through Edmund's influence that she first traveled to Cairo, where she met the renowned cartographer Helena Voss. The two women corresponded for years, and Helena's bold methods deeply influenced Margaret's own work. Margaret eventually wrote Principles of Navigation, which many regarded as a challenge to Edmund's more traditional views on the subject. Helena, who had once taught at Oxford before the Society forced her departure, remained Margaret's closest intellectual ally."
+Text: "Cousin Cæsar was born to Nancy Wade in West Tennessee and grew up under the care of Big-sis. At twenty years of age we find Cousin Cæsar in Paducah, Kentucky, calling himself Cole Conway, in company with one Steve Sharp; they were partners in the game, as they called it. Sharp, a pilot by profession, had purchased the cards, while Conway dealt in the back room of a saloon. Earlier, Rob Roy cut wood for Old Smith on a farm near the Tennessee River."
 
 Output:
 {"entities": [
-  {"name": "Margaret Ashworth", "type": "person", "description": "Author of Principles of Navigation, influenced by Helena Voss", "aliases": []},
-  {"name": "Edmund Ashworth", "type": "person", "description": "President of The Geographical Society, married to Margaret", "aliases": ["Edmund"]},
-  {"name": "The Geographical Society", "type": "organization", "description": "Academic society led by Edmund Ashworth", "aliases": ["the Society"]},
-  {"name": "Cairo", "type": "location", "description": "City where Margaret met Helena Voss", "aliases": []},
-  {"name": "Oxford", "type": "location", "description": "City where Margaret lived and Helena once taught", "aliases": []},
-  {"name": "Helena Voss", "type": "person", "description": "Renowned cartographer and Margaret's intellectual ally", "aliases": ["Helena"]},
-  {"name": "Principles of Navigation", "type": "work_of_art", "description": "Book written by Margaret Ashworth", "aliases": []}
+  {"name": "Cousin Cæsar", "type": "person", "description": "A man born to Nancy Wade in West Tennessee who later uses the name Cole Conway in Paducah, Kentucky", "aliases": ["Cole Conway", "Conway"]},
+  {"name": "Nancy Wade", "type": "person", "description": "Mother of Cousin Cæsar", "aliases": []},
+  {"name": "Big-sis", "type": "person", "description": "Caretaker of Cousin Cæsar during childhood", "aliases": []},
+  {"name": "Steve Sharp", "type": "person", "description": "Pilot and partner of Cousin Cæsar in the card game", "aliases": ["Sharp"]},
+  {"name": "Paducah, Kentucky", "type": "location", "description": "City in Kentucky where Cousin Cæsar uses the name Cole Conway", "aliases": ["Paducah"]},
+  {"name": "West Tennessee", "type": "location", "description": "Region where Cousin Cæsar was born", "aliases": []},
+  {"name": "Rob Roy", "type": "person", "description": "Wood cutter who worked for Old Smith", "aliases": ["Roy"]},
+  {"name": "Old Smith", "type": "person", "description": "Farm owner near the Tennessee River who employed Rob Roy", "aliases": ["Smith"]},
+  {"name": "Tennessee River", "type": "location", "description": "River near Old Smith's farm", "aliases": []}
 ], "relationships": [
-  {"subject": "Margaret Ashworth", "predicate": "LIVED_IN", "object": "Oxford", "confidence": 0.95},
-  {"subject": "Margaret Ashworth", "predicate": "MARRIED", "object": "Edmund Ashworth", "confidence": 0.95},
-  {"subject": "Edmund Ashworth", "predicate": "LEADS", "object": "The Geographical Society", "confidence": 0.9},
-  {"subject": "Margaret Ashworth", "predicate": "TRAVELED_TO", "object": "Cairo", "confidence": 0.9},
-  {"subject": "Edmund Ashworth", "predicate": "INFLUENCED", "object": "Margaret Ashworth", "confidence": 0.85},
-  {"subject": "Helena Voss", "predicate": "CORRESPONDS_WITH", "object": "Margaret Ashworth", "confidence": 0.9},
-  {"subject": "Helena Voss", "predicate": "INFLUENCED", "object": "Margaret Ashworth", "confidence": 0.9},
-  {"subject": "Margaret Ashworth", "predicate": "WROTE", "object": "Principles of Navigation", "confidence": 0.95},
-  {"subject": "Margaret Ashworth", "predicate": "OPPOSED", "object": "Edmund Ashworth", "confidence": 0.75},
-  {"subject": "Helena Voss", "predicate": "TAUGHT", "object": "Oxford", "confidence": 0.85},
-  {"subject": "Helena Voss", "predicate": "COLLABORATED_WITH", "object": "Margaret Ashworth", "confidence": 0.9}
+  {"subject": "Cousin Cæsar", "predicate": "CHILD_OF", "object": "Nancy Wade", "confidence": 0.95},
+  {"subject": "Cousin Cæsar", "predicate": "BORN_IN", "object": "West Tennessee", "confidence": 0.95},
+  {"subject": "Cousin Cæsar", "predicate": "TRAVELED_TO", "object": "Paducah, Kentucky", "confidence": 0.85},
+  {"subject": "Cousin Cæsar", "predicate": "COLLABORATED_WITH", "object": "Steve Sharp", "confidence": 0.95},
+  {"subject": "Old Smith", "predicate": "EMPLOYED", "object": "Rob Roy", "confidence": 0.9}
 ]}
 
 ## Self-review
@@ -189,7 +422,7 @@ ${content}`
 
 function buildEntityExtractionPrompt(content: string, entityContext?: EntityContext[], documentTitle?: string): string {
   const contextSection = entityContext?.length
-    ? `\nPreviously identified entities in the text string:\n${entityContext.map(e => `- ${e.name} (${e.type})`).join('\n')}\n\nUse these names when the text refers to these entities by pronoun, abbreviation, or epithet.\n`
+    ? `\nPreviously identified entities in the text string:\n${entityContext.map(e => `- ${e.name} (${e.type})`).join('\n')}\n\nUse these names as canonical entities when the text refers to them by pronoun, abbreviation, surname, title, epithet, or pseudonym. Preserve any newly observed surface form as an alias instead of creating a duplicate entity.\n`
     : ''
   const titleSection = documentTitle
     ? `\nThe text string is from a document titled: "${documentTitle}". Entities referenced in the title should be extracted as primary entities using their full formal names.\n`
@@ -201,23 +434,23 @@ function buildEntityExtractionPrompt(content: string, entityContext?: EntityCont
 
 For each entity, provide:
 
-- "name": The most complete, formal and canonical name of the entity. Always use full proper names — NOT surnames, nicknames, shortened forms, or abbreviations alone. Examples across domains:
--- People: "Stephen Curry" not "Curry"; "Barack Obama" not "Obama"; "Marie Curie" not "Curie"; "Ada Lovelace" not "Lovelace"
+- "name": The most complete, formal and canonical name of the entity that is supported by the text or prior entity context. Always use full proper names — NOT surnames, first names, nicknames, shortened forms, or abbreviations alone. Examples across domains:
+-- People: "Stephen Curry" not "Curry"; "Barack Obama" not "Obama"; "Marie Curie" not "Curie"; "Ada Lovelace" not "Lovelace"; "Cole Conway" not "Conway" when the full form appears
 -- Organizations: "Goldman Sachs Group" not "Goldman"; "European Central Bank" not "ECB"; "Massachusetts Institute of Technology" not "MIT"; "World Health Organization" not "WHO"; "Apple Inc." not "Apple"
 -- Technology: "Amazon Web Services" not "AWS"; "React Native" not "React"; "PostgreSQL" not "Postgres"; "Large Language Model" not "LLM" (when first introduced)
--- Locations: "San Francisco Bay Area" not "Bay Area"; "United Kingdom" not "UK"; "Silicon Valley" not "the Valley"; "Cape Town, South Africa" not "the Cape"
+-- Locations: "San Francisco Bay Area" not "Bay Area"; "United Kingdom" not "UK"; "Silicon Valley" not "the Valley"; "Paducah, Kentucky" not "Paducah" when the full form appears; do not invent a state/country if the text does not provide one
 -- Events: "2024 United States presidential election" not "the election"; "1984 Summer Olympics" not "1984 games"; "CES 2025" not "CES"; "World War II" not "the war"
 -- Legal/Science: "General Data Protection Regulation" not "GDPR"; "Clean Air Act of 1970" not "Clean Air Act"; "Hubble Space Telescope" not "Hubble"; "CRISPR-Cas9" not "CRISPR"
 -- Products: "iPhone 16 Pro Max" not "iPhone"; "Tesla Model 3" not "Model 3"; "GPT-4" not "GPT"
 -- Culture: "Naismith Memorial Basketball Hall of Fame" not "Hall of Fame"; "Academy Award for Best Picture" not "Best Picture"; "The Great Gatsby" not "Gatsby"
 - "type": One of: ${ENTITY_TYPES_LIST}
 - "description": A one-sentence description of what this entity IS — its defining attributes, NOT its relationships to other entities
-- "aliases": Other proper names, abbreviations, or widely-recognized nicknames for THIS SAME entity in the text (array of strings).
--- Valid aliases: "NYC" for "New York City", "WHO" for "World Health Organization", "The Iron Lady" for "Margaret Thatcher", "Python" for "Python programming language"
+- "aliases": Other proper names, abbreviations, pseudonyms, titles, or stable short references for THIS SAME entity in the text (array of strings). Preserve the exact surface forms that appear in the source text.
+-- Valid aliases: "NYC" for "New York City", "WHO" for "World Health Organization", "The Iron Lady" for "Margaret Thatcher", "Python" for "Python programming language", "Cole Conway" and "Conway" for "Cousin Cæsar" when the text says he is calling himself Cole Conway and later refers to him as Conway
 -- NEVER include as aliases:
 --- Pronouns or pronoun phrases (he, she, it, they, them, we, his, her, its)
 --- Generic references (the team, the roster, the company, the city, the league, the organization, the event, the protocol, the framework, the ingredient)
---- Surnames or first names alone (Curry, Obama, Kevin, Marie) — these are ambiguous, not aliases
+--- Surnames or first names alone as canonical entity names (Curry, Obama, Kevin, Marie). A bare surname may be an alias only when the same passage or prior context clearly ties it to a full person entity, e.g. "Conway" after "Cole Conway"
 --- Names of DIFFERENT entities — "FIBA Hall of Fame" and "Naismith Hall of Fame" are SEPARATE entities; "React" and "React Native" are SEPARATE; "Python 2" and "Python 3" are SEPARATE
 --- Descriptive phrases (the American team, the defending champions, the former president, the lead researcher, the main ingredient)
 --- Country/city names for their teams — "France" is NOT an alias of "France men's national basketball team"; "Brazil" is NOT an alias of "Brazil national football team"
@@ -227,7 +460,7 @@ For each entity, provide:
 
 <TASK_RULES>
 
-- Extract a MAXIMUM of 12 entities. When the text contains more potential entities, prioritize:
+- Extract a MAXIMUM of 15 entities. When the text contains more potential entities, prioritize:
 -- 1. Primary subjects — entities the text is primarily ABOUT, not merely mentioned
 -- 2. Entities with explicit relationships — entities that have stated connections to other entities in the text
 -- 3. Specific over generic — prefer "2006 FIBA World Championship" over "basketball"
@@ -236,6 +469,13 @@ For each entity, provide:
 - Only extract specific named entities — NOT dates, dollar amounts, percentages, or generic descriptions
 - If an entity is referred to by multiple names (e.g., "OpenAI" and "the company"), list the proper name variants as aliases — NOT the generic reference
 - Include important entities even if they only appear once
+- Preserve complete person surface forms exactly when present. If the text says a person is "calling himself Cole Conway" or "known as Cole Conway", include "Cole Conway" as the entity name or alias — not only "Conway".
+- For people, prefer complete first+last names, titled names, and pseudonyms over bare first names or surnames.
+- Never create a standalone PERSON entity from a bare first name or surname when a fuller person name appears in the text or prior context. Promote it to the fuller entity and store the bare form as an alias only if it is clearly used as a reference.
+- Treat "called", "calling himself", "known as", "alias", "under the name", "styled himself", and "went by" constructions as alias evidence for the same entity unless the text clearly describes two different people.
+- Do not add a shared family surname as an alias when several related people use that surname. For example, "Simon" alone is not a safe alias for "Cæsar Simon" when "S. S. Simon" or "Young Simon" may also appear.
+- For locations, use the fullest location span stated in the text. If the source says "Paducah, Kentucky" or "Cairo, Egypt", the entity name should include the qualifier; the bare city may be an alias. Do not invent missing qualifiers.
+- Reject generic, low-information entities such as "Bill", "Bertha", "Coffee", "College Avenue", "the Queen", "the city", or "the old man" unless the text clearly establishes that exact phrase as a specific named entity.
 - Return an empty array if no named entities exist
 - For events, awards, seasons, software versions, product generations, or any time/version-specific entities, ALWAYS include the year, version, or edition in the name. Each distinct occurrence is a SEPARATE entity — e.g., "2023 NBA Finals" and "2024 NBA Finals" are different, "Python 2" and "Python 3" are different, "iPhone 15" and "iPhone 16" are different, "HTTP/1.1" and "HTTP/2" are different, "Michelin Guide 2024" and "Michelin Guide 2025" are different.
 - Different awards are ALWAYS separate entities even when they share words — "NBA Finals MVP" and "NBA MVP" are SEPARATE; "Academy Award for Best Picture" and "Academy Award for Best Director" are SEPARATE; "Nobel Peace Prize" and "Nobel Prize in Physics" are SEPARATE
@@ -249,6 +489,7 @@ CRITICAL — Aliases vs. Relationships:
 - An ALIAS is a different name for THE SAME entity (e.g., "NYC" is an alias for "New York City")
 - A RELATIONSHIP connects TWO DIFFERENT entities (e.g., "NBA" and "Los Angeles Lakers" are connected by MEMBER_OF — "Lakers" is NOT an alias of "NBA")
 - NEVER list a related entity as an alias. If "Kevin Durant" appears in text about "Brooklyn Nets", they are SEPARATE entities connected by a relationship
+- NEVER create a separate entity for a pseudonym or surface form that the text says belongs to the same person. If "Cousin Cæsar" is "calling himself Cole Conway", extract one person entity and put "Cole Conway" in aliases.
 - Test: Could you replace one name with the other in any sentence and preserve meaning? If yes → alias. If no → separate entities with a relationship
 
 </CRITICAL_RULES>
@@ -259,20 +500,21 @@ CRITICAL — Aliases vs. Relationships:
 
   <EXAMPLE_TEXT_STRING>
 
-  "Margaret Ashworth had lived in Oxford since her marriage to Edmund, who served as president of The Geographical Society. It was through Edmund's influence that she first traveled to Cairo, where she met the renowned cartographer Helena Voss. The two women corresponded for years, and Helena's bold methods deeply influenced Margaret's own work. Margaret eventually wrote Principles of Navigation, which many regarded as a challenge to Edmund's more traditional views on the subject. Helena, who had once taught at Oxford before the Society forced her departure, remained Margaret's closest intellectual ally."
+  "Cousin Cæsar was born to Nancy Wade in West Tennessee and grew up under the care of Big-sis. At twenty years of age we find Cousin Cæsar in Paducah, Kentucky, calling himself Cole Conway, in company with one Steve Sharp; they were partners in the game, as they called it. Sharp, a pilot by profession, had purchased the cards, while Conway dealt in the back room of a saloon. Earlier, Rob Roy cut wood for Old Smith on a farm near the Tennessee River."
 
   </EXAMPLE_TEXT_STRING>
 
   <EXAMPLE_OUTPUT>
 
-  [{"name": "Margaret Ashworth", "type": "person", "description": "Author of Principles of Navigation, influenced by Helena Voss", "aliases": []},
-  {"name": "Edmund Ashworth", "type": "person", "description": "President of The Geographical Society, married to Margaret", "aliases": ["Edmund"]},
-  {"name": "The Geographical Society", "type": "organization", "description": "Academic society led by Edmund Ashworth", "aliases": ["the Society"]},
-  {"name": "Cairo", "type": "location", "description": "City where Margaret met Helena Voss", "aliases": []},
-  {"name": "Oxford", "type": "location", "description": "City where Margaret had lived", "aliases": []},
-  {"name": "Oxford", "type": "organization", "description": "Academic organization where Helena had once taught", "aliases": []},
-  {"name": "Helena Voss", "type": "person", "description": "Renowned cartographer and Margaret's intellectual ally", "aliases": ["Helena"]},
-  {"name": "Principles of Navigation", "type": "work_of_art", "description": "Book written by Margaret Ashworth", "aliases": []}]
+  [{"name": "Cousin Cæsar", "type": "person", "description": "A man born to Nancy Wade in West Tennessee who later uses the name Cole Conway in Paducah, Kentucky", "aliases": ["Cole Conway", "Conway"]},
+  {"name": "Nancy Wade", "type": "person", "description": "Mother of Cousin Cæsar", "aliases": []},
+  {"name": "Big-sis", "type": "person", "description": "Caretaker of Cousin Cæsar during childhood", "aliases": []},
+  {"name": "Steve Sharp", "type": "person", "description": "Pilot and partner of Cousin Cæsar in the card game", "aliases": ["Sharp"]},
+  {"name": "Paducah, Kentucky", "type": "location", "description": "City in Kentucky where Cousin Cæsar uses the name Cole Conway", "aliases": ["Paducah"]},
+  {"name": "West Tennessee", "type": "location", "description": "Region where Cousin Cæsar was born", "aliases": []},
+  {"name": "Rob Roy", "type": "person", "description": "Wood cutter who worked for Old Smith", "aliases": ["Roy"]},
+  {"name": "Old Smith", "type": "person", "description": "Farm owner near the Tennessee River who employed Rob Roy", "aliases": ["Smith"]},
+  {"name": "Tennessee River", "type": "location", "description": "River near Old Smith's farm", "aliases": []}]
 
   </EXAMPLE_OUTPUT>
 
@@ -334,6 +576,8 @@ For each relationship, provide:
 - Never create compound predicates (e.g., "MENTIONED_COOKING_IN")
 - Use the most specific predicate that accurately captures the relationship
 - Extract relationships that are explicitly stated or strongly implied in the text
+- Do not emit self-relationships or alias relationships. If two names refer to the same entity, they belong in aliases from the entity step, not in the relationships array.
+- Do not connect an entity to a generic description or role unless that role was extracted as a specific named entity.
 - Return an empty array if no clear relationships exist between the entities listed below
 
 </TASK_RULES>
@@ -345,37 +589,32 @@ For each relationship, provide:
   <EXAMPLE_ENTITIES_FOUND_IN_THE_EXAMPLE_TEXT_STRING>
 
     Entities found in the example text string:
-    
-    [{"name": "Margaret Ashworth", "type": "person", "description": "Author of Principles of Navigation, influenced by Helena Voss", "aliases": []},
-    {"name": "Edmund Ashworth", "type": "person", "description": "President of The Geographical Society, married to Margaret", "aliases": ["Edmund"]},
-    {"name": "The Geographical Society", "type": "organization", "description": "Academic society led by Edmund Ashworth", "aliases": ["the Society"]},
-    {"name": "Cairo", "type": "location", "description": "City where Margaret met Helena Voss", "aliases": []},
-    {"name": "Oxford", "type": "location", "description": "City where Margaret had lived", "aliases": []},
-    {"name": "Oxford", "type": "organization", "description": "Academic organization where Helena had once taught", "aliases": []},
-    {"name": "Helena Voss", "type": "person", "description": "Renowned cartographer and Margaret's intellectual ally", "aliases": ["Helena"]},
-    {"name": "Principles of Navigation", "type": "work_of_art", "description": "Book written by Margaret Ashworth", "aliases": []}]
+
+    [{"name": "Cousin Cæsar", "type": "person", "description": "A man born to Nancy Wade in West Tennessee who later uses the name Cole Conway in Paducah, Kentucky", "aliases": ["Cole Conway", "Conway"]},
+    {"name": "Nancy Wade", "type": "person", "description": "Mother of Cousin Cæsar", "aliases": []},
+    {"name": "Big-sis", "type": "person", "description": "Caretaker of Cousin Cæsar during childhood", "aliases": []},
+    {"name": "Steve Sharp", "type": "person", "description": "Pilot and partner of Cousin Cæsar in the card game", "aliases": ["Sharp"]},
+    {"name": "Paducah, Kentucky", "type": "location", "description": "City in Kentucky where Cousin Cæsar uses the name Cole Conway", "aliases": ["Paducah"]},
+    {"name": "West Tennessee", "type": "location", "description": "Region where Cousin Cæsar was born", "aliases": []},
+    {"name": "Rob Roy", "type": "person", "description": "Wood cutter who worked for Old Smith", "aliases": ["Roy"]},
+    {"name": "Old Smith", "type": "person", "description": "Farm owner near the Tennessee River who employed Rob Roy", "aliases": ["Smith"]},
+    {"name": "Tennessee River", "type": "location", "description": "River near Old Smith's farm", "aliases": []}]
 
   </EXAMPLE_ENTITIES_FOUND_IN_THE_EXAMPLE_TEXT_STRING>
 
   <EXAMPLE_TEXT_STRING>
 
-    "Margaret Ashworth had lived in Oxford since her marriage to Edmund, who served as president of The Geographical Society. It was through Edmund's influence that she first traveled to Cairo, where she met the renowned cartographer Helena Voss. The two women corresponded for years, and Helena's bold methods deeply influenced Margaret's own work. Margaret eventually wrote Principles of Navigation, which many regarded as a challenge to Edmund's more traditional views on the subject. Helena, who had once taught at Oxford before the Society forced her departure, remained Margaret's closest intellectual ally."
+    "Cousin Cæsar was born to Nancy Wade in West Tennessee and grew up under the care of Big-sis. At twenty years of age we find Cousin Cæsar in Paducah, Kentucky, calling himself Cole Conway, in company with one Steve Sharp; they were partners in the game, as they called it. Sharp, a pilot by profession, had purchased the cards, while Conway dealt in the back room of a saloon. Earlier, Rob Roy cut wood for Old Smith on a farm near the Tennessee River."
 
   </EXAMPLE_TEXT_STRING>
 
   <EXAMPLE_OUTPUT>
 
-    [{"subject": "Margaret Ashworth", "predicate": "LIVED_IN", "object": "Oxford, United Kingdom", "confidence": 0.95},
-    {"subject": "Margaret Ashworth", "predicate": "MARRIED", "object": "Edmund Ashworth", "confidence": 0.95},
-    {"subject": "Edmund Ashworth", "predicate": "LEADS", "object": "The Geographical Society", "confidence": 0.9},
-    {"subject": "Margaret Ashworth", "predicate": "TRAVELED_TO", "object": "Cairo, Egypt", "confidence": 0.9},
-    {"subject": "Edmund Ashworth", "predicate": "INFLUENCED", "object": "Margaret Ashworth", "confidence": 0.85},
-    {"subject": "Helena Voss", "predicate": "CORRESPONDS_WITH", "object": "Margaret Ashworth", "confidence": 0.9},
-    {"subject": "Helena Voss", "predicate": "INFLUENCED", "object": "Margaret Ashworth", "confidence": 0.9},
-    {"subject": "Margaret Ashworth", "predicate": "WROTE", "object": "Principles of Navigation", "confidence": 0.95},
-    {"subject": "Margaret Ashworth", "predicate": "OPPOSED", "object": "Edmund Ashworth", "confidence": 0.75},
-    {"subject": "Helena Voss", "predicate": "TAUGHT", "object": "Oxford, United Kingdom", "confidence": 0.85},
-    {"subject": "Helena Voss", "predicate": "COLLABORATED_WITH", "object": "Margaret Ashworth", "confidence": 0.9}]
+    [{"subject": "Cousin Cæsar", "predicate": "CHILD_OF", "object": "Nancy Wade", "confidence": 0.95},
+    {"subject": "Cousin Cæsar", "predicate": "BORN_IN", "object": "West Tennessee", "confidence": 0.95},
+    {"subject": "Cousin Cæsar", "predicate": "TRAVELED_TO", "object": "Paducah, Kentucky", "confidence": 0.85},
+    {"subject": "Cousin Cæsar", "predicate": "COLLABORATED_WITH", "object": "Steve Sharp", "confidence": 0.95},
+    {"subject": "Old Smith", "predicate": "EMPLOYED", "object": "Rob Roy", "confidence": 0.9}]
 
   </EXAMPLE_OUTPUT>
 
@@ -441,27 +680,39 @@ export class TripleExtractor {
     entityContext?: EntityContext[],
     documentTitle?: string,
   ): Promise<{ entities: EntityContext[] } | undefined> {
-    if (!this.graph.addTriple) return undefined
+    if (!this.graph.addTriple && !this.graph.addEntityMentions) return { entities: [] }
 
-    try {
-      const { entities, relationships } = this.twoPass
-        ? await this.extractTwoPass(content, entityContext, documentTitle)
-        : await this.extractSinglePass(content, entityContext, documentTitle)
+    const cleanContent = sanitizeText(content)
+    const cleanTitle = documentTitle ? sanitizeField(documentTitle) : undefined
+    const raw = this.twoPass
+      ? await this.extractTwoPass(cleanContent, entityContext, cleanTitle)
+      : await this.extractSinglePass(cleanContent, entityContext, cleanTitle)
+    const { entities, relationships } = postProcessExtraction(raw.entities, raw.relationships, cleanContent)
 
-      if (entities.length < 2) return { entities: entities.map(e => ({ name: e.name, type: e.type })) }
+    if (this.graph.addEntityMentions && entities.length > 0) {
+      await this.graph.addEntityMentions(entities.map(entity => ({
+        name: entity.name,
+        type: entity.type,
+        aliases: entity.aliases ?? [],
+        description: entity.description,
+        content: cleanContent,
+        bucketId,
+        ...(chunkIndex !== undefined ? { chunkIndex } : {}),
+        ...(documentId ? { documentId } : {}),
+        ...(metadata ? { metadata } : {}),
+      })))
+    }
 
-      // Build entity lookup for validation
+    if (this.graph.addTriple && entities.length >= 2) {
       const entityByName = new Map<string, ExtractedEntity>()
       for (const e of entities) {
-        entityByName.set(e.name.toLowerCase(), e)
+        entityByName.set(normalizeName(e.name), e)
+        for (const alias of e.aliases) entityByName.set(normalizeName(alias), e)
       }
 
-      // Validate and emit triples
       for (const rel of relationships) {
-        if (!rel.subject || !rel.predicate || !rel.object) continue
-
-        const subjectEntity = entityByName.get(rel.subject.toLowerCase())
-        const objectEntity = entityByName.get(rel.object.toLowerCase())
+        const subjectEntity = entityByName.get(normalizeName(rel.subject))
+        const objectEntity = entityByName.get(normalizeName(rel.object))
         if (!subjectEntity || !objectEntity) continue
 
         await this.graph.addTriple({
@@ -475,25 +726,16 @@ export class TripleExtractor {
           objectAliases: objectEntity.aliases ?? [],
           objectDescription: objectEntity.description,
           confidence: typeof rel.confidence === 'number' ? Math.max(0, Math.min(1, rel.confidence)) : 1.0,
-          content,
+          content: cleanContent,
           bucketId,
           ...(chunkIndex !== undefined ? { chunkIndex } : {}),
           ...(documentId ? { documentId } : {}),
           ...(metadata ? { metadata } : {}),
         })
       }
-
-      return { entities: entities.map(e => ({ name: e.name, type: e.type })) }
-    } catch (err) {
-      // Triple extraction failures should not block indexing, but log for observability
-      console.error('[typegraph] Triple extraction failed', {
-        bucketId,
-        documentId,
-        chunkIndex,
-        error: err instanceof Error ? err.message : String(err),
-      })
-      return undefined
     }
+
+    return { entities: entities.map(e => ({ name: e.name, type: e.type })) }
   }
 
   /** Single combined LLM call for entities + relationships (default). */
@@ -505,7 +747,7 @@ export class TripleExtractor {
     const prompt = buildSinglePassPrompt(content, entityContext, documentTitle)
     const result = await this.llm.generateJSON<ExtractionResult>(
       prompt,
-      'You are a precise knowledge graph extractor. Extract entities and relationships from text. Return only valid JSON.',
+      'You are a precise knowledge graph extractor. Preserve complete named surface forms, model pseudonyms as aliases, reject generic one-token entities, and return only valid JSON.',
       { schema: singlePassSchema },
     )
 
@@ -530,7 +772,7 @@ export class TripleExtractor {
     // Pass 1: Extract entities
     const rawEntities = await this.llm.generateJSON<ExtractedEntity[]>(
       buildEntityExtractionPrompt(content, entityContext, documentTitle),
-      'You are a precise named entity extractor. Return only valid JSON arrays.',
+      'You are a precise named entity extractor. Preserve complete named surface forms, model pseudonyms as aliases, reject generic one-token entities, and return only valid JSON arrays.',
       { schema: entitySchema },
     )
 
@@ -552,7 +794,7 @@ export class TripleExtractor {
 
     const rawRelationships = await this.relationshipLlm.generateJSON<ExtractedRelationship[]>(
       prompt,
-      'You are a precise relationship extractor. Return only valid JSON arrays.',
+      'You are a precise relationship extractor. Do not emit alias/self relationships. Return only valid JSON arrays.',
       { schema: relationshipSchema },
     )
 

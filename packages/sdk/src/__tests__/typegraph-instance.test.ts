@@ -7,6 +7,7 @@ import { createTestDocument, createTestDocuments } from './helpers/mock-connecto
 import type { typegraphInstance } from '../typegraph.js'
 import type { Bucket } from '../types/bucket.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
+import type { EntityResult, KnowledgeGraphBridge } from '../types/graph-bridge.js'
 
 /** Register a pre-built Bucket + embedding on an instance (bypasses buckets.create UUID generation). */
 function registerTestBucket(instance: typegraphInstance, bucket: Bucket, embedding: EmbeddingProvider) {
@@ -93,6 +94,78 @@ describe('typegraphInit', () => {
       registerTestBucket(instance, s2, differentEmb)
       const groups = instance.groupBucketsByModel()
       expect(groups.size).toBe(2)
+    })
+  })
+
+  describe('graph.searchEntities', () => {
+    it('preserves bridge-provided aliases and edge counts', async () => {
+      const identity = { userId: 'test-user' }
+      const searchResults: EntityResult[] = [{
+        id: 'ent_caesar',
+        name: 'Cousin Cæsar',
+        entityType: 'person',
+        aliases: ['Cole Conway', 'Conway'],
+        similarity: 0.98,
+        edgeCount: 4,
+        properties: { description: 'Uses the name Cole Conway in Paducah.' },
+      }]
+      const knowledgeGraph: KnowledgeGraphBridge = {
+        searchEntities: vi.fn().mockResolvedValue(searchResults),
+      }
+      const inst = await typegraphInit({ vectorStore: adapter, embedding, knowledgeGraph })
+
+      const results = await inst.graph.searchEntities('Cole Conway', identity, { limit: 5 })
+
+      expect(knowledgeGraph.searchEntities).toHaveBeenCalledWith('Cole Conway', identity, 5)
+      expect(results).toEqual(searchResults)
+    })
+
+    it('filters search results by entity type and minimum connections', async () => {
+      const identity = { userId: 'test-user' }
+      const knowledgeGraph: KnowledgeGraphBridge = {
+        searchEntities: vi.fn().mockResolvedValue([
+          {
+            id: 'ent_caesar',
+            name: 'Cousin Cæsar',
+            entityType: 'person',
+            aliases: ['Cole Conway'],
+            similarity: 0.98,
+            edgeCount: 3,
+          },
+          {
+            id: 'ent_sharp',
+            name: 'Steve Sharp',
+            entityType: 'person',
+            aliases: ['Sharp'],
+            similarity: 0.86,
+            edgeCount: 1,
+          },
+          {
+            id: 'ent_paducah',
+            name: 'Paducah, Kentucky',
+            entityType: 'location',
+            aliases: ['Paducah'],
+            similarity: 0.77,
+            edgeCount: 5,
+          },
+        ] satisfies EntityResult[]),
+      }
+      const inst = await typegraphInit({ vectorStore: adapter, embedding, knowledgeGraph })
+
+      const results = await inst.graph.searchEntities('Cole Conway', identity, {
+        limit: 10,
+        entityType: 'person',
+        minConnections: 2,
+      })
+
+      expect(knowledgeGraph.searchEntities).toHaveBeenCalledWith('Cole Conway', identity, 10)
+      expect(results).toEqual([
+        expect.objectContaining({
+          id: 'ent_caesar',
+          aliases: ['Cole Conway'],
+          edgeCount: 3,
+        }),
+      ])
     })
   })
 

@@ -41,6 +41,25 @@ const GENERIC_NOUNS = new Set([
   'draft', 'drafts', 'round', 'rounds',
 ])
 
+const PERSON_COMMON_GIVEN_NAMES = new Set([
+  'alice', 'anne', 'anna', 'bertha', 'bill', 'bob', 'charles', 'david',
+  'elizabeth', 'frank', 'george', 'harry', 'henry', 'jack', 'james', 'john',
+  'mary', 'michael', 'nancy', 'paul', 'peter', 'rose', 'sam', 'sarah',
+  'steve', 'thomas', 'william',
+])
+
+const PERSON_TITLE_PREFIXES = new Set([
+  'cousin', 'captain', 'colonel', 'doctor', 'dr', 'judge', 'king', 'queen',
+  'lord', 'lady', 'sir', 'saint', 'st',
+])
+
+const ALIAS_LEADING_FRAGMENT_WORDS = new Set([
+  'a', 'an', 'and', 'as', 'at', 'because', 'before', 'but', 'by', 'for',
+  'from', 'if', 'in', 'now', 'of', 'on', 'or', 'since', 'so', 'that', 'then',
+  'there', 'therefore', 'these', 'this', 'those', 'though', 'to', 'when',
+  'where', 'while', 'with',
+])
+
 /**
  * Validates whether a string is a legitimate alias (proper name, abbreviation, or nickname).
  * Rejects pronouns, generic noun phrases, pure numbers, and too-short strings.
@@ -104,6 +123,54 @@ export function isValidAlias(alias: string): boolean {
   return true
 }
 
+function hasSentenceBoundaryInsideAlias(value: string): boolean {
+  const withoutInitials = value.replace(/\b[A-Z]\.\s*/g, '')
+  return /[.!?]|--|—|–/.test(withoutInitials)
+}
+
+function isDisplayAliasSafe(alias: string, entityType: string): boolean {
+  if (!isValidAlias(alias)) return false
+  if (entityType !== 'person') return true
+  if (hasSentenceBoundaryInsideAlias(alias)) return false
+  const tokens = nameTokens(alias)
+  if (tokens.length === 0 || tokens.length > 5) return false
+  if (ALIAS_LEADING_FRAGMENT_WORDS.has(tokens[0]!)) return false
+  return true
+}
+
+function isStrongAliasForMerge(
+  alias: string,
+  entityType: string,
+  ownerName: string,
+  ownerAliases: string[],
+): boolean {
+  if (!isDisplayAliasSafe(alias, entityType)) return false
+  if (entityType !== 'person') return true
+
+  const aliasTokens = nameTokens(alias)
+  const ownerTokens = nameTokens(ownerName)
+  if (aliasTokens.length === 0) return false
+  if (ownerTokens.length <= 1) return true
+
+  if (aliasTokens.length === 1) {
+    const token = aliasTokens[0]!
+    const ownerLast = ownerTokens[ownerTokens.length - 1]!
+    const ownerHasTitlePrefix = PERSON_TITLE_PREFIXES.has(ownerTokens[0]!)
+    if (token === ownerLast) return ownerHasTitlePrefix
+    if (PERSON_COMMON_GIVEN_NAMES.has(token)) return false
+    if (ownerTokens.includes(token)) return true
+    return ownerAliases.some(otherAlias => {
+      const otherTokens = nameTokens(otherAlias)
+      return otherTokens.length >= 2
+        && otherTokens[otherTokens.length - 1] === token
+        && otherTokens[otherTokens.length - 1] !== ownerLast
+        && !isWeakSurnameOnlyPersonNamePair(otherAlias, ownerName)
+    })
+  }
+
+  return !isWeakSurnameOnlyPersonNamePair(alias, ownerName)
+}
+
 /** Common adjectives that appear in generic references but not proper names */
 function isCommonAdjective(word: string): boolean {
   const ADJECTIVES = new Set([
@@ -158,7 +225,7 @@ export class EntityResolver {
   private cacheEntity(entity: SemanticEntity): void {
     this.nameCache.set(normalizeForComparison(entity.name), entity)
     for (const alias of entity.aliases) {
-      if (!isValidAlias(alias)) continue // skip indexing garbage aliases
+      if (!isStrongAliasForMerge(alias, entity.entityType, entity.name, entity.aliases)) continue
       this.nameCache.set(normalizeForComparison(alias), entity)
     }
   }
@@ -184,7 +251,7 @@ export class EntityResolver {
     }
     // Also check aliases against cache (skip invalid aliases to prevent false cache hits)
     for (const alias of aliases) {
-      if (!isValidAlias(alias)) continue
+      if (!isStrongAliasForMerge(alias, entityType, name, aliases)) continue
       const cachedByAlias = this.nameCache.get(normalizeForComparison(alias))
       if (cachedByAlias && typesCompatible(entityType, cachedByAlias.entityType)) {
         const merged = await this.merge(cachedByAlias, { name, entityType, aliases, description })
@@ -212,6 +279,7 @@ export class EntityResolver {
           return { entity: merged, isNew: false }
         }
         for (const alias of candidate.aliases) {
+          if (!isStrongAliasForMerge(alias, candidate.entityType, candidate.name, candidate.aliases)) continue
           if (normalizeForComparison(alias) === normalizedName) {
             const merged = await this.merge(candidate, { name, entityType, aliases, description })
             this.cacheEntity(merged)
@@ -241,6 +309,7 @@ export class EntityResolver {
         if (!typesCompatible(entityType, candidate.entityType)) continue
         if (entityType === 'person' && candidate.entityType === 'person') {
           if (!hasMatchingLastToken(name, candidate.name)) continue
+          if (hasWeakPersonNameMergeEvidence(name, candidate.name)) continue
         }
         if (hasConflictingDistinguishers(name, candidate.name)) continue
         if (!hasSharedNameToken(name, candidate.name)) continue
@@ -301,19 +370,22 @@ export class EntityResolver {
     entityType: string,
     candidates: SemanticEntity[],
   ): SemanticEntity | undefined {
-    const nameLower = name.toLowerCase()
-    const aliasesLower = aliases.map(a => a.toLowerCase())
+    const incomingNames = [
+      name,
+      ...aliases.filter(alias => isStrongAliasForMerge(alias, entityType, name, aliases)),
+    ].map(normalizeForComparison)
 
     for (const candidate of candidates) {
       if (!typesCompatible(entityType, candidate.entityType)) continue
       const candidateNames = [
-        candidate.name.toLowerCase(),
-        ...candidate.aliases.map(a => a.toLowerCase()),
-      ]
+        candidate.name,
+        ...candidate.aliases.filter(alias =>
+          isStrongAliasForMerge(alias, candidate.entityType, candidate.name, candidate.aliases)
+        ),
+      ].map(normalizeForComparison)
 
-      if (candidateNames.includes(nameLower)) return candidate
-      for (const alias of aliasesLower) {
-        if (candidateNames.includes(alias)) return candidate
+      for (const incomingName of incomingNames) {
+        if (candidateNames.includes(incomingName)) return candidate
       }
     }
 
@@ -328,34 +400,47 @@ export class EntityResolver {
     existing: SemanticEntity,
     incoming: { name: string; entityType: string; aliases: string[]; description?: string | undefined },
   ): Promise<SemanticEntity> {
-    const existingAliases = new Set(existing.aliases.map(a => a.toLowerCase()))
-    const newAliases = [...existing.aliases]
+    const existingAliases = new Set<string>()
+    const newAliases: string[] = []
+
+    for (const alias of existing.aliases) {
+      if (!isDisplayAliasSafe(alias, existing.entityType)) continue
+      const key = normalizeForComparison(alias)
+      if (existingAliases.has(key) || key === normalizeForComparison(existing.name)) continue
+      existingAliases.add(key)
+      newAliases.push(alias)
+    }
 
     // Add the incoming name as an alias if different from canonical (validate first)
-    if (incoming.name.toLowerCase() !== existing.name.toLowerCase()) {
-      if (!existingAliases.has(incoming.name.toLowerCase()) && isValidAlias(incoming.name)) {
+    if (normalizeForComparison(incoming.name) !== normalizeForComparison(existing.name)) {
+      const key = normalizeForComparison(incoming.name)
+      if (!existingAliases.has(key) && isDisplayAliasSafe(incoming.name, incoming.entityType)) {
+        existingAliases.add(key)
         newAliases.push(incoming.name)
       }
     }
 
     // Add new aliases (filter out garbage)
     for (const alias of incoming.aliases) {
-      if (!isValidAlias(alias)) continue
-      if (!existingAliases.has(alias.toLowerCase()) && alias.toLowerCase() !== existing.name.toLowerCase()) {
+      if (!isDisplayAliasSafe(alias, incoming.entityType)) continue
+      const key = normalizeForComparison(alias)
+      if (!existingAliases.has(key) && key !== normalizeForComparison(existing.name)) {
+        existingAliases.add(key)
         newAliases.push(alias)
       }
     }
 
-    // Merge descriptions: keep best description, capped at 500 chars to prevent runaway growth
-    const MAX_DESCRIPTION_LENGTH = 500
+    // Merge descriptions at fact/sentence boundaries, capped to prevent runaway growth.
+    const MAX_DESCRIPTION_LENGTH = 1200
     const properties = { ...existing.properties }
-    if (incoming.description) {
-      const existingDesc = (properties.description as string | undefined) ?? ''
-      if (!existingDesc) {
-        properties.description = incoming.description.slice(0, MAX_DESCRIPTION_LENGTH)
-      } else if (existingDesc.length < MAX_DESCRIPTION_LENGTH && !existingDesc.includes(incoming.description)) {
-        properties.description = `${existingDesc} ${incoming.description}`.slice(0, MAX_DESCRIPTION_LENGTH)
-      }
+    const existingDesc = (properties.description as string | undefined) ?? ''
+    const incomingDescription = incoming.description
+      && !descriptionAppearsAboutDifferentPerson(existing, incoming)
+      ? incoming.description
+      : undefined
+    const mergedDescription = mergeDescriptions(existingDesc, incomingDescription, MAX_DESCRIPTION_LENGTH)
+    if (mergedDescription) {
+      properties.description = mergedDescription
     }
 
     // Re-embed description if it changed (so stored description_embedding stays fresh)
@@ -389,14 +474,23 @@ export class EntityResolver {
     candidates: SemanticEntity[],
   ): SemanticEntity | undefined {
     const FUZZY_THRESHOLD = 0.85
-    const incomingNames = [name, ...aliases]
+    const incomingNames = [
+      name,
+      ...aliases.filter(alias => isStrongAliasForMerge(alias, entityType, name, aliases)),
+    ]
 
     for (const candidate of candidates) {
       if (!typesCompatible(entityType, candidate.entityType)) continue
       if (entityType === 'person' && candidate.entityType === 'person') {
         if (!hasMatchingLastToken(name, candidate.name)) continue
+        if (hasWeakPersonNameMergeEvidence(name, candidate.name)) continue
       }
-      const candidateNames = [candidate.name, ...candidate.aliases]
+      const candidateNames = [
+        candidate.name,
+        ...candidate.aliases.filter(alias =>
+          isStrongAliasForMerge(alias, candidate.entityType, candidate.name, candidate.aliases)
+        ),
+      ]
 
       for (const a of incomingNames) {
         for (const b of candidateNames) {
@@ -427,6 +521,7 @@ export class EntityResolver {
       if (!typesCompatible(entityType, c.entityType)) return false
       if (entityType === 'person' && c.entityType === 'person') {
         if (!hasMatchingLastToken(name, c.name)) return false
+        if (isWeakSingleTokenPersonNamePair(name, c.name)) return false
       }
       if (hasConflictingDistinguishers(name, c.name)) return false
       if (!hasSharedNameToken(name, c.name)) return false
@@ -480,7 +575,147 @@ export class EntityResolver {
  * Catches: "OpenAI" vs "openai", "New York" vs "NewYork", "X" vs "x"
  */
 function normalizeForComparison(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, '')
+  return s
+    .replace(/[Ææ]/g, 'ae')
+    .replace(/[Œœ]/g, 'oe')
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function nameTokens(s: string): string[] {
+  return s
+    .replace(/[Ææ]/g, 'ae')
+    .replace(/[Œœ]/g, 'oe')
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
+function isWeakSurnameOnlyPersonNamePair(a: string, b: string): boolean {
+  const aTokens = nameTokens(a)
+  const bTokens = nameTokens(b)
+  if (aTokens.length < 2 || bTokens.length < 2) return false
+  const aLast = aTokens[aTokens.length - 1]!
+  const bLast = bTokens[bTokens.length - 1]!
+  if (aLast !== bLast) return false
+
+  const aNonLast = new Set(aTokens.slice(0, -1).filter(t => !STOP_WORDS.has(t)))
+  const bNonLast = new Set(bTokens.slice(0, -1).filter(t => !STOP_WORDS.has(t)))
+  for (const token of aNonLast) {
+    if (bNonLast.has(token)) return false
+  }
+
+  const aStartsWithTitle = PERSON_TITLE_PREFIXES.has(aTokens[0]!)
+  const bStartsWithTitle = PERSON_TITLE_PREFIXES.has(bTokens[0]!)
+  if (aStartsWithTitle && bStartsWithTitle && aTokens[0] === bTokens[0]) return false
+  if (hasCompatibleGivenNamePrefix(aTokens, bTokens)) return false
+  return true
+}
+
+function hasCompatibleGivenNamePrefix(aTokens: string[], bTokens: string[]): boolean {
+  const aFirst = aTokens[0]
+  const bFirst = bTokens[0]
+  if (!aFirst || !bFirst || aFirst.length < 3 || bFirst.length < 3) return false
+  return aFirst.startsWith(bFirst) || bFirst.startsWith(aFirst)
+}
+
+function isWeakSingleTokenPersonNamePair(a: string, b: string): boolean {
+  const aTokens = nameTokens(a)
+  const bTokens = nameTokens(b)
+  const weakSingleLast = (single: string[], full: string[]): boolean => {
+    if (single.length !== 1 || full.length < 2) return false
+    const token = single[0]!
+    const fullLast = full[full.length - 1]!
+    if (token !== fullLast) return false
+    return !PERSON_TITLE_PREFIXES.has(full[0]!)
+  }
+  return weakSingleLast(aTokens, bTokens) || weakSingleLast(bTokens, aTokens)
+}
+
+function hasWeakPersonNameMergeEvidence(a: string, b: string): boolean {
+  return isWeakSurnameOnlyPersonNamePair(a, b) || isWeakSingleTokenPersonNamePair(a, b)
+}
+
+function splitDescriptionSentences(text: string): string[] {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  if (!clean) return []
+  return (clean.match(/[^.!?]+[.!?]?/g) ?? [clean])
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+function normalizeDescriptionSentence(text: string): string {
+  return text
+    .replace(/[Ææ]/g, 'ae')
+    .replace(/[Œœ]/g, 'oe')
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+}
+
+function trimAtWordBoundary(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text
+  const truncated = text.slice(0, maxLength).trim()
+  const lastSpace = truncated.lastIndexOf(' ')
+  return (lastSpace > 40 ? truncated.slice(0, lastSpace) : truncated).trim()
+}
+
+function mergeDescriptions(existingDescription: string, incomingDescription: string | undefined, maxLength: number): string {
+  const sentences = [
+    ...splitDescriptionSentences(existingDescription),
+    ...(incomingDescription ? splitDescriptionSentences(incomingDescription) : []),
+  ]
+  const seen = new Set<string>()
+  const merged: string[] = []
+
+  for (const sentence of sentences) {
+    const key = normalizeDescriptionSentence(sentence)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+
+    const next = [...merged, sentence].join(' ')
+    if (next.length <= maxLength) {
+      merged.push(sentence)
+      continue
+    }
+
+    if (merged.length === 0) {
+      merged.push(trimAtWordBoundary(sentence, maxLength))
+    }
+    break
+  }
+
+  return merged.join(' ').trim()
+}
+
+function descriptionAppearsAboutDifferentPerson(
+  existing: SemanticEntity,
+  incoming: { name: string; entityType: string; aliases: string[]; description?: string | undefined },
+): boolean {
+  if (existing.entityType !== 'person' || incoming.entityType !== 'person' || !incoming.description) return false
+  const desc = normalizeDescriptionSentence(incoming.description)
+  const relationshipWords = [
+    'uncle', 'aunt', 'father', 'mother', 'son', 'daughter', 'brother', 'sister',
+    'wife', 'husband', 'cousin', 'relative', 'lawyer', 'friend', 'partner',
+  ]
+  const existingNames = [existing.name, ...existing.aliases]
+    .map(normalizeDescriptionSentence)
+    .filter(Boolean)
+
+  for (const name of existingNames) {
+    for (const relationship of relationshipWords) {
+      if (desc.includes(`${relationship} of ${name}`)) return true
+    }
+  }
+  return false
 }
 
 /**
@@ -489,7 +724,13 @@ function normalizeForComparison(s: string): string {
  * that normalized string matching misses but vector similarity is too coarse for.
  */
 function trigramJaccard(a: string, b: string): number {
-  const normalized = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const normalized = (s: string) => s
+    .replace(/[Ææ]/g, 'ae')
+    .replace(/[Œœ]/g, 'oe')
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
   const trigrams = (s: string): Set<string> => {
     const t = new Set<string>()
     const n = normalized(s)

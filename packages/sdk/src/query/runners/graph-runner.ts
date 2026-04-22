@@ -73,7 +73,7 @@ function runLightweightPPR(
   adjacency: Map<string, Array<{ target: string; weight: number }>>,
   seedNodes: string[],
   seedWeights?: Map<string, number>,
-  dampingFactor = 0.35,
+  dampingFactor = 0.15,
   maxIterations = 50
 ): Map<string, number> {
   const allNodes = new Set<string>()

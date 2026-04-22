@@ -124,6 +124,8 @@ export type {
   TemporalRecord,
   EpisodicMemory,
   SemanticEntity,
+  EntityMentionType,
+  SemanticEntityMention,
   SemanticEdge,
   SemanticFact,
   ProceduralMemory,

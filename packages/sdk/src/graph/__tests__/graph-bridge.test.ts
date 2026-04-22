@@ -43,7 +43,9 @@ interface MockMention {
   documentId: string
   chunkIndex: number
   bucketId: string
-  mentionType: 'subject' | 'object' | 'co_occurrence'
+  mentionType: 'subject' | 'object' | 'co_occurrence' | 'entity' | 'alias'
+  surfaceText?: string | undefined
+  normalizedSurfaceText?: string | undefined
   confidence?: number | undefined
 }
 
@@ -82,6 +84,26 @@ function mockStore(
       )
     }),
     searchEntities: vi.fn().mockImplementation(async () => [...entities.values()]),
+    searchEntitiesHybrid: vi.fn().mockImplementation(async (query: string) => {
+      const normalized = query
+        .replace(/[Ææ]/g, 'ae')
+        .replace(/[Œœ]/g, 'oe')
+        .normalize('NFKD')
+        .replace(/\p{Diacritic}/gu, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+      const exact = [...entities.values()]
+        .filter(e =>
+          e.name.toLowerCase() === query.toLowerCase()
+          || e.aliases.some(a => a.toLowerCase() === query.toLowerCase())
+          || mentions.some(m => m.entityId === e.id && m.normalizedSurfaceText === normalized)
+        )
+        .map(e => ({ ...e, properties: { ...e.properties, _similarity: 1 } }))
+      return exact.length > 0
+        ? exact
+        : [...entities.values()].map(e => ({ ...e, properties: { ...e.properties, _similarity: 0.5 } }))
+    }),
     upsertEdge: vi.fn().mockImplementation(async (e: SemanticEdge) => {
       edges.push(e)
       return e
@@ -211,6 +233,106 @@ describe('createKnowledgeGraphBridge', () => {
       expect(mentions.map(m => m.mentionType).sort()).toEqual(['object', 'subject'])
     })
 
+    it('stores aliases as searchable surface mentions', async () => {
+      const entities = new Map<string, SemanticEntity>()
+      const edges: SemanticEdge[] = []
+      const mentions: MockMention[] = []
+      const store = mockStore(entities, edges, mentions)
+      const bridge = createKnowledgeGraphBridge({
+        memoryStore: store,
+        embedding: mockEmbedding(),
+        scope: testScope,
+      })
+
+      await bridge.addTriple!({
+        subject: 'Cæsar Simon',
+        subjectType: 'person',
+        subjectAliases: ['Conway', 'Cole Conway', 'Cousin Cæsar'],
+        predicate: 'collaborated_with',
+        object: 'Steve Sharp',
+        objectType: 'person',
+        content: 'Cæsar Simon was calling himself Cole Conway in company with Steve Sharp.',
+        bucketId: 'bucket-1',
+        documentId: 'doc-47558',
+        chunkIndex: 24,
+      })
+
+      expect(mentions).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          mentionType: 'alias',
+          surfaceText: 'Cole Conway',
+          normalizedSurfaceText: 'cole conway',
+        }),
+      ]))
+
+      const found = await bridge.searchEntities!('Cole Conway', testScope, 10)
+      expect(found[0]).toEqual(expect.objectContaining({ name: 'Cæsar Simon' }))
+
+      const foundBySurname = await bridge.searchEntities!('Conway', testScope, 10)
+      expect(foundBySurname[0]).toEqual(expect.objectContaining({ name: 'Cæsar Simon' }))
+
+      const foundByAlias = await bridge.searchEntities!('Cousin Cæsar', testScope, 10)
+      expect(foundByAlias[0]).toEqual(expect.objectContaining({ name: 'Cæsar Simon' }))
+
+      const foundByAsciiAlias = await bridge.searchEntities!('Cousin Caesar', testScope, 10)
+      expect(foundByAsciiAlias[0]).toEqual(expect.objectContaining({ name: 'Cæsar Simon' }))
+    })
+
+    it('does not persist self-edges after entity resolution', async () => {
+      const entities = new Map<string, SemanticEntity>()
+      const edges: SemanticEdge[] = []
+      const store = mockStore(entities, edges)
+      const bridge = createKnowledgeGraphBridge({
+        memoryStore: store,
+        embedding: mockEmbedding(),
+        scope: testScope,
+      })
+
+      await bridge.addTriple!({
+        subject: 'Cæsar Simon',
+        subjectType: 'person',
+        subjectAliases: ['Conway'],
+        predicate: 'known_as',
+        object: 'Conway',
+        objectType: 'person',
+        objectAliases: ['Cæsar Simon'],
+        content: 'Cæsar Simon was known as Conway.',
+        bucketId: 'bucket-1',
+        documentId: 'doc-1',
+        chunkIndex: 0,
+      })
+
+      expect(edges).toHaveLength(0)
+    })
+
+    it('stores entity mentions even when no relationship is available', async () => {
+      const entities = new Map<string, SemanticEntity>()
+      const mentions: MockMention[] = []
+      const store = mockStore(entities, [], mentions)
+      const bridge = createKnowledgeGraphBridge({
+        memoryStore: store,
+        embedding: mockEmbedding(),
+        scope: testScope,
+      })
+
+      await bridge.addEntityMentions!([{
+        name: 'Cole Conway',
+        type: 'person',
+        aliases: ['Conway'],
+        description: 'A name used by Cæsar Simon in Paducah.',
+        content: 'At twenty years of age Cousin Cæsar was calling himself Cole Conway.',
+        bucketId: 'bucket-1',
+        documentId: 'doc-1',
+        chunkIndex: 0,
+      }])
+
+      expect(entities.size).toBe(1)
+      expect(mentions).toEqual(expect.arrayContaining([
+        expect.objectContaining({ mentionType: 'entity', surfaceText: 'Cole Conway' }),
+        expect.objectContaining({ mentionType: 'alias', surfaceText: 'Conway' }),
+      ]))
+    })
+
     it('normalizes predicate to SCREAMING_SNAKE_CASE', async () => {
       const edges: SemanticEdge[] = []
       const store = mockStore(new Map(), edges)
@@ -272,10 +394,23 @@ describe('createKnowledgeGraphBridge', () => {
   describe('searchEntities', () => {
     it('embeds query and searches store', async () => {
       const entities = new Map<string, SemanticEntity>()
-      entities.set('e1', makeEntity('e1', 'Vitamin D'))
+      entities.set('e1', {
+        ...makeEntity('e1', 'Vitamin D', 'supplement'),
+        aliases: ['cholecalciferol'],
+        properties: { source: 'test fixture' },
+      })
       entities.set('e2', makeEntity('e2', 'Calcium'))
+      const edges = [
+        makeEdge('edge-1', 'e1', 'e2', 'SUPPORTS'),
+        makeEdge('edge-2', 'e1', 'e3', 'IMPROVES'),
+      ]
 
-      const store = mockStore(entities)
+      const store = mockStore(entities, edges)
+      ;(store.getEdgesBatch as ReturnType<typeof vi.fn>).mockResolvedValue([
+        edges[0]!,
+        edges[0]!,
+        edges[1]!,
+      ])
       const emb = mockEmbedding()
       const bridge = createKnowledgeGraphBridge({
         memoryStore: store,
@@ -286,11 +421,19 @@ describe('createKnowledgeGraphBridge', () => {
       const results = await bridge.searchEntities!('vitamin supplements', testScope, 5)
 
       expect(emb.embed).toHaveBeenCalledWith('vitamin supplements')
-      expect(store.searchEntities).toHaveBeenCalled()
+      expect(store.searchEntitiesHybrid).toHaveBeenCalled()
       expect(results).toHaveLength(2)
       expect(results[0]).toHaveProperty('id')
       expect(results[0]).toHaveProperty('name')
       expect(results[0]).toHaveProperty('entityType')
+      expect(results[0]).toEqual(expect.objectContaining({
+        aliases: ['cholecalciferol'],
+        similarity: 0.5,
+        edgeCount: 2,
+        properties: expect.objectContaining({ source: 'test fixture' }),
+      }))
+      expect(results[0]?.properties).not.toHaveProperty('_similarity')
+      expect(results[1]).toEqual(expect.objectContaining({ edgeCount: 1 }))
     })
 
     it('returns empty array when store does not support searchEntities', async () => {

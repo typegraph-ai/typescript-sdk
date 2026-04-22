@@ -2,9 +2,9 @@ import type { EmbeddingProvider } from '../embedding/provider.js'
 import { embeddingModelKey } from '../embedding/provider.js'
 import type { typegraphIdentity } from '../types/identity.js'
 import type { EmbeddingConfig } from '../types/bucket.js'
-import type { KnowledgeGraphBridge, EntityDetail, EdgeResult, SubgraphOpts, SubgraphResult, GraphStats } from '../types/graph-bridge.js'
+import type { KnowledgeGraphBridge, EntityDetail, EntityResult, EdgeResult, SubgraphOpts, SubgraphResult, GraphStats } from '../types/graph-bridge.js'
 import { resolveEmbeddingProvider } from '../typegraph.js'
-import type { MemoryStoreAdapter, SemanticEdge } from '../memory/types/index.js'
+import type { MemoryStoreAdapter, SemanticEdge, SemanticEntity, SemanticEntityMention } from '../memory/types/index.js'
 import { EntityResolver, PredicateNormalizer, createTemporal } from '../memory/index.js'
 import { EmbeddedGraph } from './graph/embedded-graph.js'
 import { generateId } from '../utils/id.js'
@@ -24,6 +24,55 @@ export interface CreateKnowledgeGraphBridgeConfig {
    * source text. Typically wired to `vectorAdapter.getTable(model)`.
    */
   resolveChunksTable?: (model: string) => string | Promise<string>
+}
+
+function normalizeSurfaceText(value: string): string {
+  return value
+    .replace(/[Ææ]/g, 'ae')
+    .replace(/[Œœ]/g, 'oe')
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function buildEntityMentions(input: {
+  entityId: string
+  documentId: string
+  chunkIndex: number
+  bucketId: string
+  mentionType: SemanticEntityMention['mentionType']
+  confidence?: number | undefined
+  names: string[]
+  aliases: string[]
+}): SemanticEntityMention[] {
+  const rows: SemanticEntityMention[] = []
+  const seen = new Set<string>()
+
+  const add = (surfaceText: string, mentionType: SemanticEntityMention['mentionType']) => {
+    const trimmed = surfaceText.trim()
+    if (!trimmed) return
+    const normalizedSurfaceText = normalizeSurfaceText(trimmed)
+    const key = `${mentionType}:${normalizedSurfaceText}`
+    if (seen.has(key)) return
+    seen.add(key)
+    rows.push({
+      entityId: input.entityId,
+      documentId: input.documentId,
+      chunkIndex: input.chunkIndex,
+      bucketId: input.bucketId,
+      mentionType,
+      surfaceText: trimmed,
+      normalizedSurfaceText,
+      confidence: input.confidence,
+    })
+  }
+
+  for (const name of input.names) add(name, input.mentionType)
+  for (const alias of input.aliases) add(alias, 'alias')
+  return rows
 }
 
 // ── Knowledge Graph Bridge Factory ──
@@ -51,6 +100,73 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
   const chunkEntityMap = new Map<string, Set<string>>()
   const directEdgePairs = new Set<string>()
 
+  async function resolveAndStoreEntity(input: {
+    name: string
+    type?: string | undefined
+    aliases?: string[] | undefined
+    description?: string | undefined
+    bucketId: string
+    documentId?: string | undefined
+    chunkIndex?: number | undefined
+    confidence?: number | undefined
+    mentionType: SemanticEntityMention['mentionType']
+  }): Promise<SemanticEntity> {
+    const scope = defaultScope
+    const result = await resolver.resolve(
+      input.name,
+      input.type ?? 'entity',
+      input.aliases ?? [],
+      scope,
+      input.description,
+    )
+
+    await graph.addEntity(result.entity)
+
+    if (memoryStore.upsertEntityChunkMentions && input.documentId && input.chunkIndex !== undefined) {
+      const mentions = buildEntityMentions({
+        entityId: result.entity.id,
+        documentId: input.documentId,
+        chunkIndex: input.chunkIndex,
+        bucketId: input.bucketId,
+        mentionType: input.mentionType,
+        confidence: input.confidence,
+        names: [input.name, result.entity.name],
+        aliases: input.aliases ?? [],
+      })
+      if (mentions.length > 0) await memoryStore.upsertEntityChunkMentions(mentions)
+    }
+
+    return result.entity
+  }
+
+  async function addEntityMentions(mentions: Array<{
+    name: string
+    type?: string | undefined
+    aliases?: string[] | undefined
+    description?: string | undefined
+    content: string
+    bucketId: string
+    chunkIndex?: number | undefined
+    documentId?: string | undefined
+    metadata?: Record<string, unknown> | undefined
+    confidence?: number | undefined
+  }>): Promise<void> {
+    for (const mention of mentions) {
+      if (!mention.name?.trim()) continue
+      await resolveAndStoreEntity({
+        name: mention.name,
+        type: mention.type,
+        aliases: mention.aliases,
+        description: mention.description,
+        bucketId: mention.bucketId,
+        documentId: mention.documentId,
+        chunkIndex: mention.chunkIndex,
+        confidence: mention.confidence,
+        mentionType: 'entity',
+      })
+    }
+  }
+
   async function addTriple(triple: {
     subject: string
     subjectType?: string
@@ -76,19 +192,36 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       .replace(/[\s-]+/g, '_')
       .replace(/[^A-Z0-9_]/g, '')
 
+    const subjectResult = await resolveAndStoreEntity({
+      name: triple.subject,
+      type: triple.subjectType,
+      aliases: triple.subjectAliases,
+      description: triple.subjectDescription,
+      bucketId: triple.bucketId,
+      documentId: triple.documentId,
+      chunkIndex: triple.chunkIndex,
+      confidence: triple.confidence,
+      mentionType: 'subject',
+    })
+    const objectResult = await resolveAndStoreEntity({
+      name: triple.object,
+      type: triple.objectType,
+      aliases: triple.objectAliases,
+      description: triple.objectDescription,
+      bucketId: triple.bucketId,
+      documentId: triple.documentId,
+      chunkIndex: triple.chunkIndex,
+      confidence: triple.confidence,
+      mentionType: 'object',
+    })
+
+    if (GENERIC_PREDICATES.has(relation)) return
+    relation = await predicateNormalizer.normalize(relation)
     if (GENERIC_PREDICATES.has(relation)) return
 
-    relation = await predicateNormalizer.normalize(relation)
-
-    const [subjectResult, objectResult] = await Promise.all([
-      resolver.resolve(triple.subject, triple.subjectType ?? 'entity', triple.subjectAliases ?? [], scope, triple.subjectDescription),
-      resolver.resolve(triple.object, triple.objectType ?? 'entity', triple.objectAliases ?? [], scope, triple.objectDescription),
-    ])
-
-    await Promise.all([
-      graph.addEntity(subjectResult.entity),
-      graph.addEntity(objectResult.entity),
-    ])
+    // Dedupe may resolve subject and object to the same canonical entity. A
+    // self-edge carries no traversal value and corrupts relation semantics.
+    if (subjectResult.id === objectResult.id) return
 
     const weight = triple.confidence ?? 1.0
 
@@ -97,8 +230,8 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     // properties only if the caller supplied it (not auto-generated content).
     const edge: SemanticEdge = {
       id: generateId('edge'),
-      sourceEntityId: subjectResult.entity.id,
-      targetEntityId: objectResult.entity.id,
+      sourceEntityId: subjectResult.id,
+      targetEntityId: objectResult.id,
       relation,
       weight,
       properties: triple.metadata ? { metadata: triple.metadata } : {},
@@ -109,53 +242,21 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
 
     await graph.addEdge(edge)
 
-    // Record entity↔chunk mentions in the junction (provenance).
-    // Skipped if documentId/chunkIndex aren't provided — triple lacks a source anchor.
-    const mentions: Array<{
-      entityId: string
-      documentId: string
-      chunkIndex: number
-      bucketId: string
-      mentionType: 'subject' | 'object' | 'co_occurrence'
-      confidence?: number | undefined
-    }> = []
-    if (triple.documentId && triple.chunkIndex !== undefined) {
-      mentions.push({
-        entityId: subjectResult.entity.id,
-        documentId: triple.documentId,
-        chunkIndex: triple.chunkIndex,
-        bucketId: triple.bucketId,
-        mentionType: 'subject',
-        confidence: triple.confidence,
-      })
-      mentions.push({
-        entityId: objectResult.entity.id,
-        documentId: triple.documentId,
-        chunkIndex: triple.chunkIndex,
-        bucketId: triple.bucketId,
-        mentionType: 'object',
-        confidence: triple.confidence,
-      })
-      if (memoryStore.upsertEntityChunkMentions) {
-        await memoryStore.upsertEntityChunkMentions(mentions)
-      }
-    }
-
-    const pairKey = [subjectResult.entity.id, objectResult.entity.id].sort().join(':')
+    const pairKey = [subjectResult.id, objectResult.id].sort().join(':')
     directEdgePairs.add(pairKey)
 
     // CO_OCCURS edges for disconnected entities
-    const chunkKey = `${triple.bucketId}:${triple.chunkIndex ?? 0}`
+    const chunkKey = `${triple.bucketId}:${triple.documentId ?? ''}:${triple.chunkIndex ?? 0}`
     let chunkEntities = chunkEntityMap.get(chunkKey)
     if (!chunkEntities) {
       chunkEntities = new Set()
       chunkEntityMap.set(chunkKey, chunkEntities)
     }
-    const newEntityIds = [subjectResult.entity.id, objectResult.entity.id]
+    const newEntityIds = [subjectResult.id, objectResult.id]
     for (const newId of newEntityIds) {
       if (chunkEntities.has(newId)) continue
 
-      const hasDirectEdges = [...directEdgePairs].some(pair => pair.includes(newId))
+      const hasDirectEdges = [...directEdgePairs].some(pair => pair.split(':').includes(newId))
       if (!hasDirectEdges) {
         const existingIds = [...chunkEntities]
         if (existingIds.length > 0) {
@@ -181,6 +282,7 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
                 chunkIndex: triple.chunkIndex,
                 bucketId: triple.bucketId,
                 mentionType: 'co_occurrence',
+                normalizedSurfaceText: '',
               }])
             }
           }
@@ -194,18 +296,41 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     query: string,
     identity: typegraphIdentity,
     limit: number = 10,
-  ): Promise<Array<{ id: string; name: string; entityType: string; similarity?: number }>> {
-    if (!memoryStore.searchEntities) return []
+  ): Promise<EntityResult[]> {
+    if (!memoryStore.searchEntities && !memoryStore.searchEntitiesHybrid) return []
 
     const queryEmbedding = await embedding.embed(query)
-    const entities = await memoryStore.searchEntities(queryEmbedding, identity, limit)
+    const entities = memoryStore.searchEntitiesHybrid
+      ? await memoryStore.searchEntitiesHybrid(query, queryEmbedding, identity, limit)
+      : await memoryStore.searchEntities!(queryEmbedding, identity, limit)
 
-    return entities.map(e => ({
-      id: e.id,
-      name: e.name,
-      entityType: e.entityType,
-      similarity: (e.properties._similarity as number) ?? undefined,
-    }))
+    const resultIds = entities.map(e => e.id)
+    const edgeIdsByEntity = new Map<string, Set<string>>()
+    for (const id of resultIds) edgeIdsByEntity.set(id, new Set())
+
+    if (resultIds.length > 0) {
+      const edges = await graph.getEdgesBatch(resultIds, 'both')
+      for (const edge of edges) {
+        edgeIdsByEntity.get(edge.sourceEntityId)?.add(edge.id)
+        edgeIdsByEntity.get(edge.targetEntityId)?.add(edge.id)
+      }
+    }
+
+    return entities.map(e => {
+      const properties = { ...e.properties }
+      const similarity = properties._similarity
+      delete properties._similarity
+
+      return {
+        id: e.id,
+        name: e.name,
+        entityType: e.entityType,
+        aliases: e.aliases,
+        ...(typeof similarity === 'number' ? { similarity } : {}),
+        edgeCount: edgeIdsByEntity.get(e.id)?.size ?? 0,
+        properties,
+      }
+    })
   }
 
   async function getAdjacencyList(
@@ -237,10 +362,21 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       allEntityIds.add(edge.targetEntityId)
     }
 
-    const newNeighborIds = [...allEntityIds].filter(id => !entityIds.includes(id)).slice(0, 30)
-    if (newNeighborIds.length > 0) {
-      const hopEdges = await graph.getEdgesBatch(newNeighborIds, 'both')
-      neighborEdges.push(...hopEdges)
+    const firstHopIds = [...allEntityIds].filter(id => !entityIds.includes(id)).slice(0, 100)
+    if (firstHopIds.length > 0) {
+      const firstHopEdges = await graph.getEdgesBatch(firstHopIds, 'both')
+      for (const edge of firstHopEdges) {
+        neighborEdges.push(edge)
+        allEntityIds.add(edge.sourceEntityId)
+        allEntityIds.add(edge.targetEntityId)
+      }
+
+      const seenIds = new Set<string>([...entityIds, ...firstHopIds])
+      const secondHopIds = [...allEntityIds].filter(id => !seenIds.has(id)).slice(0, 100)
+      if (secondHopIds.length > 0) {
+        const secondHopEdges = await graph.getEdgesBatch(secondHopIds, 'both')
+        neighborEdges.push(...secondHopEdges)
+      }
     }
 
     const seenEdges = new Set<string>()
@@ -394,9 +530,11 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
 
   async function getSubgraph(opts: SubgraphOpts): Promise<SubgraphResult> {
     let seedIds = opts.entityIds ?? []
-    if (opts.query && memoryStore.searchEntities) {
+    if (opts.query && (memoryStore.searchEntities || memoryStore.searchEntitiesHybrid)) {
       const queryEmb = await embedding.embed(opts.query)
-      const found = await memoryStore.searchEntities(queryEmb, opts.identity, opts.limit ?? 10)
+      const found = memoryStore.searchEntitiesHybrid
+        ? await memoryStore.searchEntitiesHybrid(opts.query, queryEmb, opts.identity, opts.limit ?? 10)
+        : await memoryStore.searchEntities!(queryEmb, opts.identity, opts.limit ?? 10)
       seedIds = [...seedIds, ...found.map(e => e.id)]
     }
     if (seedIds.length === 0) {
@@ -509,6 +647,7 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
   return {
     deploy,
     addTriple,
+    addEntityMentions,
     searchEntities,
     getAdjacencyList,
     getChunksForEntities,

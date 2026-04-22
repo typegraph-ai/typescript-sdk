@@ -20,6 +20,49 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | undefined>
 }
 
 const TRIPLE_EXTRACTION_TIMEOUT_MS = 360_000 // 6 minutes per chunk
+const ENTITY_CONTEXT_LIMIT = 20
+
+function sanitizeText(value: string): string {
+  return sanitizeInvalidSurrogates(value
+    .replace(/\u0000/g, '')
+    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g, ' '))
+}
+
+function sanitizeInvalidSurrogates(value: string): string {
+  let out = ''
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      const next = value.charCodeAt(i + 1)
+      if (next >= 0xDC00 && next <= 0xDFFF) {
+        out += value.charAt(i) + value.charAt(i + 1)
+        i++
+      } else {
+        out += '\uFFFD'
+      }
+    } else if (code >= 0xDC00 && code <= 0xDFFF) {
+      out += '\uFFFD'
+    } else {
+      out += value[i]
+    }
+  }
+  return out
+}
+
+function sanitizeDocument(doc: RawDocument): RawDocument {
+  return {
+    ...doc,
+    title: sanitizeText(doc.title),
+    content: sanitizeText(doc.content),
+  }
+}
+
+function sanitizeChunk(chunk: Chunk): Chunk {
+  return {
+    ...chunk,
+    content: sanitizeText(chunk.content),
+  }
+}
 
 export class IndexEngine {
   tripleExtractor?: TripleExtractor
@@ -46,6 +89,8 @@ export class IndexEngine {
     chunks: Chunk[],
     opts: IngestOptions = {},
   ): Promise<IndexResult> {
+    const cleanDoc = sanitizeDocument(doc)
+    const cleanChunks = chunks.map(sanitizeChunk)
     const { tenantId, groupId, userId, agentId, conversationId, visibility, dryRun = false } = opts
     const shouldExtract = !!this.tripleExtractor && !dryRun && !!opts.graphExtraction
 
@@ -56,11 +101,11 @@ export class IndexEngine {
       await this.adapter.ensureModel(modelId, this.embedding.dimensions)
     }
 
-    const contentHash = sha256(doc.content)
+    const contentHash = sha256(cleanDoc.content)
     const deduplicateBy = opts.deduplicateBy ?? ['url']
-    const ikey = resolveIdempotencyKey(doc, deduplicateBy)
+    const ikey = resolveIdempotencyKey(cleanDoc, deduplicateBy)
 
-    const documentId = doc.id ?? generateId('doc')
+    const documentId = cleanDoc.id ?? generateId('doc')
     if (this.adapter.upsertDocumentRecord && !dryRun) {
       await this.adapter.upsertDocumentRecord({
         id: documentId,
@@ -70,24 +115,24 @@ export class IndexEngine {
         userId,
         agentId,
         conversationId,
-        title: doc.title,
-        url: doc.url,
+        title: cleanDoc.title,
+        url: cleanDoc.url,
         contentHash,
-        chunkCount: chunks.length,
+        chunkCount: cleanChunks.length,
         status: 'processing',
         visibility,
         graphExtracted: shouldExtract,
-        metadata: doc.metadata ?? {},
+        metadata: cleanDoc.metadata ?? {},
       })
     }
 
     try {
-      const textsForEmbedding = chunks.map(c => this.preprocessForEmbedding(c.content, opts))
+      const textsForEmbedding = cleanChunks.map(c => this.preprocessForEmbedding(c.content, opts))
       const embeddings = await this.embedding.embedBatch(textsForEmbedding)
 
-      const propagated = this.propagateMetadata(doc, opts.propagateMetadata)
+      const propagated = this.propagateMetadata(cleanDoc, opts.propagateMetadata)
 
-      const embeddedChunks = chunks.map((chunk, i) => ({
+      const embeddedChunks = cleanChunks.map((chunk, i) => ({
         idempotencyKey: ikey,
         bucketId,
         tenantId,
@@ -100,96 +145,23 @@ export class IndexEngine {
         embedding: embeddings[i]!,
         embeddingModel: modelId,
         chunkIndex: chunk.chunkIndex,
-        totalChunks: chunks.length,
+        totalChunks: cleanChunks.length,
         visibility,
         metadata: { ...propagated, ...chunk.metadata },
         indexedAt: new Date(),
       }))
 
-      // Extract triples for entity graph — first-chunk-then-parallel for entity context propagation
       let extraction: { succeeded: number; failed: number; failedChunks?: ExtractionFailure[] } | undefined
       if (shouldExtract) {
         const documentTitle = (propagated.title as string | undefined) ?? undefined
-        let entityContext: EntityContext[] = []
-        let succeeded = 0
-        let failed = 0
-        const failedChunks: ExtractionFailure[] = []
-
-        // Phase A: Extract chunk 0 first to establish entity context for this document
-        if (chunks.length > 0) {
-          try {
-            const firstResult = await withTimeout(
-              this.tripleExtractor!.extractFromChunk(
-                chunks[0]!.content, bucketId, chunks[0]!.chunkIndex, documentId,
-                { ...propagated, ...chunks[0]!.metadata },
-                undefined,
-                documentTitle,
-              ),
-              TRIPLE_EXTRACTION_TIMEOUT_MS,
-            )
-            if (firstResult) {
-              succeeded++
-              for (const e of firstResult.entities) {
-                if (entityContext.length >= 20) break
-                if (!entityContext.some(ec => ec.name.toLowerCase() === e.name.toLowerCase())) {
-                  entityContext.push(e)
-                }
-              }
-            } else {
-              failed++
-              failedChunks.push({ documentId, chunkIndex: chunks[0]!.chunkIndex, reason: 'timeout' })
-              this.logger?.warn?.('[typegraph] Triple extraction timed out', { documentId, chunkIndex: 0, bucketId })
-            }
-          } catch (err) {
-            failed++
-            const msg = err instanceof Error ? err.message : String(err)
-            failedChunks.push({ documentId, chunkIndex: chunks[0]!.chunkIndex, reason: 'error', message: msg })
-            this.logger?.error?.('[typegraph] Triple extraction failed', { documentId, chunkIndex: 0, bucketId, error: msg })
-          }
-        }
-
-        // Phase B: Extract remaining chunks in parallel, seeded with chunk 0's entity context
-        if (chunks.length > 1) {
-          const remainingResults = await Promise.allSettled(
-            chunks.slice(1).map(chunk =>
-              withTimeout(
-                this.tripleExtractor!.extractFromChunk(
-                  chunk.content, bucketId, chunk.chunkIndex, documentId,
-                  { ...propagated, ...chunk.metadata },
-                  entityContext.length > 0 ? entityContext : undefined,
-                  documentTitle,
-                ),
-                TRIPLE_EXTRACTION_TIMEOUT_MS,
-              )
-            )
-          )
-          remainingResults.forEach((r, i) => {
-            const chunkIndex = chunks[i + 1]!.chunkIndex
-            if (r.status === 'rejected') {
-              failed++
-              const msg = r.reason instanceof Error ? r.reason.message : String(r.reason)
-              failedChunks.push({ documentId, chunkIndex, reason: 'error', message: msg })
-              this.logger?.error?.('[typegraph] Triple extraction failed', { documentId, chunkIndex, bucketId, error: msg })
-            } else if (r.value === undefined) {
-              failed++
-              failedChunks.push({ documentId, chunkIndex, reason: 'timeout' })
-              this.logger?.warn?.('[typegraph] Triple extraction timed out', { documentId, chunkIndex, bucketId })
-            } else {
-              succeeded++
-            }
-          })
-        }
-
-        extraction = failedChunks.length > 0
-          ? { succeeded, failed, failedChunks }
-          : { succeeded, failed }
+        extraction = await this.extractTriplesForChunks(bucketId, documentId, cleanChunks, propagated, documentTitle)
       }
 
       if (!dryRun) {
         await this.adapter.upsertDocument(modelId, embeddedChunks)
 
         if (this.adapter.updateDocumentStatus) {
-          await this.adapter.updateDocumentStatus(documentId, 'complete', chunks.length)
+          await this.adapter.updateDocumentStatus(documentId, 'complete', cleanChunks.length)
         }
 
         const storeKey = buildHashStoreKey(tenantId, bucketId, ikey)
@@ -200,7 +172,7 @@ export class IndexEngine {
           tenantId,
           embeddingModel: modelId,
           indexedAt: new Date(),
-          chunkCount: chunks.length,
+          chunkCount: cleanChunks.length,
         })
       }
 
@@ -233,6 +205,10 @@ export class IndexEngine {
     items: Array<{ doc: RawDocument; chunks: Chunk[] }>,
     opts: IngestOptions = {},
   ): Promise<IndexResult> {
+    const cleanItems = items.map(({ doc, chunks }) => ({
+      doc: sanitizeDocument(doc),
+      chunks: chunks.map(sanitizeChunk),
+    }))
     const { tenantId, groupId, userId, agentId, conversationId, visibility, dryRun = false, traceId, spanId } = opts
     const shouldExtract = !!this.tripleExtractor && !dryRun && !!opts.graphExtraction
     const modelId = embeddingModelKey(this.embedding)
@@ -242,7 +218,7 @@ export class IndexEngine {
       id: crypto.randomUUID(),
       eventType: 'index.start',
       identity: { tenantId, groupId, userId, agentId, conversationId },
-      payload: { bucketId, documentCount: items.length },
+      payload: { bucketId, documentCount: cleanItems.length },
       traceId,
       spanId,
       timestamp: new Date(),
@@ -258,7 +234,7 @@ export class IndexEngine {
       bucketId,
       tenantId,
       mode: 'upsert',
-      total: items.length,
+      total: cleanItems.length,
       skipped: 0,
       updated: 0,
       inserted: 0,
@@ -281,7 +257,7 @@ export class IndexEngine {
     const allTexts: string[] = []
 
     // Batch hash store lookup: check all idempotency keys in a single query
-    const docMeta = items.map(({ doc }) => ({
+    const docMeta = cleanItems.map(({ doc }) => ({
       doc,
       contentHash: sha256(doc.content),
       ikey: resolveIdempotencyKey(doc, deduplicateBy),
@@ -296,8 +272,8 @@ export class IndexEngine {
         : undefined
     }
 
-    for (let i = 0; i < items.length; i++) {
-      const { chunks } = items[i]!
+    for (let i = 0; i < cleanItems.length; i++) {
+      const { chunks } = cleanItems[i]!
       const { doc, contentHash, ikey, storeKey } = docMeta[i]!
 
       // Hash store dedup: skip docs whose content + model haven't changed
@@ -379,85 +355,16 @@ export class IndexEngine {
         indexedAt: new Date(),
       }))
 
-      // Extract triples for entity graph — first-chunk-then-parallel for entity context propagation
       if (shouldExtract) {
         const documentTitle = (propagated.title as string | undefined) ?? undefined
-        let entityContext: EntityContext[] = []
-        let succeeded = 0
-        let failed = 0
-        const failedChunks: ExtractionFailure[] = []
-
-        // Phase A: Extract chunk 0 first to establish entity context for this document
-        if (chunks.length > 0) {
-          try {
-            const firstResult = await withTimeout(
-              this.tripleExtractor!.extractFromChunk(
-                chunks[0]!.content, bucketId, chunks[0]!.chunkIndex, documentId,
-                { ...propagated, ...chunks[0]!.metadata },
-                undefined,
-                documentTitle,
-              ),
-              TRIPLE_EXTRACTION_TIMEOUT_MS,
-            )
-            if (firstResult) {
-              succeeded++
-              for (const e of firstResult.entities) {
-                if (entityContext.length >= 20) break
-                if (!entityContext.some(ec => ec.name.toLowerCase() === e.name.toLowerCase())) {
-                  entityContext.push(e)
-                }
-              }
-            } else {
-              failed++
-              failedChunks.push({ documentId, chunkIndex: chunks[0]!.chunkIndex, reason: 'timeout' })
-              this.logger?.warn?.('[typegraph] Triple extraction timed out', { documentId, chunkIndex: 0, bucketId })
-            }
-          } catch (err) {
-            failed++
-            const msg = err instanceof Error ? err.message : String(err)
-            failedChunks.push({ documentId, chunkIndex: chunks[0]!.chunkIndex, reason: 'error', message: msg })
-            this.logger?.error?.('[typegraph] Triple extraction failed', { documentId, chunkIndex: 0, bucketId, error: msg })
-          }
-        }
-
-        // Phase B: Extract remaining chunks in parallel, seeded with chunk 0's entity context
-        if (chunks.length > 1) {
-          const remainingResults = await Promise.allSettled(
-            chunks.slice(1).map(chunk =>
-              withTimeout(
-                this.tripleExtractor!.extractFromChunk(
-                  chunk.content, bucketId, chunk.chunkIndex, documentId,
-                  { ...propagated, ...chunk.metadata },
-                  entityContext.length > 0 ? entityContext : undefined,
-                  documentTitle,
-                ),
-                TRIPLE_EXTRACTION_TIMEOUT_MS,
-              )
-            )
-          )
-          remainingResults.forEach((r, i) => {
-            const chunkIndex = chunks[i + 1]!.chunkIndex
-            if (r.status === 'rejected') {
-              failed++
-              const msg = r.reason instanceof Error ? r.reason.message : String(r.reason)
-              failedChunks.push({ documentId, chunkIndex, reason: 'error', message: msg })
-              this.logger?.error?.('[typegraph] Triple extraction failed', { documentId, chunkIndex, bucketId, error: msg })
-            } else if (r.value === undefined) {
-              failed++
-              failedChunks.push({ documentId, chunkIndex, reason: 'timeout' })
-              this.logger?.warn?.('[typegraph] Triple extraction timed out', { documentId, chunkIndex, bucketId })
-            } else {
-              succeeded++
-            }
-          })
-        }
+        const extraction = await this.extractTriplesForChunks(bucketId, documentId, chunks, propagated, documentTitle)
 
         if (!result.extraction) result.extraction = { succeeded: 0, failed: 0 }
-        result.extraction.succeeded += succeeded
-        result.extraction.failed += failed
-        if (failedChunks.length > 0) {
+        result.extraction.succeeded += extraction.succeeded
+        result.extraction.failed += extraction.failed
+        if (extraction.failedChunks && extraction.failedChunks.length > 0) {
           if (!result.extraction.failedChunks) result.extraction.failedChunks = []
-          result.extraction.failedChunks.push(...failedChunks)
+          result.extraction.failedChunks.push(...extraction.failedChunks)
           if (result.extraction.failedChunks.length > 100) {
             result.extraction.failedChunks = result.extraction.failedChunks.slice(0, 100)
           }
@@ -566,6 +473,64 @@ export class IndexEngine {
     }
 
     return result
+  }
+
+  private async extractTriplesForChunks(
+    bucketId: string,
+    documentId: string,
+    chunks: Chunk[],
+    propagated: Record<string, unknown>,
+    documentTitle?: string,
+  ): Promise<{ succeeded: number; failed: number; failedChunks?: ExtractionFailure[] }> {
+    let entityContext: EntityContext[] = []
+    let succeeded = 0
+    let failed = 0
+    const failedChunks: ExtractionFailure[] = []
+
+    for (const chunk of chunks) {
+      try {
+        const contextForChunk = entityContext.length > 0
+          ? entityContext.map(e => ({ ...e }))
+          : undefined
+
+        const extractionResult = await withTimeout(
+          this.tripleExtractor!.extractFromChunk(
+            chunk.content,
+            bucketId,
+            chunk.chunkIndex,
+            documentId,
+            { ...propagated, ...chunk.metadata },
+            contextForChunk,
+            documentTitle,
+          ),
+          TRIPLE_EXTRACTION_TIMEOUT_MS,
+        )
+
+        if (extractionResult === undefined) {
+          failed++
+          failedChunks.push({ documentId, chunkIndex: chunk.chunkIndex, reason: 'timeout' })
+          this.logger?.warn?.('[typegraph] Triple extraction timed out', { documentId, chunkIndex: chunk.chunkIndex, bucketId })
+          continue
+        }
+
+        succeeded++
+        for (const e of extractionResult.entities) {
+          if (entityContext.length >= ENTITY_CONTEXT_LIMIT) break
+          if (!entityContext.some(ec => ec.name.toLowerCase() === e.name.toLowerCase())) {
+            entityContext.push(e)
+          }
+        }
+      } catch (err) {
+        failed++
+        const msg = err instanceof Error ? err.message : String(err)
+        failedChunks.push({ documentId, chunkIndex: chunk.chunkIndex, reason: 'error', message: msg })
+        this.logger?.error?.('[typegraph] Triple extraction failed', { documentId, chunkIndex: chunk.chunkIndex, bucketId, error: msg })
+      }
+    }
+
+    return failedChunks.length > 0
+      ? { succeeded, failed, failedChunks }
+      : { succeeded, failed }
   }
 
   private preprocessForEmbedding(content: string, opts: IngestOptions): string {

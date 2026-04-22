@@ -204,5 +204,44 @@ describe('IndexEngine', () => {
         expect(statusCalls[statusCalls.length - 1]!.args[1]).toBe('failed')
       }
     })
+
+    it('reports triple extraction exceptions as errors, not timeouts', async () => {
+      const doc = createTestDocument()
+      const { bucket } = createMockBucket({ documents: [] })
+      const chunks = [{ content: 'Alice met Bob.', chunkIndex: 0 }]
+      const engine = new IndexEngine(adapter, embedding)
+      engine.tripleExtractor = {
+        extractFromChunk: vi.fn().mockRejectedValue(new Error('No output generated.')),
+      } as any
+
+      const result = await engine.ingestWithChunks(bucket.id, doc, chunks, { graphExtraction: true })
+
+      expect(result.extraction?.failed).toBe(1)
+      expect(result.extraction?.failedChunks?.[0]).toEqual(expect.objectContaining({
+        reason: 'error',
+        message: 'No output generated.',
+      }))
+    })
+
+    it('passes accumulated entity context to later chunks', async () => {
+      const doc = createTestDocument()
+      const { bucket } = createMockBucket({ documents: [] })
+      const chunks = [
+        { content: 'Cole Conway entered the saloon.', chunkIndex: 0 },
+        { content: 'Conway met Steve Sharp there.', chunkIndex: 1 },
+      ]
+      const extractFromChunk = vi.fn()
+        .mockResolvedValueOnce({ entities: [{ name: 'Cole Conway', type: 'person' }] })
+        .mockResolvedValueOnce({ entities: [{ name: 'Steve Sharp', type: 'person' }] })
+      const engine = new IndexEngine(adapter, embedding)
+      engine.tripleExtractor = { extractFromChunk } as any
+
+      await engine.ingestWithChunks(bucket.id, doc, chunks, { graphExtraction: true })
+
+      expect(extractFromChunk).toHaveBeenCalledTimes(2)
+      expect(extractFromChunk.mock.calls[1]![5]).toEqual([
+        { name: 'Cole Conway', type: 'person' },
+      ])
+    })
   })
 })

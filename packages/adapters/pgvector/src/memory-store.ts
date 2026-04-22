@@ -6,7 +6,7 @@
  * driver-agnostic Postgres access (Neon, node-postgres, Drizzle, etc.).
  */
 
-import type { MemoryStoreAdapter, MemoryFilter, MemorySearchOpts, MemoryRecord, SemanticEntity, SemanticEdge, typegraphIdentity } from '@typegraph-ai/sdk'
+import type { MemoryStoreAdapter, MemoryFilter, MemorySearchOpts, MemoryRecord, SemanticEntity, SemanticEntityMention, SemanticEdge, typegraphIdentity } from '@typegraph-ai/sdk'
 import { generateId } from '@typegraph-ai/sdk'
 
 type SqlExecutor = (
@@ -206,16 +206,19 @@ const CHUNK_MENTIONS_DDL = (t: string) => {
     chunk_index     INTEGER NOT NULL,
     bucket_id       TEXT NOT NULL,
     mention_type    TEXT NOT NULL
-                    CHECK (mention_type IN ('subject', 'object', 'co_occurrence')),
+                    CHECK (mention_type IN ('subject', 'object', 'co_occurrence', 'entity', 'alias')),
+    surface_text    TEXT,
+    normalized_surface_text TEXT NOT NULL DEFAULT '',
     confidence      REAL,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT ${safeIdx(i, 'mention_uniq')}
-      UNIQUE (entity_id, document_id, chunk_index, mention_type)
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
 
   CREATE INDEX IF NOT EXISTS ${idx('entity_idx')} ON ${t} (entity_id);
   CREATE INDEX IF NOT EXISTS ${idx('chunk_idx')} ON ${t} (document_id, chunk_index);
   CREATE INDEX IF NOT EXISTS ${idx('bucket_entity_idx')} ON ${t} (bucket_id, entity_id);
+  CREATE INDEX IF NOT EXISTS ${idx('surface_idx')} ON ${t} (normalized_surface_text);
+  CREATE UNIQUE INDEX IF NOT EXISTS ${idx('mention_uniq_idx')}
+    ON ${t} (entity_id, document_id, chunk_index, mention_type, normalized_surface_text);
 `
 }
 
@@ -270,6 +273,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
         await this.sql(stmt)
       }
     }
+    await this.ensureChunkMentionShape()
 
     // Try to create HNSW indexes on entity and memory embeddings.
     // May fail if tables are empty (no embedding dimensions known yet).
@@ -325,6 +329,36 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     } catch (err: unknown) {
       console.warn(`[typegraph] HNSW index creation on ${table} failed: ${err instanceof Error ? err.message : String(err)}`)
     }
+  }
+
+  private async ensureChunkMentionShape(): Promise<void> {
+    const i = idxPrefix(this.chunkMentionsTable)
+    await this.sql(`ALTER TABLE ${this.chunkMentionsTable} ADD COLUMN IF NOT EXISTS surface_text TEXT`)
+    await this.sql(`ALTER TABLE ${this.chunkMentionsTable} ADD COLUMN IF NOT EXISTS normalized_surface_text TEXT NOT NULL DEFAULT ''`)
+    await this.sql(`ALTER TABLE ${this.chunkMentionsTable} DROP CONSTRAINT IF EXISTS ${safeIdx(i, 'mention_uniq')}`)
+    const mentionTypeChecks = await this.sql(
+      `SELECT conname
+         FROM pg_constraint
+        WHERE conrelid = $1::regclass
+          AND contype = 'c'
+          AND pg_get_constraintdef(oid) ILIKE '%mention_type%'`,
+      [this.chunkMentionsTable]
+    )
+    for (const row of mentionTypeChecks) {
+      await this.sql(`ALTER TABLE ${this.chunkMentionsTable} DROP CONSTRAINT IF EXISTS ${quoteIdent(row.conname as string)}`)
+    }
+    const mentionTypeCheck = safeIdx(i, 'mention_type_check')
+    await this.sql(
+      `ALTER TABLE ${this.chunkMentionsTable}
+       ADD CONSTRAINT ${mentionTypeCheck}
+       CHECK (mention_type IN ('subject', 'object', 'co_occurrence', 'entity', 'alias')) NOT VALID`
+    )
+    await this.sql(`ALTER TABLE ${this.chunkMentionsTable} VALIDATE CONSTRAINT ${mentionTypeCheck}`)
+    await this.sql(`CREATE INDEX IF NOT EXISTS ${safeIdx(i, 'surface_idx')} ON ${this.chunkMentionsTable} (normalized_surface_text)`)
+    await this.sql(
+      `CREATE UNIQUE INDEX IF NOT EXISTS ${safeIdx(i, 'mention_uniq_idx')}
+       ON ${this.chunkMentionsTable} (entity_id, document_id, chunk_index, mention_type, normalized_surface_text)`
+    )
   }
 
   // ── CRUD ──
@@ -658,7 +692,12 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
               valid_at, invalid_at, created_at, updated_at
        FROM ${this.entitiesTable}
        WHERE (name ILIKE ${nameParam}
-              OR EXISTS (SELECT 1 FROM unnest(aliases) AS a WHERE a ILIKE ${nameParam}))
+              OR EXISTS (SELECT 1 FROM unnest(aliases) AS a WHERE a ILIKE ${nameParam})
+              OR EXISTS (
+                SELECT 1 FROM ${this.chunkMentionsTable} m
+                WHERE m.entity_id = ${this.entitiesTable}.id
+                  AND m.surface_text ILIKE ${nameParam}
+              ))
          ${scopeClause}
          AND invalid_at IS NULL
        LIMIT ${limitParam}`,
@@ -684,6 +723,85 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
       [vectorStr, ...params]
     )
     return rows.map(mapRowToEntity)
+  }
+
+  async searchEntitiesHybrid(query: string, embedding: number[], scope: typegraphIdentity, limit?: number): Promise<SemanticEntity[]> {
+    const normalizedQuery = normalizeEntityText(query)
+    const likeQuery = `%${escapeLike(query.trim())}%`
+    const lowerQuery = query.trim().toLowerCase()
+    const maxRows = limit ?? 20
+
+    const identity = buildIdentityWhere(scope, 4)
+    const scopeClause = identity.where ? ` AND ${identity.where}` : ''
+
+    const lexicalParams: unknown[] = [lowerQuery, normalizedQuery, likeQuery, maxRows * 4, ...identity.params]
+    const lowerParam = '$1'
+    const normalizedParam = '$2'
+    const likeParam = '$3'
+    const lexicalLimitParam = '$4'
+    const lexicalRows = await this.sqlWithRetry(
+      `SELECT e.*,
+              GREATEST(
+                CASE WHEN lower(e.name) = ${lowerParam} THEN 1.0 ELSE 0 END,
+                CASE WHEN EXISTS (SELECT 1 FROM unnest(e.aliases) AS a WHERE lower(a) = ${lowerParam}) THEN 0.98 ELSE 0 END,
+                CASE WHEN EXISTS (
+                  SELECT 1 FROM ${this.chunkMentionsTable} m
+                  WHERE m.entity_id = e.id AND m.normalized_surface_text = ${normalizedParam}
+                ) THEN 0.97 ELSE 0 END,
+                CASE WHEN e.name ILIKE ${likeParam} THEN 0.88 ELSE 0 END,
+                CASE WHEN EXISTS (SELECT 1 FROM unnest(e.aliases) AS a WHERE a ILIKE ${likeParam}) THEN 0.86 ELSE 0 END,
+                CASE WHEN EXISTS (
+                  SELECT 1 FROM ${this.chunkMentionsTable} m
+                  WHERE m.entity_id = e.id AND m.surface_text ILIKE ${likeParam}
+                ) THEN 0.84 ELSE 0 END
+              ) AS similarity
+         FROM ${this.entitiesTable} e
+        WHERE e.invalid_at IS NULL
+          ${scopeClause}
+          AND (
+            lower(e.name) = ${lowerParam}
+            OR EXISTS (SELECT 1 FROM unnest(e.aliases) AS a WHERE lower(a) = ${lowerParam})
+            OR EXISTS (SELECT 1 FROM ${this.chunkMentionsTable} m WHERE m.entity_id = e.id AND m.normalized_surface_text = ${normalizedParam})
+            OR e.name ILIKE ${likeParam}
+            OR EXISTS (SELECT 1 FROM unnest(e.aliases) AS a WHERE a ILIKE ${likeParam})
+            OR EXISTS (SELECT 1 FROM ${this.chunkMentionsTable} m WHERE m.entity_id = e.id AND m.surface_text ILIKE ${likeParam})
+          )
+        ORDER BY similarity DESC, e.name ASC
+        LIMIT ${lexicalLimitParam}`,
+      lexicalParams
+    )
+
+    const vectorStr = `[${embedding.join(',')}]`
+    const vectorWhere = buildIdentityWhere(scope, 1)
+    const vectorScopeClause = vectorWhere.where ? ` AND ${vectorWhere.where}` : ''
+    const vectorLimitParam = `$${2 + vectorWhere.params.length}`
+    const vectorRows = await this.sqlWithRetry(
+      `SELECT *,
+              GREATEST(
+                1 - (embedding <=> $1::vector),
+                COALESCE(1 - (description_embedding <=> $1::vector), 0)
+              ) AS similarity
+         FROM ${this.entitiesTable}
+        WHERE embedding IS NOT NULL
+          ${vectorScopeClause}
+          AND invalid_at IS NULL
+        ORDER BY embedding <=> $1::vector
+        LIMIT ${vectorLimitParam}`,
+      [vectorStr, ...vectorWhere.params, maxRows * 3]
+    )
+
+    const byId = new Map<string, SemanticEntity>()
+    for (const row of [...lexicalRows, ...vectorRows]) {
+      const entity = mapRowToEntity(row)
+      const existing = byId.get(entity.id)
+      if (!existing || ((entity.properties._similarity as number | undefined) ?? 0) > ((existing.properties._similarity as number | undefined) ?? 0)) {
+        byId.set(entity.id, entity)
+      }
+    }
+
+    return [...byId.values()]
+      .sort((a, b) => ((b.properties._similarity as number | undefined) ?? 0) - ((a.properties._similarity as number | undefined) ?? 0))
+      .slice(0, maxRows)
   }
 
   // ── Edge Storage ──
@@ -777,26 +895,20 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
 
   // ── Entity ↔ Chunk Junction ──
 
-  async upsertEntityChunkMentions(
-    mentions: Array<{
-      entityId: string
-      documentId: string
-      chunkIndex: number
-      bucketId: string
-      mentionType: 'subject' | 'object' | 'co_occurrence'
-      confidence?: number
-    }>
-  ): Promise<void> {
+  async upsertEntityChunkMentions(mentions: SemanticEntityMention[]): Promise<void> {
     if (mentions.length === 0) return
 
     // Build a single multi-row INSERT. ON CONFLICT updates confidence if provided
-    // (last writer wins on confidence — rare: only if the same triple re-extracts
-    // with a different score). Idempotent on (entity_id, document_id, chunk_index, mention_type).
+    // (last writer wins on confidence — rare: only if the same extraction reruns
+    // with a different score). Idempotent on entity/chunk/type/surface form.
     const values: string[] = []
     const params: unknown[] = []
     for (const m of mentions) {
       const base = params.length
-      values.push(`($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7})`)
+      values.push(`($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9})`)
+      const surfaceText = m.surfaceText?.trim() || null
+      const normalizedSurfaceText = m.normalizedSurfaceText?.trim()
+        || (surfaceText ? normalizeEntityText(surfaceText) : '')
       params.push(
         generateId('mention'),
         m.entityId,
@@ -804,15 +916,18 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
         m.chunkIndex,
         m.bucketId,
         m.mentionType,
+        surfaceText,
+        normalizedSurfaceText,
         m.confidence ?? null,
       )
     }
 
     await this.sqlWithRetry(
       `INSERT INTO ${this.chunkMentionsTable}
-         (id, entity_id, document_id, chunk_index, bucket_id, mention_type, confidence)
+         (id, entity_id, document_id, chunk_index, bucket_id, mention_type, surface_text, normalized_surface_text, confidence)
        VALUES ${values.join(',')}
-       ON CONFLICT (entity_id, document_id, chunk_index, mention_type) DO UPDATE SET
+       ON CONFLICT (entity_id, document_id, chunk_index, mention_type, normalized_surface_text) DO UPDATE SET
+         surface_text = COALESCE(EXCLUDED.surface_text, ${unqualified(this.chunkMentionsTable)}.surface_text),
          confidence = COALESCE(EXCLUDED.confidence, ${unqualified(this.chunkMentionsTable)}.confidence)`,
       params
     )
@@ -831,6 +946,9 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     documentId: string
     chunkIndex: number
     entityId: string
+    surfaceText?: string | undefined
+    normalizedSurfaceText?: string | undefined
+    mentionType?: SemanticEntityMention['mentionType'] | undefined
     confidence: number | null
   }>> {
     if (entityIds.length === 0) return []
@@ -850,7 +968,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     const rows = await this.sqlWithRetry(
       `SELECT DISTINCT ON (c.document_id, c.chunk_index)
               c.content, c.bucket_id, c.document_id, c.chunk_index,
-              m.entity_id, m.confidence
+              m.entity_id, m.surface_text, m.normalized_surface_text, m.mention_type, m.confidence
          FROM ${this.chunkMentionsTable} m
          JOIN ${opts.chunksTable} c
            ON m.document_id = c.document_id AND m.chunk_index = c.chunk_index
@@ -867,6 +985,9 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
       documentId: r.document_id as string,
       chunkIndex: r.chunk_index as number,
       entityId: r.entity_id as string,
+      surfaceText: (r.surface_text as string | null) ?? undefined,
+      normalizedSurfaceText: (r.normalized_surface_text as string | null) ?? undefined,
+      mentionType: (r.mention_type as SemanticEntityMention['mentionType'] | null) ?? undefined,
       confidence: (r.confidence as number | null) ?? null,
     }))
   }
@@ -1055,6 +1176,26 @@ function parseVectorString(val: unknown): number[] | undefined {
     return trimmed.split(',').map(Number)
   }
   return undefined
+}
+
+function normalizeEntityText(value: string): string {
+  return value
+    .replace(/[Ææ]/g, 'ae')
+    .replace(/[Œœ]/g, 'oe')
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&')
+}
+
+function quoteIdent(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`
 }
 
 function buildMemoryWhere(

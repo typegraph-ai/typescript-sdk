@@ -108,6 +108,73 @@ describe('EntityResolver', () => {
       expect(entity.name).toBe('Acme Corporation')
     })
 
+    it('does not merge Simon-family people through weak surname evidence alone', async () => {
+      const existing: SemanticEntity = {
+        id: 'entity-caesar',
+        name: 'Cæsar Simon',
+        entityType: 'person',
+        aliases: ['Simon'],
+        properties: { _similarity: 0.99 },
+        embedding: [0.9, 0.9, 0.9],
+        scope: testScope,
+        temporal: { validAt: new Date(), createdAt: new Date() },
+      }
+      const store = mockStore([existing])
+      ;(store.searchEntities as ReturnType<typeof vi.fn>).mockResolvedValue([existing])
+
+      const resolver = new EntityResolver({ store, embedding: mockEmbedding() })
+
+      const youngSimon = await resolver.resolve('Young Simon', 'person', ['Simon'], testScope)
+      expect(youngSimon.isNew).toBe(true)
+      expect(youngSimon.entity.id).not.toBe('entity-caesar')
+
+      const ssSimon = await resolver.resolve('S. S. Simon', 'person', ['Simon'], testScope)
+      expect(ssSimon.isNew).toBe(true)
+      expect(ssSimon.entity.id).not.toBe('entity-caesar')
+    })
+
+    it('keeps pseudonym surname aliases strong when backed by a full pseudonym', async () => {
+      const existing: SemanticEntity = {
+        id: 'entity-caesar',
+        name: 'Cousin Cæsar',
+        entityType: 'person',
+        aliases: ['Cole Conway', 'Conway'],
+        properties: {},
+        scope: testScope,
+        temporal: { validAt: new Date(), createdAt: new Date() },
+      }
+
+      const resolver = new EntityResolver({
+        store: mockStore([existing]),
+        embedding: mockEmbedding(),
+      })
+
+      const { entity, isNew } = await resolver.resolve('Conway', 'person', [], testScope)
+      expect(isNew).toBe(false)
+      expect(entity.id).toBe('entity-caesar')
+    })
+
+    it('does not merge from weak single-token surname aliases', async () => {
+      const existing: SemanticEntity = {
+        id: 'entity-caesar',
+        name: 'Cæsar Simon',
+        entityType: 'person',
+        aliases: ['Simon'],
+        properties: { _similarity: 0.99 },
+        embedding: [0.9, 0.9, 0.9],
+        scope: testScope,
+        temporal: { validAt: new Date(), createdAt: new Date() },
+      }
+      const store = mockStore([existing])
+      ;(store.searchEntities as ReturnType<typeof vi.fn>).mockResolvedValue([existing])
+
+      const resolver = new EntityResolver({ store, embedding: mockEmbedding() })
+
+      const { entity, isNew } = await resolver.resolve('Simon', 'person', [], testScope)
+      expect(isNew).toBe(true)
+      expect(entity.id).not.toBe('entity-caesar')
+    })
+
     it('Phase 3.5: merges entities when descriptions confirm near-miss name match', async () => {
       const existing: SemanticEntity = {
         id: 'entity-mullin',
@@ -413,6 +480,79 @@ describe('EntityResolver', () => {
       // Description changed — should re-embed
       expect(merged.descriptionEmbedding).toEqual([0.7, 0.8, 0.9])
       expect(embedding.embed).toHaveBeenCalledWith('NBA player Five-time All-Star')
+    })
+
+    it('compacts merged descriptions by sentence without duplicate facts or mid-sentence cuts', async () => {
+      const embedding = mockEmbedding()
+      ;(embedding.embed as ReturnType<typeof vi.fn>).mockResolvedValue([0.7, 0.8, 0.9])
+
+      const resolver = new EntityResolver({
+        store: mockStore(),
+        embedding,
+      })
+
+      const existing: SemanticEntity = {
+        id: 'e-caesar',
+        name: 'Cousin Cæsar',
+        entityType: 'person',
+        aliases: ['Cole Conway'],
+        properties: {
+          description: 'A card player using the pseudonym Cole Conway. A card player using the pseudonym Cole Conway.',
+        },
+        descriptionEmbedding: [0.1, 0.2, 0.3],
+        scope: testScope,
+        temporal: { validAt: new Date(), createdAt: new Date() },
+      }
+
+      const incomingDescription = [
+        'A card player using the pseudonym Cole Conway.',
+        'A partner of Steve Sharp in Paducah, Kentucky.',
+        'A man who travels toward the West Indies.',
+      ].join(' ')
+
+      const merged = await resolver.merge(existing, {
+        name: 'Cole Conway',
+        entityType: 'person',
+        aliases: ['Conway'],
+        description: incomingDescription,
+      })
+
+      const description = merged.properties.description as string
+      expect(description.length).toBeLessThanOrEqual(1200)
+      expect(description.match(/A card player using the pseudonym Cole Conway/g)).toHaveLength(1)
+      expect(description).toContain('A partner of Steve Sharp in Paducah, Kentucky.')
+      expect(description).toContain('A man who travels toward the West Indies.')
+      expect(description.endsWith('.')).toBe(true)
+      expect(embedding.embed).toHaveBeenCalledWith(description)
+    })
+
+    it('does not append descriptions that describe a different named person by relationship', async () => {
+      const embedding = mockEmbedding()
+      const resolver = new EntityResolver({
+        store: mockStore(),
+        embedding,
+      })
+
+      const existing: SemanticEntity = {
+        id: 'e-caesar',
+        name: 'Cousin Cæsar',
+        entityType: 'person',
+        aliases: ['Cole Conway'],
+        properties: { description: 'The main protagonist who uses the name Cole Conway.' },
+        descriptionEmbedding: [0.1, 0.2, 0.3],
+        scope: testScope,
+        temporal: { validAt: new Date(), createdAt: new Date() },
+      }
+
+      const merged = await resolver.merge(existing, {
+        name: 'S. S. Simon',
+        entityType: 'person',
+        aliases: ['Simon'],
+        description: 'The uncle of Cousin Cæsar who left a significant estate in Arkansas after his death.',
+      })
+
+      expect(merged.properties.description).toBe('The main protagonist who uses the name Cole Conway.')
+      expect(embedding.embed).not.toHaveBeenCalled()
     })
 
     it('preserves description embedding when description unchanged', async () => {

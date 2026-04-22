@@ -5,6 +5,8 @@ export type {
   MemoryRecord,
   EpisodicMemory,
   SemanticEntity,
+  EntityMentionType,
+  SemanticEntityMention,
   SemanticEdge,
   SemanticFact,
   ProceduralMemory,
