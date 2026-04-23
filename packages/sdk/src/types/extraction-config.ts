@@ -8,9 +8,9 @@ import type { LLMConfig } from './llm-provider.js'
 export interface ExtractionConfig {
   /**
    * Use two separate LLM calls (entities then relationships) instead of one combined call.
-   * - `false` (default): Single call extracts both entities and relationships together.
+   * - `false`: Single call extracts both entities and relationships together.
    *   Better coherence, lower latency, works well with reasoning models.
-   * - `true`: Pass 1 extracts entities, Pass 2 extracts relationships using the entity list.
+   * - `true` (default): Pass 1 extracts entities, Pass 2 extracts relationships using the entity list.
    *   Allows different models per pass.
    */
   twoPass?: boolean | undefined

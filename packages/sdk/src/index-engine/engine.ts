@@ -151,15 +151,40 @@ export class IndexEngine {
         indexedAt: new Date(),
       }))
 
+      if (!dryRun) {
+        await this.adapter.upsertDocument(modelId, embeddedChunks)
+        if (shouldExtract) {
+          await this.tripleExtractor?.persistPassageNodes?.(embeddedChunks.map(chunk => ({
+            bucketId: chunk.bucketId,
+            documentId: chunk.documentId,
+            chunkIndex: chunk.chunkIndex,
+            embeddingModel: chunk.embeddingModel,
+            contentHash: sha256(chunk.content),
+            metadata: chunk.metadata,
+            visibility: chunk.visibility,
+            tenantId: chunk.tenantId,
+            groupId: chunk.groupId,
+            userId: chunk.userId,
+            agentId: chunk.agentId,
+            conversationId: chunk.conversationId,
+          })))
+        }
+      }
+
       let extraction: { succeeded: number; failed: number; failedChunks?: ExtractionFailure[] } | undefined
       if (shouldExtract) {
         const documentTitle = (propagated.title as string | undefined) ?? undefined
-        extraction = await this.extractTriplesForChunks(bucketId, documentId, cleanChunks, propagated, documentTitle)
+        extraction = await this.extractTriplesForChunks(
+          bucketId,
+          documentId,
+          cleanChunks,
+          propagated,
+          documentTitle,
+          { tenantId, groupId, userId, agentId, conversationId },
+        )
       }
 
       if (!dryRun) {
-        await this.adapter.upsertDocument(modelId, embeddedChunks)
-
         if (this.adapter.updateDocumentStatus) {
           await this.adapter.updateDocumentStatus(documentId, 'complete', cleanChunks.length)
         }
@@ -355,9 +380,36 @@ export class IndexEngine {
         indexedAt: new Date(),
       }))
 
+      if (!dryRun) {
+        await this.adapter.upsertDocument(modelId, embeddedChunks)
+        if (shouldExtract) {
+          await this.tripleExtractor?.persistPassageNodes?.(embeddedChunks.map(chunk => ({
+            bucketId: chunk.bucketId,
+            documentId: chunk.documentId,
+            chunkIndex: chunk.chunkIndex,
+            embeddingModel: chunk.embeddingModel,
+            contentHash: sha256(chunk.content),
+            metadata: chunk.metadata,
+            visibility: chunk.visibility,
+            tenantId: chunk.tenantId,
+            groupId: chunk.groupId,
+            userId: chunk.userId,
+            agentId: chunk.agentId,
+            conversationId: chunk.conversationId,
+          })))
+        }
+      }
+
       if (shouldExtract) {
         const documentTitle = (propagated.title as string | undefined) ?? undefined
-        const extraction = await this.extractTriplesForChunks(bucketId, documentId, chunks, propagated, documentTitle)
+        const extraction = await this.extractTriplesForChunks(
+          bucketId,
+          documentId,
+          chunks,
+          propagated,
+          documentTitle,
+          { tenantId, groupId, userId, agentId, conversationId },
+        )
 
         if (!result.extraction) result.extraction = { succeeded: 0, failed: 0 }
         result.extraction.succeeded += extraction.succeeded
@@ -372,8 +424,6 @@ export class IndexEngine {
       }
 
       if (!dryRun) {
-        await this.adapter.upsertDocument(modelId, embeddedChunks)
-
         if (this.adapter.updateDocumentStatus) {
           await this.adapter.updateDocumentStatus(documentId, 'complete', chunks.length)
         }
@@ -481,6 +531,13 @@ export class IndexEngine {
     chunks: Chunk[],
     propagated: Record<string, unknown>,
     documentTitle?: string,
+    identity?: {
+      tenantId?: string | undefined
+      groupId?: string | undefined
+      userId?: string | undefined
+      agentId?: string | undefined
+      conversationId?: string | undefined
+    },
   ): Promise<{ succeeded: number; failed: number; failedChunks?: ExtractionFailure[] }> {
     let entityContext: EntityContext[] = []
     let succeeded = 0
@@ -502,6 +559,7 @@ export class IndexEngine {
             { ...propagated, ...chunk.metadata },
             contextForChunk,
             documentTitle,
+            identity,
           ),
           TRIPLE_EXTRACTION_TIMEOUT_MS,
         )

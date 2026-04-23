@@ -212,7 +212,7 @@ export class QueryPlanner {
         try {
           const graphRunner = new GraphRunner(this.knowledgeGraph!)
           const graphResults = await withTimeout(
-            graphRunner.run(text, identity, count, activeBucketIds),
+            graphRunner.run(text, identity, count, activeBucketIds, opts.graph),
             timeouts.graph,
             [] as NormalizedResult[]
           )
@@ -289,6 +289,7 @@ export class QueryPlanner {
         results,
         buckets: bucketTimings,
         query: { text, tenantId, durationMs: Date.now() - startMs, mergeStrategy: 'rrf' },
+        warnings: warnings.length > 0 ? warnings : undefined,
       }
     }
 
@@ -362,7 +363,7 @@ export class QueryPlanner {
       const graphPromise = !needsGraph
         ? Promise.resolve([] as NormalizedResult[])
         : withTimeout(
-            new GraphRunner(this.knowledgeGraph!).run(text, identity, count, activeBucketIds)
+            new GraphRunner(this.knowledgeGraph!).run(text, identity, count, activeBucketIds, opts.graph)
               .catch((err) => { this.logger?.warn(`GraphRunner failed: ${err instanceof Error ? err.message : err}`); warnings.push(`Graph search failed: ${err instanceof Error ? err.message : String(err)}`); return [] as NormalizedResult[] }),
             timeouts.graph,
             [] as NormalizedResult[]
@@ -381,17 +382,17 @@ export class QueryPlanner {
         bucketTimings['__memory__'] = { mode: 'cached', resultCount: memResults.length, durationMs: Date.now() - startMs, status: 'ok' }
       }
       if (graphResults.length > 0) {
-        const reinforcement = opts.graphReinforcement ?? 'only'
+        const reinforcement = opts.graphReinforcement ?? 'off'
 
         if (reinforcement === 'off') {
           // Include all graph results as-is
           runnerArrays.push(graphResults)
         } else if (reinforcement === 'prefer') {
-          // Keep all graph results but boost those matching indexed content
+          // Keep all graph results but boost those matching indexed chunks
           if (allResults.length > 0) {
-            const indexedContent = new Set(allResults.map(r => r.content))
+            const indexedChunks = new Set(allResults.map(resultIdentityKey))
             for (const gr of graphResults) {
-              if (indexedContent.has(gr.content)) {
+              if (indexedChunks.has(resultIdentityKey(gr))) {
                 // Boost reinforcing graph results
                 gr.rawScores.graph = (gr.rawScores.graph ?? 0) * 1.5
               }
@@ -399,10 +400,10 @@ export class QueryPlanner {
           }
           runnerArrays.push(graphResults)
         } else {
-          // 'only' (default): keep graph results whose content matches an indexed result
+          // 'only': keep graph results whose chunk identity matches an indexed result
           if (allResults.length > 0) {
-            const indexedContent = new Set(allResults.map(r => r.content))
-            const reinforcing = graphResults.filter(r => indexedContent.has(r.content))
+            const indexedChunks = new Set(allResults.map(resultIdentityKey))
+            const reinforcing = graphResults.filter(r => indexedChunks.has(resultIdentityKey(r)))
             if (reinforcing.length > 0) {
               runnerArrays.push(reinforcing)
             }
@@ -556,6 +557,13 @@ function modeToSource(mode: string): string {
     case 'live': return 'semantic'
     default: return mode
   }
+}
+
+function resultIdentityKey(result: NormalizedResult): string {
+  if (result.documentId && result.chunk?.index !== undefined && result.bucketId) {
+    return `${result.bucketId}:${result.documentId}:${result.chunk.index}`
+  }
+  return result.content
 }
 
 /** Dot product of two vectors — equivalent to cosine similarity when vectors are L2-normalized

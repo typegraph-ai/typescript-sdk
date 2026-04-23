@@ -24,9 +24,10 @@ export interface NormalizedResult {
   conversationId?: string | undefined
 }
 
-/** Content-based dedup key. Uses SHA256 hash of content to ensure cross-runner dedup works
- *  (e.g. graph runner assigns synthetic documentIds like `graph-0` that won't match indexed results). */
 export function dedupKey(r: NormalizedResult): string {
+  if (r.documentId && r.chunk?.index !== undefined && r.bucketId) {
+    return `${r.bucketId}:${r.documentId}:${r.chunk.index}`
+  }
   return createHash('sha256').update(r.content).digest('hex')
 }
 

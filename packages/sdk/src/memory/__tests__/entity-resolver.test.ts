@@ -33,6 +33,17 @@ function mockStore(entities: SemanticEntity[] = []): MemoryStoreAdapter {
 const testScope = buildScope({ userId: 'alice' })
 
 describe('EntityResolver', () => {
+  describe('isValidAlias', () => {
+    it('rejects noisy person alias fragments observed in support threads', () => {
+      expect(isValidAlias('Hi Adarsh')).toBe(false)
+      expect(isValidAlias('Inform Adarsh Tadimari')).toBe(false)
+      expect(isValidAlias("Plotline's Adarsh")).toBe(false)
+      expect(isValidAlias("Adarsh's")).toBe(false)
+      expect(isValidAlias('Both Adarsh')).toBe(false)
+      expect(isValidAlias('Adarsh Tadimari')).toBe(true)
+    })
+  })
+
   describe('resolve', () => {
     it('creates a new entity when no match found', async () => {
       const resolver = new EntityResolver({

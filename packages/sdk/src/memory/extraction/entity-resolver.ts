@@ -60,6 +60,10 @@ const ALIAS_LEADING_FRAGMENT_WORDS = new Set([
   'where', 'while', 'with',
 ])
 
+const ALIAS_GREETING_WORDS = new Set(['hi', 'hello', 'hey', 'dear'])
+const ALIAS_IMPERATIVE_WORDS = new Set(['inform', 'ask', 'tell', 'cc', 'tag', 'notify', 'ping'])
+const ALIAS_QUANTIFIER_WORDS = new Set(['both', 'all', 'either', 'neither'])
+
 /**
  * Validates whether a string is a legitimate alias (proper name, abbreviation, or nickname).
  * Rejects pronouns, generic noun phrases, pure numbers, and too-short strings.
@@ -81,6 +85,14 @@ export function isValidAlias(alias: string): boolean {
   if (trimmed.length > 80) return false
 
   const lower = trimmed.toLowerCase()
+  const tokens = nameTokens(trimmed)
+  if (tokens.length > 0) {
+    if (ALIAS_GREETING_WORDS.has(tokens[0]!)) return false
+    if (ALIAS_IMPERATIVE_WORDS.has(tokens[0]!)) return false
+    if (ALIAS_QUANTIFIER_WORDS.has(tokens[0]!)) return false
+  }
+  if (/['’]s\b/i.test(trimmed)) return false
+  if (/https?:\/\/|www\.|@.+\..+/.test(trimmed)) return false
 
   // Reject pronouns — only when original is all-lowercase (preserves "US", "IT" as abbreviations)
   if (trimmed === lower && PRONOUN_BLOCKLIST.has(lower)) return false
@@ -436,6 +448,7 @@ export class EntityResolver {
     const existingDesc = (properties.description as string | undefined) ?? ''
     const incomingDescription = incoming.description
       && !descriptionAppearsAboutDifferentPerson(existing, incoming)
+      && !isLowValueEntityDescription(incoming.description)
       ? incoming.description
       : undefined
     const mergedDescription = mergeDescriptions(existingDesc, incomingDescription, MAX_DESCRIPTION_LENGTH)
@@ -670,7 +683,7 @@ function trimAtWordBoundary(text: string, maxLength: number): string {
 
 function mergeDescriptions(existingDescription: string, incomingDescription: string | undefined, maxLength: number): string {
   const sentences = [
-    ...splitDescriptionSentences(existingDescription),
+    ...splitDescriptionSentences(existingDescription).filter(sentence => !isLowValueEntityDescription(sentence)),
     ...(incomingDescription ? splitDescriptionSentences(incomingDescription) : []),
   ]
   const seen = new Set<string>()
@@ -694,6 +707,42 @@ function mergeDescriptions(existingDescription: string, incomingDescription: str
   }
 
   return merged.join(' ').trim()
+}
+
+function isLowValueEntityDescription(text: string): boolean {
+  const normalized = normalizeDescriptionSentence(text)
+  if (!normalized) return true
+  const boilerplatePhrases = [
+    'creator of the task',
+    'creator of the record',
+    'creator of the document',
+    'creator in the document',
+    'identified as the creator',
+    'designated as the creator',
+    'person identified as the creator',
+    'individual identified as the creator',
+    'assignee responsible',
+    'identified as the assignee',
+    'requester for the',
+    'primary contact and requester',
+    'tagged in the',
+    'mentioned in the',
+    'copied on the',
+    'for visibility',
+  ]
+  if (boilerplatePhrases.some(phrase => normalized.includes(phrase))) return true
+  const roleOnly = [
+    'creator',
+    'assignee',
+    'requester',
+    'stakeholder',
+    'participant',
+    'individual',
+    'person',
+    'professional',
+  ]
+  const words = normalized.split(/\s+/)
+  return words.length <= 8 && roleOnly.some(role => words.includes(role))
 }
 
 function descriptionAppearsAboutDifferentPerson(

@@ -49,19 +49,10 @@ interface MockMention {
   confidence?: number | undefined
 }
 
-interface MockChunk {
-  entityId: string
-  documentId: string
-  chunkIndex: number
-  bucketId: string
-  content: string
-}
-
 function mockStore(
   entities: Map<string, SemanticEntity> = new Map(),
   edges: SemanticEdge[] = [],
   mentions: MockMention[] = [],
-  chunkContent: Map<string, MockChunk> = new Map(),
 ) {
   const store: MemoryStoreAdapter = {
     initialize: vi.fn(),
@@ -132,37 +123,6 @@ function mockStore(
     upsertEntityChunkMentions: vi.fn().mockImplementation(async (rows: MockMention[]) => {
       mentions.push(...rows)
     }),
-    getChunksForEntitiesViaJunction: vi.fn().mockImplementation(
-      async (entityIds: string[], opts: { bucketIds?: string[]; limit?: number }) => {
-        const matched = mentions
-          .filter(m => entityIds.includes(m.entityId))
-          .filter(m => !opts.bucketIds || opts.bucketIds.includes(m.bucketId))
-          .map(m => {
-            const key = `${m.documentId}:${m.chunkIndex}`
-            const c = chunkContent.get(key)
-            if (!c) return null
-            return {
-              content: c.content,
-              bucketId: c.bucketId,
-              documentId: c.documentId,
-              chunkIndex: c.chunkIndex,
-              entityId: m.entityId,
-              confidence: m.confidence ?? null,
-            }
-          })
-          .filter((r): r is NonNullable<typeof r> => r !== null)
-        // Dedupe on (documentId, chunkIndex) — same as the real SQL DISTINCT ON
-        const seen = new Set<string>()
-        const out: typeof matched = []
-        for (const r of matched) {
-          const k = `${r.documentId}:${r.chunkIndex}`
-          if (seen.has(k)) continue
-          seen.add(k)
-          out.push(r)
-        }
-        return out.slice(0, opts.limit ?? 20)
-      }
-    ),
   }
   return store
 }
@@ -212,8 +172,8 @@ describe('createKnowledgeGraphBridge', () => {
         chunkIndex: 0,
       })
 
-      // Two entities created
-      expect(store.upsertEntity).toHaveBeenCalledTimes(2)
+      // Two entities created, then profile evidence is updated from the stored fact.
+      expect(store.upsertEntity).toHaveBeenCalledTimes(4)
       expect(entities.size).toBe(2)
 
       // One edge created — content is NOT embedded in properties anymore
@@ -391,6 +351,96 @@ describe('createKnowledgeGraphBridge', () => {
     })
   })
 
+  describe('backfill', () => {
+    it('creates passage nodes, passage-entity edges, fact records, and profiles from existing rows', async () => {
+      const entities = new Map<string, SemanticEntity>([
+        ['alice', makeEntity('alice', 'Alice', 'person')],
+        ['beta', makeEntity('beta', 'Beta Inc', 'organization')],
+      ])
+      const edges = [makeEdge('edge-1', 'alice', 'beta', 'WORKS_AT')]
+      const store = mockStore(entities, edges)
+      Object.assign(store, {
+        listPassageBackfillChunks: vi.fn().mockImplementation(async ({ offset }: { offset?: number }) => {
+          if ((offset ?? 0) > 0) return []
+          return [{
+            chunkId: 'chk-1',
+            bucketId: 'bucket-1',
+            documentId: 'doc-1',
+            chunkIndex: 0,
+            embeddingModel: 'mock-embed',
+            content: 'Alice works at Beta Inc.',
+            metadata: { source: 'test' },
+            userId: 'test-user',
+          }]
+        }),
+        listPassageMentionBackfillRows: vi.fn().mockImplementation(async ({ offset }: { offset?: number }) => {
+          if ((offset ?? 0) > 0) return []
+          return [
+            {
+              chunkId: 'chk-1',
+              bucketId: 'bucket-1',
+              documentId: 'doc-1',
+              chunkIndex: 0,
+              embeddingModel: 'mock-embed',
+              content: 'Alice works at Beta Inc.',
+              metadata: {},
+              userId: 'test-user',
+              entityId: 'alice',
+              mentionType: 'subject',
+              surfaceText: 'Alice',
+              confidence: 0.9,
+            },
+            {
+              chunkId: 'chk-1',
+              bucketId: 'bucket-1',
+              documentId: 'doc-1',
+              chunkIndex: 0,
+              embeddingModel: 'mock-embed',
+              content: 'Alice works at Beta Inc.',
+              metadata: {},
+              userId: 'test-user',
+              entityId: 'beta',
+              mentionType: 'object',
+              surfaceText: 'Beta Inc',
+              confidence: 0.9,
+            },
+          ]
+        }),
+        listSemanticEdgesForBackfill: vi.fn().mockImplementation(async ({ offset }: { offset?: number } = {}) => {
+          if ((offset ?? 0) > 0) return []
+          return edges
+        }),
+        upsertPassageNodes: vi.fn(),
+        upsertPassageEntityEdges: vi.fn(),
+        upsertFactRecord: vi.fn().mockImplementation(async fact => fact),
+      })
+
+      const bridge = createKnowledgeGraphBridge({
+        memoryStore: store,
+        embedding: mockEmbedding(),
+        scope: testScope,
+        resolveChunksTable: () => 'chunks_mock',
+      })
+
+      const result = await bridge.backfill!(testScope, { batchSize: 10 })
+
+      expect(result.passageNodesUpserted).toBe(1)
+      expect(result.passageEntityEdgesUpserted).toBe(2)
+      expect(result.factRecordsUpserted).toBe(1)
+      expect(result.entityProfilesUpdated).toBe(2)
+      expect(store.upsertPassageNodes).toHaveBeenCalledWith(expect.arrayContaining([
+        expect.objectContaining({
+          bucketId: 'bucket-1',
+          documentId: 'doc-1',
+          chunkIndex: 0,
+        }),
+      ]))
+      expect(store.upsertFactRecord).toHaveBeenCalledWith(expect.objectContaining({
+        factText: 'Alice works at Beta Inc',
+      }))
+    })
+  })
+
   describe('searchEntities', () => {
     it('embeds query and searches store', async () => {
       const entities = new Map<string, SemanticEntity>()
@@ -451,16 +501,87 @@ describe('createKnowledgeGraphBridge', () => {
     })
   })
 
-  describe('getAdjacencyList', () => {
-    it('builds bidirectional adjacency from edges', async () => {
-      const entities = new Map<string, SemanticEntity>()
-      entities.set('a', makeEntity('a', 'A'))
-      entities.set('b', makeEntity('b', 'B'))
-      entities.set('c', makeEntity('c', 'C'))
+  describe('searchGraphPassages', () => {
+    it('returns ranked passages and keeps direct entity seeding from hybrid entity lookup', async () => {
+      const entities = new Map<string, SemanticEntity>([
+        ['adarsh', {
+          ...makeEntity('adarsh', 'Adarsh Tadimari', 'person'),
+          aliases: [],
+          properties: { description: 'Technical team member at Plotline.' },
+        }],
+      ])
+      const mentions: MockMention[] = [{
+        entityId: 'adarsh',
+        documentId: 'doc-1',
+        chunkIndex: 0,
+        bucketId: 'bucket-1',
+        mentionType: 'entity',
+        surfaceText: 'Adarsh',
+        normalizedSurfaceText: 'adarsh',
+      }]
+      const store = mockStore(entities, [], mentions)
+      Object.assign(store, {
+        searchFacts: vi.fn().mockResolvedValue([]),
+        searchPassageNodes: vi.fn().mockResolvedValue([]),
+        getPassageEdgesForEntities: vi.fn().mockResolvedValue([{
+          passageId: 'passage_test',
+          entityId: 'adarsh',
+          weight: 1.5,
+          mentionCount: 1,
+          confidence: 0.9,
+          surfaceTexts: ['Adarsh'],
+          mentionTypes: ['entity'],
+        }]),
+        getPassagesByIds: vi.fn().mockResolvedValue([{
+          passageId: 'passage_test',
+          content: 'Adarsh Tadimari is debugging Plotline SDK initialization issues.',
+          bucketId: 'bucket-1',
+          documentId: 'doc-1',
+          chunkIndex: 0,
+          totalChunks: 1,
+          metadata: { source: 'test' },
+          userId: 'test-user',
+        }]),
+      })
 
+      const bridge = createKnowledgeGraphBridge({
+        memoryStore: store,
+        embedding: mockEmbedding(),
+        scope: testScope,
+        resolveChunksTable: () => 'typegraph_chunks_mock',
+      })
+
+      const result = await bridge.searchGraphPassages!('Adarsh', testScope, { count: 5 })
+
+      expect(store.searchEntitiesHybrid).toHaveBeenCalledWith(expect.any(String), expect.any(Array), testScope, 10)
+      expect(result.results).toHaveLength(1)
+      expect(result.results[0]).toEqual(expect.objectContaining({
+        passageId: 'passage_test',
+        bucketId: 'bucket-1',
+        documentId: 'doc-1',
+        chunkIndex: 0,
+      }))
+      expect(result.results[0]!.score).toBeGreaterThan(0)
+      expect(result.trace.entitySeedCount).toBeGreaterThan(0)
+      expect(result.trace.selectedEntityIds).toContain('adarsh')
+    })
+  })
+
+  describe('explore', () => {
+    it.each([
+      'plotline employees',
+      'employees at plotline',
+      'who works at plotline',
+    ])('resolves employment intent and returns fact projections for "%s"', async (query) => {
+      const entities = new Map<string, SemanticEntity>([
+        ['plotline', makeEntity('plotline', 'Plotline', 'organization')],
+        ['adarsh', makeEntity('adarsh', 'Adarsh Tadimari', 'person')],
+        ['rajat', makeEntity('rajat', 'Rajat', 'person')],
+      ])
       const edges = [
-        makeEdge('e1', 'a', 'b', 'KNOWS'),
-        makeEdge('e2', 'b', 'c', 'WORKS_WITH'),
+        makeEdge('edge-1', 'adarsh', 'plotline', 'WORKS_FOR'),
+        makeEdge('edge-2', 'rajat', 'plotline', 'MEMBER_OF'),
+        makeEdge('edge-3', 'adarsh', 'plotline', 'LEADS'),
       ]
       const store = mockStore(entities, edges)
       const bridge = createKnowledgeGraphBridge({
@@ -469,155 +590,114 @@ describe('createKnowledgeGraphBridge', () => {
         scope: testScope,
       })
 
-      const adj = await bridge.getAdjacencyList!(['a'])
+      const result = await bridge.explore!(query, { userId: 'test-user', explain: true })
 
-      // a→b (from edge e1, forward)
-      expect(adj.get('a')).toEqual(expect.arrayContaining([
-        expect.objectContaining({ target: 'b' }),
-      ]))
-
-      // b→a (from edge e1, reverse — bidirectional)
-      expect(adj.get('b')).toEqual(expect.arrayContaining([
-        expect.objectContaining({ target: 'a' }),
-      ]))
-
-      // 2-hop expansion: b→c and c→b from edge e2
-      expect(adj.get('b')).toEqual(expect.arrayContaining([
-        expect.objectContaining({ target: 'c' }),
-      ]))
-      expect(adj.get('c')).toEqual(expect.arrayContaining([
-        expect.objectContaining({ target: 'b' }),
-      ]))
+      expect(result.intent.relationFamilies.map(family => family.name)).toContain('employment')
+      expect(result.anchors[0]).toEqual(expect.objectContaining({ name: 'Plotline', entityType: 'organization' }))
+      expect(result.entities.map(entity => entity.name)).toEqual(expect.arrayContaining(['Adarsh Tadimari', 'Rajat']))
+      expect(result.entities.map(entity => entity.name)).not.toContain('Plotline')
+      expect(result.facts.map(fact => fact.relation)).toEqual(expect.arrayContaining(['WORKS_FOR', 'MEMBER_OF']))
+      expect(result.facts.map(fact => fact.relation)).not.toContain('LEADS')
+      expect(result.facts.every(fact => fact.similarity === undefined)).toBe(true)
+      expect(result.trace).toEqual(expect.objectContaining({
+        parser: 'fallback',
+        selectedAnchorIds: ['plotline'],
+      }))
     })
 
-    it('returns empty map for entities with no edges', async () => {
-      const store = mockStore()
+    it('uses the configured exploration LLM when it returns valid structured intent', async () => {
+      const entities = new Map<string, SemanticEntity>([
+        ['plotline', makeEntity('plotline', 'Plotline', 'organization')],
+        ['adarsh', makeEntity('adarsh', 'Adarsh Tadimari', 'person')],
+      ])
+      const edges = [makeEdge('edge-1', 'adarsh', 'plotline', 'WORKS_FOR')]
+      const store = mockStore(entities, edges)
+      const explorationLlm = {
+        generateText: vi.fn().mockResolvedValue(''),
+        generateJSON: vi.fn().mockResolvedValue({
+          anchorText: 'Plotline',
+          relationFamilies: [{ name: 'employment', confidence: 0.95 }],
+          targetEntityTypes: ['person'],
+        }),
+      }
       const bridge = createKnowledgeGraphBridge({
         memoryStore: store,
         embedding: mockEmbedding(),
         scope: testScope,
+        explorationLlm,
       })
 
-      const adj = await bridge.getAdjacencyList!(['nonexistent'])
-      expect(adj.size).toBe(0)
-    })
-  })
+      const result = await bridge.explore!('plotline employees', { userId: 'test-user', explain: true })
 
-  describe('getChunksForEntities', () => {
-    function setupJunctionBridge(
-      entityIds: string[],
-      chunksPerEntity: Array<{ entityId: string; documentId: string; chunkIndex: number; bucketId: string; content: string }>,
-    ) {
-      const edges: SemanticEdge[] = entityIds.flatMap((e, i) =>
-        i > 0 ? [makeEdge(`e${i}`, entityIds[0]!, e, 'REL')] : [],
-      )
-      const mentions: MockMention[] = chunksPerEntity.map(c => ({
-        entityId: c.entityId,
-        documentId: c.documentId,
-        chunkIndex: c.chunkIndex,
-        bucketId: c.bucketId,
-        mentionType: 'subject',
+      expect(explorationLlm.generateJSON).toHaveBeenCalled()
+      expect(result.trace?.parser).toBe('llm')
+      expect(result.intent.anchorText).toBe('Plotline')
+      expect(result.intent.relationFamilies[0]).toEqual(expect.objectContaining({
+        name: 'employment',
+        confidence: 0.95,
       }))
-      const chunkContent = new Map<string, MockChunk>()
-      for (const c of chunksPerEntity) {
-        chunkContent.set(`${c.documentId}:${c.chunkIndex}`, {
-          entityId: c.entityId,
-          documentId: c.documentId,
-          chunkIndex: c.chunkIndex,
-          bucketId: c.bucketId,
-          content: c.content,
-        })
+    })
+
+    it('falls back to deterministic parsing when the exploration LLM returns invalid output and can include passages', async () => {
+      const entities = new Map<string, SemanticEntity>([
+        ['plotline', makeEntity('plotline', 'Plotline', 'organization')],
+        ['adarsh', makeEntity('adarsh', 'Adarsh Tadimari', 'person')],
+      ])
+      const edges = [makeEdge('edge-1', 'adarsh', 'plotline', 'WORKS_FOR')]
+      const store = mockStore(entities, edges)
+      Object.assign(store, {
+        getPassageEdgesForEntities: vi.fn().mockResolvedValue([{
+          passageId: 'passage_plotline_adarsh',
+          entityId: 'adarsh',
+          weight: 2,
+          mentionCount: 1,
+          confidence: 0.9,
+          surfaceTexts: ['Adarsh Tadimari'],
+          mentionTypes: ['subject'],
+        }]),
+        getPassagesByIds: vi.fn().mockResolvedValue([{
+          passageId: 'passage_plotline_adarsh',
+          content: 'Adarsh Tadimari works at Plotline on SDK integration issues.',
+          bucketId: 'bucket-1',
+          documentId: 'doc-1',
+          chunkIndex: 0,
+          totalChunks: 1,
+          metadata: { source: 'test' },
+          userId: 'test-user',
+        }]),
+      })
+      const explorationLlm = {
+        generateText: vi.fn().mockResolvedValue(''),
+        generateJSON: vi.fn().mockResolvedValue({
+          anchorText: 'Plotline',
+          relationFamilies: [{ name: 'not-a-family', confidence: 1 }],
+          targetEntityTypes: [],
+        }),
       }
-      const store = mockStore(new Map(), edges, mentions, chunkContent)
       const bridge = createKnowledgeGraphBridge({
         memoryStore: store,
         embedding: mockEmbedding(),
         scope: testScope,
         resolveChunksTable: () => 'typegraph_chunks_mock',
-      })
-      return { bridge, store }
-    }
-
-    it('retrieves chunks for entities via the junction', async () => {
-      const { bridge } = setupJunctionBridge(['a', 'b', 'c'], [
-        { entityId: 'a', documentId: 'doc-1', chunkIndex: 0, bucketId: 'bucket-1', content: 'Vitamin D prevents osteoporosis.' },
-        { entityId: 'a', documentId: 'doc-2', chunkIndex: 0, bucketId: 'bucket-2', content: 'Vitamin D supports bone health.' },
-      ])
-
-      const chunks = await bridge.getChunksForEntities!(['a'], 10)
-
-      expect(chunks).toHaveLength(2)
-      expect(chunks[0]).toEqual(expect.objectContaining({
-        content: expect.any(String),
-        bucketId: expect.any(String),
-        score: expect.any(Number),
-      }))
-      expect(chunks[0]!.score).toBeGreaterThan(0)
-    })
-
-    it('deduplicates chunks by (documentId, chunkIndex)', async () => {
-      const { bridge } = setupJunctionBridge(['a', 'b', 'c'], [
-        { entityId: 'a', documentId: 'doc-1', chunkIndex: 0, bucketId: 'bucket-1', content: 'Same chunk.' },
-        { entityId: 'a', documentId: 'doc-1', chunkIndex: 0, bucketId: 'bucket-1', content: 'Same chunk.' },
-      ])
-
-      const chunks = await bridge.getChunksForEntities!(['a'], 10)
-      expect(chunks).toHaveLength(1)
-    })
-
-    it('respects limit parameter', async () => {
-      const chunksSeed = Array.from({ length: 10 }, (_, i) => ({
-        entityId: 'a', documentId: `doc-${i}`, chunkIndex: 0, bucketId: `bucket-${i}`, content: `Content ${i}`,
-      }))
-      const { bridge } = setupJunctionBridge(['a'], chunksSeed)
-
-      const chunks = await bridge.getChunksForEntities!(['a'], 3)
-      expect(chunks).toHaveLength(3)
-    })
-
-    it('filters by bucketIds when provided', async () => {
-      const { bridge } = setupJunctionBridge(['a'], [
-        { entityId: 'a', documentId: 'doc-1', chunkIndex: 0, bucketId: 'bucket-1', content: 'In bucket 1.' },
-        { entityId: 'a', documentId: 'doc-2', chunkIndex: 0, bucketId: 'bucket-2', content: 'In bucket 2.' },
-      ])
-
-      const chunks = await bridge.getChunksForEntities!(['a'], 10, undefined, ['bucket-1'])
-      expect(chunks).toHaveLength(1)
-      expect(chunks[0]!.bucketId).toBe('bucket-1')
-    })
-
-    it('returns empty when resolveChunksTable is not configured', async () => {
-      const store = mockStore()
-      const bridge = createKnowledgeGraphBridge({
-        memoryStore: store,
-        embedding: mockEmbedding(),
-        scope: testScope,
-        // no resolveChunksTable
+        explorationLlm,
       })
 
-      const chunks = await bridge.getChunksForEntities!(['a'], 10)
-      expect(chunks).toEqual([])
-    })
-
-    it('passes the dimension-qualified embedding model key to resolveChunksTable', async () => {
-      const edges: SemanticEdge[] = []
-      const mentions: MockMention[] = [
-        { entityId: 'a', documentId: 'doc-1', chunkIndex: 0, bucketId: 'bucket-1', mentionType: 'subject' },
-      ]
-      const chunkContent = new Map<string, MockChunk>([
-        ['doc-1:0', { entityId: 'a', documentId: 'doc-1', chunkIndex: 0, bucketId: 'bucket-1', content: 'x' }],
-      ])
-      const store = mockStore(new Map(), edges, mentions, chunkContent)
-      const resolveChunksTable = vi.fn().mockReturnValue('typegraph_chunks_mock')
-      const bridge = createKnowledgeGraphBridge({
-        memoryStore: store,
-        embedding: mockEmbedding(),
-        scope: testScope,
-        resolveChunksTable,
+      const result = await bridge.explore!('plotline employees', {
+        userId: 'test-user',
+        include: { passages: true },
+        explain: true,
       })
 
-      await bridge.getChunksForEntities!(['a'], 10)
-      expect(resolveChunksTable).toHaveBeenCalledWith('mock-embed:10')
+      expect(result.trace?.parser).toBe('fallback')
+      expect(result.intent.relationFamilies.map(family => family.name)).toContain('employment')
+      expect(result.passages).toEqual([
+        expect.objectContaining({
+          passageId: 'passage_plotline_adarsh',
+          documentId: 'doc-1',
+          chunkIndex: 0,
+        }),
+      ])
+      expect(result.passages?.[0]?.score).toBeGreaterThan(0)
     })
   })
 })

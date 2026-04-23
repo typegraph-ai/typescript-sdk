@@ -100,6 +100,11 @@ export interface KnowledgeGraphBridge {
     bucketId: string
     chunkIndex?: number
     documentId?: string
+    tenantId?: string | undefined
+    groupId?: string | undefined
+    userId?: string | undefined
+    agentId?: string | undefined
+    conversationId?: string | undefined
     metadata?: Record<string, unknown>
   }): Promise<void>
 
@@ -113,18 +118,55 @@ export interface KnowledgeGraphBridge {
     bucketId: string
     chunkIndex?: number | undefined
     documentId?: string | undefined
+    tenantId?: string | undefined
+    groupId?: string | undefined
+    userId?: string | undefined
+    agentId?: string | undefined
+    conversationId?: string | undefined
     metadata?: Record<string, unknown> | undefined
     confidence?: number | undefined
   }>): Promise<void>
 
-  /** Search entities by embedding similarity. Used during graph-augmented retrieval and graph exploration. */
+  /** Persist graph passage nodes for indexed chunks. */
+  upsertPassageNodes?(nodes: Array<{
+    bucketId: string
+    documentId: string
+    chunkIndex: number
+    embeddingModel: string
+    contentHash: string
+    chunkId?: string | undefined
+    metadata?: Record<string, unknown> | undefined
+    visibility?: import('./typegraph-document.js').Visibility | undefined
+    tenantId?: string | undefined
+    groupId?: string | undefined
+    userId?: string | undefined
+    agentId?: string | undefined
+    conversationId?: string | undefined
+  }>): Promise<void>
+
+  /** Search entities for query seeding and graph exploration. */
   searchEntities?(query: string, identity: typegraphIdentity, limit?: number): Promise<EntityResult[]>
 
-  /** Get adjacency list for PPR. */
-  getAdjacencyList?(entityIds: string[]): Promise<Map<string, Array<{ target: string; weight: number }>>>
+  /** Search persisted facts by semantic similarity. */
+  searchFacts?(query: string, opts?: FactSearchOpts): Promise<FactResult[]>
 
-  /** Get chunk content associated with entities. Optionally scoped to specific buckets via `bucketIds`. */
-  getChunksForEntities?(entityIds: string[], limit?: number, pprScores?: Map<string, number>, bucketIds?: string[]): Promise<Array<{ content: string; bucketId: string; score: number; documentId?: string; chunkIndex?: number; metadata?: Record<string, unknown> }>>
+  /** Explore a semantic subgraph using anchor resolution and relation-family intent parsing. */
+  explore?(query: string, opts?: GraphExploreOpts): Promise<GraphExploreResult>
+
+  /** Retrieve passages directly connected to an entity. */
+  getPassagesForEntity?(entityId: string, opts?: {
+    bucketIds?: string[] | undefined
+    limit?: number | undefined
+  }): Promise<PassageResult[]>
+
+  /** Run heterogeneous graph traversal and return ranked passages. */
+  searchGraphPassages?(query: string, identity: typegraphIdentity, opts?: GraphSearchOpts): Promise<GraphSearchResult>
+
+  /** Explain a heterogeneous graph query without changing retrieval behavior. */
+  explainQuery?(query: string, opts?: GraphExplainOpts): Promise<GraphSearchTrace>
+
+  /** Backfill persisted passage nodes, passage-entity edges, and fact records from existing indexed graph data. */
+  backfill?(identity: typegraphIdentity, opts?: GraphBackfillOpts): Promise<GraphBackfillResult>
 
   // ── Graph exploration methods ──
 
@@ -183,6 +225,149 @@ export interface EdgeResult {
   relation: string
   weight: number
   properties?: Record<string, unknown> | undefined
+}
+
+export interface FactResult {
+  id: string
+  edgeId: string
+  sourceEntityId: string
+  sourceEntityName?: string | undefined
+  targetEntityId: string
+  targetEntityName?: string | undefined
+  relation: string
+  factText: string
+  weight: number
+  evidenceCount: number
+  similarity?: number | undefined
+  properties?: Record<string, unknown> | undefined
+}
+
+export type FactRelevanceFilter = (query: string, facts: FactResult[]) => Promise<string[]>
+
+export interface FactSearchOpts extends typegraphIdentity {
+  limit?: number | undefined
+}
+
+export interface GraphExploreOptions {
+  include?: {
+    entities?: boolean | undefined
+    facts?: boolean | undefined
+    passages?: boolean | undefined
+  } | undefined
+  relationFamilies?: string[] | undefined
+  bucketIds?: string[] | undefined
+  anchorLimit?: number | undefined
+  entityLimit?: number | undefined
+  factLimit?: number | undefined
+  passageLimit?: number | undefined
+  depth?: 1 | 2 | undefined
+  explain?: boolean | undefined
+}
+
+export type GraphExploreOpts = GraphExploreOptions & typegraphIdentity & TelemetryOpts
+
+export interface GraphExploreIntentFamily {
+  name: string
+  predicates: string[]
+  confidence: number
+}
+
+export interface GraphExploreIntent {
+  rawQuery: string
+  anchorText: string
+  relationFamilies: GraphExploreIntentFamily[]
+  targetEntityTypes: string[]
+}
+
+export interface GraphExploreTrace {
+  parser: 'llm' | 'fallback'
+  anchorCandidates: EntityResult[]
+  selectedAnchorIds: string[]
+  matchedEdgeIds: string[]
+  matchedRelations: string[]
+  droppedByRelation: number
+  droppedByType: number
+  droppedByDirection: number
+}
+
+export interface GraphExploreResult {
+  intent: GraphExploreIntent
+  anchors: EntityResult[]
+  entities: EntityResult[]
+  facts: FactResult[]
+  passages?: PassageResult[] | undefined
+  trace?: GraphExploreTrace | undefined
+}
+
+export interface PassageResult {
+  passageId: string
+  content: string
+  bucketId: string
+  documentId: string
+  chunkIndex: number
+  totalChunks?: number | undefined
+  score: number
+  metadata?: Record<string, unknown> | undefined
+  tenantId?: string | undefined
+  groupId?: string | undefined
+  userId?: string | undefined
+  agentId?: string | undefined
+  conversationId?: string | undefined
+}
+
+export interface GraphSearchOpts {
+  count?: number | undefined
+  bucketIds?: string[] | undefined
+  restartProbability?: number | undefined
+  passageSeedWeight?: number | undefined
+  entitySeedWeight?: number | undefined
+  factCandidateLimit?: number | undefined
+  factFilterInputLimit?: number | undefined
+  factSeedLimit?: number | undefined
+  passageSeedLimit?: number | undefined
+  maxExpansionEdgesPerEntity?: number | undefined
+  maxPprIterations?: number | undefined
+  minPprScore?: number | undefined
+  factFilter?: boolean | undefined
+}
+
+export type GraphExplainOpts = GraphSearchOpts & typegraphIdentity
+
+export interface GraphSearchTrace {
+  entitySeedCount: number
+  factSeedCount: number
+  passageSeedCount: number
+  graphNodeCount: number
+  graphEdgeCount: number
+  pprNonzeroCount: number
+  candidatesBeforeMerge: number
+  candidatesAfterMerge: number
+  topGraphScores: number[]
+  selectedFactIds: string[]
+  selectedEntityIds: string[]
+  selectedPassageIds: string[]
+}
+
+export interface GraphSearchResult {
+  results: PassageResult[]
+  trace: GraphSearchTrace
+}
+
+export interface GraphBackfillOpts {
+  bucketIds?: string[] | undefined
+  batchSize?: number | undefined
+  passages?: boolean | undefined
+  passageEntityEdges?: boolean | undefined
+  facts?: boolean | undefined
+  entityProfiles?: boolean | undefined
+}
+
+export interface GraphBackfillResult {
+  passageNodesUpserted: number
+  passageEntityEdgesUpserted: number
+  factRecordsUpserted: number
+  entityProfilesUpdated: number
+  batches: number
 }
 
 export interface SubgraphOpts {

@@ -120,6 +120,50 @@ export interface SemanticEntityMention {
   confidence?: number | undefined
 }
 
+export interface SemanticPassageNode {
+  id: string
+  bucketId: string
+  documentId: string
+  chunkIndex: number
+  embeddingModel: string
+  contentHash: string
+  chunkId?: string | undefined
+  metadata: Record<string, unknown>
+  scope: typegraphIdentity
+  visibility?: Visibility | undefined
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface SemanticPassageEntityEdge {
+  passageId: string
+  entityId: string
+  weight: number
+  mentionCount: number
+  confidence?: number | undefined
+  surfaceTexts: string[]
+  mentionTypes: EntityMentionType[]
+  createdAt?: Date | undefined
+  updatedAt?: Date | undefined
+}
+
+export interface SemanticFactRecord {
+  id: string
+  edgeId: string
+  sourceEntityId: string
+  targetEntityId: string
+  relation: string
+  factText: string
+  weight: number
+  evidenceCount: number
+  embedding?: number[] | undefined
+  scope: typegraphIdentity
+  visibility?: Visibility | undefined
+  createdAt: Date
+  updatedAt: Date
+  similarity?: number | undefined
+}
+
 // ── Semantic Memory - Edges ──
 // Relationships between entities - "how things relate"
 

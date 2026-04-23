@@ -9,7 +9,7 @@ export interface TripleExtractorConfig {
   /** LLM for relationship extraction (Pass 2 in two-pass mode). Falls back to llm. */
   relationshipLlm?: LLMProvider | undefined
   graph: KnowledgeGraphBridge
-  /** Use two separate LLM calls (entities then relationships) instead of one combined call. Default: false. */
+  /** Use two separate LLM calls (entities then relationships) instead of one combined call. Default: true. */
   twoPass?: boolean | undefined
 }
 
@@ -144,6 +144,21 @@ const ALIAS_LEADING_FRAGMENT_WORDS = new Set([
   'where', 'while', 'with',
 ])
 
+const ALIAS_GREETING_WORDS = new Set(['hi', 'hello', 'hey', 'dear'])
+const ALIAS_IMPERATIVE_WORDS = new Set(['inform', 'ask', 'tell', 'cc', 'tag', 'notify', 'ping'])
+const ALIAS_QUANTIFIER_WORDS = new Set(['both', 'all', 'either', 'neither'])
+
+function isBadAliasFragment(value: string): boolean {
+  const tokens = normalizeName(value).split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return true
+  if (ALIAS_GREETING_WORDS.has(tokens[0]!)) return true
+  if (ALIAS_IMPERATIVE_WORDS.has(tokens[0]!)) return true
+  if (ALIAS_QUANTIFIER_WORDS.has(tokens[0]!)) return true
+  if (/['’]s\b/i.test(value)) return true
+  if (/https?:\/\/|www\.|@.+\..+/.test(value)) return true
+  return false
+}
+
 function hasSentenceBoundaryInsideAlias(value: string): boolean {
   const withoutInitials = value.replace(/\b[A-Z]\.\s*/g, '')
   return /[.!?]|--|—|–/.test(withoutInitials)
@@ -152,6 +167,7 @@ function hasSentenceBoundaryInsideAlias(value: string): boolean {
 function isModeratePersonAlias(alias: string): boolean {
   const cleaned = sanitizeField(alias)
   if (!cleaned || cleaned.length > 80) return false
+  if (isBadAliasFragment(cleaned)) return false
   if (hasSentenceBoundaryInsideAlias(cleaned)) return false
 
   const tokens = normalizeName(cleaned).split(/\s+/).filter(Boolean)
@@ -263,6 +279,8 @@ function postProcessExtraction(
 
     if (entity.type === 'person') {
       entity.aliases = entity.aliases.filter(isModeratePersonAlias)
+    } else {
+      entity.aliases = entity.aliases.filter(alias => !isBadAliasFragment(alias))
     }
 
     if (entity.type === 'person') augmentPersonAliases(entity, content)
@@ -664,7 +682,7 @@ export class TripleExtractor {
     this.llm = config.llm
     this.relationshipLlm = config.relationshipLlm ?? config.llm
     this.graph = config.graph
-    this.twoPass = config.twoPass ?? false
+    this.twoPass = config.twoPass ?? true
   }
 
   /**
@@ -679,6 +697,13 @@ export class TripleExtractor {
     metadata?: Record<string, unknown>,
     entityContext?: EntityContext[],
     documentTitle?: string,
+    identity?: {
+      tenantId?: string | undefined
+      groupId?: string | undefined
+      userId?: string | undefined
+      agentId?: string | undefined
+      conversationId?: string | undefined
+    },
   ): Promise<{ entities: EntityContext[] } | undefined> {
     if (!this.graph.addTriple && !this.graph.addEntityMentions) return { entities: [] }
 
@@ -699,6 +724,11 @@ export class TripleExtractor {
         bucketId,
         ...(chunkIndex !== undefined ? { chunkIndex } : {}),
         ...(documentId ? { documentId } : {}),
+        ...(identity?.tenantId ? { tenantId: identity.tenantId } : {}),
+        ...(identity?.groupId ? { groupId: identity.groupId } : {}),
+        ...(identity?.userId ? { userId: identity.userId } : {}),
+        ...(identity?.agentId ? { agentId: identity.agentId } : {}),
+        ...(identity?.conversationId ? { conversationId: identity.conversationId } : {}),
         ...(metadata ? { metadata } : {}),
       })))
     }
@@ -730,6 +760,11 @@ export class TripleExtractor {
           bucketId,
           ...(chunkIndex !== undefined ? { chunkIndex } : {}),
           ...(documentId ? { documentId } : {}),
+          ...(identity?.tenantId ? { tenantId: identity.tenantId } : {}),
+          ...(identity?.groupId ? { groupId: identity.groupId } : {}),
+          ...(identity?.userId ? { userId: identity.userId } : {}),
+          ...(identity?.agentId ? { agentId: identity.agentId } : {}),
+          ...(identity?.conversationId ? { conversationId: identity.conversationId } : {}),
           ...(metadata ? { metadata } : {}),
         })
       }
@@ -738,7 +773,11 @@ export class TripleExtractor {
     return { entities: entities.map(e => ({ name: e.name, type: e.type })) }
   }
 
-  /** Single combined LLM call for entities + relationships (default). */
+  async persistPassageNodes(nodes: Parameters<NonNullable<KnowledgeGraphBridge['upsertPassageNodes']>>[0]): Promise<void> {
+    await this.graph.upsertPassageNodes?.(nodes)
+  }
+
+  /** Single combined LLM call for entities + relationships. Used only when twoPass is disabled. */
   private async extractSinglePass(
     content: string,
     entityContext?: EntityContext[],

@@ -7,7 +7,7 @@ import { createTestDocument, createTestDocuments } from './helpers/mock-connecto
 import type { typegraphInstance } from '../typegraph.js'
 import type { Bucket } from '../types/bucket.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
-import type { EntityResult, KnowledgeGraphBridge } from '../types/graph-bridge.js'
+import type { EntityResult, GraphExploreResult, KnowledgeGraphBridge } from '../types/graph-bridge.js'
 
 /** Register a pre-built Bucket + embedding on an instance (bypasses buckets.create UUID generation). */
 function registerTestBucket(instance: typegraphInstance, bucket: Bucket, embedding: EmbeddingProvider) {
@@ -166,6 +166,67 @@ describe('typegraphInit', () => {
           edgeCount: 3,
         }),
       ])
+    })
+  })
+
+  describe('graph.explore', () => {
+    it('forwards structured graph exploration to the bridge', async () => {
+      const identity = { userId: 'test-user' }
+      const exploreResult: GraphExploreResult = {
+        intent: {
+          rawQuery: 'plotline employees',
+          anchorText: 'Plotline',
+          relationFamilies: [{
+            name: 'employment',
+            predicates: ['WORKS_FOR', 'WORKED_FOR', 'MEMBER_OF'],
+            confidence: 0.95,
+          }],
+          targetEntityTypes: ['person'],
+        },
+        anchors: [{
+          id: 'ent_plotline',
+          name: 'Plotline',
+          entityType: 'organization',
+          aliases: [],
+          edgeCount: 3,
+        }],
+        entities: [{
+          id: 'ent_adarsh',
+          name: 'Adarsh Tadimari',
+          entityType: 'person',
+          aliases: ['Adarsh'],
+          edgeCount: 4,
+        }],
+        facts: [{
+          id: 'fact_1',
+          edgeId: 'edge_1',
+          sourceEntityId: 'ent_adarsh',
+          sourceEntityName: 'Adarsh Tadimari',
+          targetEntityId: 'ent_plotline',
+          targetEntityName: 'Plotline',
+          relation: 'WORKS_FOR',
+          factText: 'Adarsh Tadimari works for Plotline',
+          weight: 1,
+          evidenceCount: 1,
+        }],
+      }
+      const knowledgeGraph: KnowledgeGraphBridge = {
+        explore: vi.fn().mockResolvedValue(exploreResult),
+      }
+      const inst = await typegraphInit({ vectorStore: adapter, embedding, knowledgeGraph })
+
+      const result = await inst.graph.explore('plotline employees', {
+        ...identity,
+        depth: 1,
+        include: { passages: false },
+      })
+
+      expect(knowledgeGraph.explore).toHaveBeenCalledWith('plotline employees', {
+        ...identity,
+        depth: 1,
+        include: { passages: false },
+      })
+      expect(result).toEqual(exploreResult)
     })
   })
 

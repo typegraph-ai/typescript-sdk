@@ -15,16 +15,22 @@ function makeResult(overrides: Partial<NormalizedResult> = {}): NormalizedResult
 }
 
 describe('dedupKey', () => {
-  it('always uses content hash (64-char SHA256)', () => {
+  it('uses stable chunk identity when bucket, document, and chunk are available', () => {
     const r = makeResult({ url: 'https://example.com/page', chunk: { index: 2, total: 5, isNeighbor: false } })
+    const key = dedupKey(r)
+    expect(key).toBe('src-1:doc-1:2')
+  })
+
+  it('falls back to content hash when chunk identity is unavailable', () => {
+    const r = makeResult({ url: 'https://example.com/page', documentId: '', chunk: undefined })
     const key = dedupKey(r)
     expect(key).toHaveLength(64)
     expect(key).toMatch(/^[0-9a-f]{64}$/)
   })
 
-  it('same content produces same key regardless of documentId', () => {
-    const a = makeResult({ content: 'hello world', documentId: 'doc-1' })
-    const b = makeResult({ content: 'hello world', documentId: 'graph-0' })
+  it('same content produces same fallback key regardless of documentId', () => {
+    const a = makeResult({ content: 'hello world', documentId: '', chunk: undefined })
+    const b = makeResult({ content: 'hello world', documentId: 'graph-0', chunk: undefined })
     expect(dedupKey(a)).toBe(dedupKey(b))
   })
 
@@ -301,10 +307,11 @@ describe('mergeAndRank', () => {
     })]
     const graph = [makeResult({
       content: 'Golden State Warriors are awesome',
-      documentId: 'graph-0',
+      documentId: 'doc-123',
       mode: 'graph',
       normalizedScore: 0.15,
       rawScores: { graph: 0.15 },
+      chunk: { index: 0, total: 1, isNeighbor: false },
     })]
     const merged = mergeAndRank([indexed, graph], 10)
     expect(merged).toHaveLength(1)

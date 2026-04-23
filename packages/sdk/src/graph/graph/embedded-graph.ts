@@ -44,11 +44,11 @@ export class EmbeddedGraph {
   /**
    * Add an edge (relationship) to the graph.
    */
-  async addEdge(edge: SemanticEdge): Promise<void> {
+  async addEdge(edge: SemanticEdge): Promise<SemanticEdge> {
     if (!this.store.upsertEdge) {
       throw new Error('MemoryStoreAdapter does not support edge storage')
     }
-    await this.store.upsertEdge(edge)
+    return this.store.upsertEdge(edge)
   }
 
   /**

@@ -12,7 +12,7 @@ import type { PaginationOpts, PaginatedResult } from '../types/pagination.js'
 import type { ConversationTurnResult, MemoryHealthReport } from '../types/memory.js'
 import type { MemoryRecord } from '../memory/types/memory.js'
 import type { Job, JobFilter } from '../types/job.js'
-import type { EntityResult, EntityDetail, EdgeResult, SubgraphOpts, SubgraphResult, GraphStats, RecallOpts } from '../types/graph-bridge.js'
+import type { EntityResult, EntityDetail, EdgeResult, FactResult, FactSearchOpts, GraphExploreOpts, GraphExploreResult, GraphBackfillOpts, GraphBackfillResult, GraphExplainOpts, GraphSearchTrace, PassageResult, SubgraphOpts, SubgraphResult, GraphStats, RecallOpts } from '../types/graph-bridge.js'
 import { DEFAULT_BUCKET_ID, normalizeRawDocument } from '../typegraph.js'
 import { HttpClient } from './http-client.js'
 import type { CloudConfig } from './http-client.js'
@@ -119,6 +119,30 @@ export function createCloudInstance(config: CloudConfig): typegraphCloudInstance
       limit?: number
     }): Promise<EdgeResult[]> {
       return client.post<EdgeResult[]>(`/v1/graph/entities/${e(entityId)}/edges`, opts)
+    },
+    async searchFacts(query: string, opts?: FactSearchOpts): Promise<FactResult[]> {
+      const { tenantId, groupId, userId, agentId, conversationId, ...rest } = opts ?? {}
+      const identity = { tenantId, groupId, userId, agentId, conversationId }
+      return client.post<FactResult[]>('/v1/graph/facts/search', { query, identity, ...rest })
+    },
+    async explore(query: string, opts?: GraphExploreOpts): Promise<GraphExploreResult> {
+      const { tenantId, groupId, userId, agentId, conversationId, ...rest } = opts ?? {}
+      const identity = { tenantId, groupId, userId, agentId, conversationId }
+      return client.post<GraphExploreResult>('/v1/graph/explore', { query, identity, ...rest })
+    },
+    async getPassagesForEntity(entityId: string, opts?: {
+      bucketIds?: string[] | undefined
+      limit?: number | undefined
+    }): Promise<PassageResult[]> {
+      return client.post<PassageResult[]>(`/v1/graph/entities/${e(entityId)}/passages`, opts)
+    },
+    async explainQuery(query: string, opts?: GraphExplainOpts): Promise<GraphSearchTrace> {
+      const { tenantId, groupId, userId, agentId, conversationId, ...rest } = opts ?? {}
+      const identity = { tenantId, groupId, userId, agentId, conversationId }
+      return client.post<GraphSearchTrace>('/v1/graph/query/explain', { query, identity, ...rest })
+    },
+    async backfill(identity: typegraphIdentity, opts?: GraphBackfillOpts): Promise<GraphBackfillResult> {
+      return client.post<GraphBackfillResult>('/v1/graph/backfill', { identity, ...opts })
     },
     async getSubgraph(opts: SubgraphOpts): Promise<SubgraphResult> {
       return client.post<SubgraphResult>('/v1/graph/subgraph', opts)

@@ -64,7 +64,7 @@ TypeGraph uses **composable query signals** - the caller chooses which retrieval
 | ---------- | -------------------------------------------------- | ------- |
 | `semantic` | Semantic embedding search against chunk embeddings | **On**  |
 | `keyword`  | BM25 keyword search, fused with semantic via RRF   | Off     |
-| `graph`    | PPR graph traversal via entity embeddings          | Off     |
+| `graph`    | Heterogeneous passage-node PPR over entities and passages | Off     |
 | `memory`   | Cognitive memory recall (facts, episodes)          | Off     |
 
 
@@ -84,9 +84,19 @@ d.query('what did Alice say about the SSO migration?', {
   tenantId: 'org1',
 })
 
-// Graph-only: entity-centric associative retrieval
+// Graph-only: graph-ranked evidence retrieval
 d.query('how are Alice and Acme Corp connected?', {
   signals: { graph: true },
+})
+```
+
+For structured graph exploration, use the graph API directly:
+
+```ts
+await d.graph.explore('plotline employees', {
+  tenantId: 'org1',
+  include: { entities: true, facts: true, passages: true },
+  depth: 1,
 })
 ```
 
@@ -97,7 +107,7 @@ When `graph` and `llm` are configured, document indexing automatically builds a 
 3. **Predicate normalization** - relationship types are canonicalized via a predicate ontology (~150 types) and synonym groups to prevent graph fragmentation
 4. **Cross-chunk context** - entity context accumulates across chunks within a document, improving extraction consistency
 
-At query time, enabling the `graph` signal seeds a **Personalized PageRank** walk from entities mentioned in the query, traversing the graph to surface associatively-connected passages across documents and memory. When combined with `vector` and `keyword` signals, results are fused via RRF, enabling multi-hop reasoning in a single retrieval step. Composite score weights are configurable per-query via `scoreWeights`, and graph result filtering is tunable via `graphReinforcement` (`'only'`, `'prefer'`, or `'off'`).
+At query time, enabling the `graph` signal seeds a **Personalized PageRank** walk from fact-linked entities, direct entity matches, and dense passage seeds, traversing a heterogeneous graph of entities and passages to surface evidence-bearing chunks. When combined with `vector` and `keyword` signals, results are fused via RRF, enabling multi-hop reasoning in a single retrieval step. Composite score weights are configurable per-query via `scoreWeights`, and graph result filtering is tunable via `graphReinforcement` (`'only'`, `'prefer'`, or `'off'`).
 
 The extraction pipeline supports configurable LLMs - using a reasoning model for extraction produces dramatically higher-quality graphs (fewer entities, richer predicate vocabulary, zero noise edges) at the cost of slower ingestion.
 

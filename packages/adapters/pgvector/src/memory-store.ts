@@ -6,7 +6,21 @@
  * driver-agnostic Postgres access (Neon, node-postgres, Drizzle, etc.).
  */
 
-import type { MemoryStoreAdapter, MemoryFilter, MemorySearchOpts, MemoryRecord, SemanticEntity, SemanticEntityMention, SemanticEdge, typegraphIdentity } from '@typegraph-ai/sdk'
+import type {
+  MemoryStoreAdapter,
+  MemoryFilter,
+  MemorySearchOpts,
+  MemoryRecord,
+  PassageBackfillChunk,
+  PassageMentionBackfillRow,
+  SemanticEntity,
+  SemanticEntityMention,
+  SemanticEdge,
+  SemanticFactRecord,
+  SemanticPassageEntityEdge,
+  SemanticPassageNode,
+  typegraphIdentity,
+} from '@typegraph-ai/sdk'
 import { generateId } from '@typegraph-ai/sdk'
 
 type SqlExecutor = (
@@ -22,6 +36,9 @@ export interface PgMemoryAdapterConfig {
   entitiesTable?: string | undefined
   edgesTable?: string | undefined
   chunkMentionsTable?: string | undefined
+  passageNodesTable?: string | undefined
+  passageEntityEdgesTable?: string | undefined
+  factRecordsTable?: string | undefined
   /** Embedding vector dimensions (e.g. 1536 for text-embedding-3-small). Used for HNSW index creation. */
   embeddingDimensions?: number | undefined
 }
@@ -222,6 +239,100 @@ const CHUNK_MENTIONS_DDL = (t: string) => {
 `
 }
 
+const PASSAGE_NODES_DDL = (t: string) => {
+  const i = idxPrefix(t)
+  const idx = (suffix: string) => safeIdx(i, suffix)
+  return `
+  CREATE TABLE IF NOT EXISTS ${t} (
+    id              TEXT PRIMARY KEY,
+    bucket_id       TEXT NOT NULL,
+    document_id     TEXT NOT NULL,
+    chunk_index     INTEGER NOT NULL,
+    chunk_id        TEXT,
+    embedding_model TEXT NOT NULL,
+    content_hash    TEXT NOT NULL,
+    metadata        JSONB NOT NULL DEFAULT '{}',
+    scope           JSONB NOT NULL DEFAULT '{}',
+    tenant_id       TEXT,
+    group_id        TEXT,
+    user_id         TEXT,
+    agent_id        TEXT,
+    conversation_id TEXT,
+    visibility      TEXT CHECK (visibility IS NULL OR visibility IN ('tenant', 'group', 'user', 'agent', 'conversation')),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT ${safeIdx(i, 'passage_uniq')} UNIQUE (bucket_id, document_id, chunk_index, embedding_model)
+  );
+
+  CREATE INDEX IF NOT EXISTS ${idx('doc_chunk_idx')} ON ${t} (document_id, chunk_index);
+  CREATE INDEX IF NOT EXISTS ${idx('bucket_idx')} ON ${t} (bucket_id);
+  CREATE INDEX IF NOT EXISTS ${idx('tenant_user_idx')} ON ${t} (tenant_id, user_id);
+  CREATE INDEX IF NOT EXISTS ${idx('tenant_group_idx')} ON ${t} (tenant_id, group_id);
+  CREATE INDEX IF NOT EXISTS ${idx('tenant_agent_idx')} ON ${t} (tenant_id, agent_id);
+  CREATE INDEX IF NOT EXISTS ${idx('tenant_conversation_idx')} ON ${t} (tenant_id, conversation_id);
+  CREATE INDEX IF NOT EXISTS ${idx('visibility_idx')} ON ${t} (visibility);
+`
+}
+
+const PASSAGE_ENTITY_EDGES_DDL = (t: string) => {
+  const i = idxPrefix(t)
+  const idx = (suffix: string) => safeIdx(i, suffix)
+  return `
+  CREATE TABLE IF NOT EXISTS ${t} (
+    passage_id    TEXT NOT NULL,
+    entity_id     TEXT NOT NULL,
+    weight        REAL NOT NULL DEFAULT 1.0,
+    mention_count INTEGER NOT NULL DEFAULT 1,
+    confidence    REAL,
+    surface_texts TEXT[] NOT NULL DEFAULT '{}',
+    mention_types TEXT[] NOT NULL DEFAULT '{}',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (passage_id, entity_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS ${idx('entity_idx')} ON ${t} (entity_id);
+  CREATE INDEX IF NOT EXISTS ${idx('passage_idx')} ON ${t} (passage_id);
+`
+}
+
+const FACT_RECORDS_DDL = (t: string, dims?: number) => {
+  const i = idxPrefix(t)
+  const idx = (suffix: string) => safeIdx(i, suffix)
+  return `
+  CREATE TABLE IF NOT EXISTS ${t} (
+    id               TEXT PRIMARY KEY,
+    edge_id          TEXT NOT NULL UNIQUE,
+    source_entity_id TEXT NOT NULL,
+    target_entity_id TEXT NOT NULL,
+    relation         TEXT NOT NULL,
+    fact_text        TEXT NOT NULL,
+    weight           REAL NOT NULL DEFAULT 1.0,
+    evidence_count   INTEGER NOT NULL DEFAULT 1,
+    embedding        VECTOR${dims ? `(${dims})` : ''},
+    scope            JSONB NOT NULL DEFAULT '{}',
+    tenant_id        TEXT,
+    group_id         TEXT,
+    user_id          TEXT,
+    agent_id         TEXT,
+    conversation_id  TEXT,
+    visibility       TEXT CHECK (visibility IS NULL OR visibility IN ('tenant', 'group', 'user', 'agent', 'conversation')),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE INDEX IF NOT EXISTS ${idx('source_idx')} ON ${t} (source_entity_id);
+  CREATE INDEX IF NOT EXISTS ${idx('target_idx')} ON ${t} (target_entity_id);
+  CREATE INDEX IF NOT EXISTS ${idx('relation_idx')} ON ${t} (relation);
+  CREATE INDEX IF NOT EXISTS ${idx('tenant_user_idx')} ON ${t} (tenant_id, user_id);
+  CREATE INDEX IF NOT EXISTS ${idx('tenant_group_idx')} ON ${t} (tenant_id, group_id);
+  CREATE INDEX IF NOT EXISTS ${idx('tenant_agent_idx')} ON ${t} (tenant_id, agent_id);
+  CREATE INDEX IF NOT EXISTS ${idx('tenant_conversation_idx')} ON ${t} (tenant_id, conversation_id);
+  CREATE INDEX IF NOT EXISTS ${idx('visibility_idx')} ON ${t} (visibility);
+  CREATE INDEX IF NOT EXISTS ${idx('embedding_idx')} ON ${t} USING hnsw (embedding vector_cosine_ops);
+`
+}
+
 // ── Adapter Implementation ──
 
 /** Strip schema prefix from a qualified table name for use in ON CONFLICT column refs. */
@@ -233,6 +344,9 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
   private entitiesTable: string
   private edgesTable: string
   private chunkMentionsTable: string
+  private passageNodesTable: string
+  private passageEntityEdgesTable: string
+  private factRecordsTable: string
   private schema: string | undefined
   private hnswEntityIndexCreated = false
   private hnswMemoryIndexCreated = false
@@ -246,6 +360,9 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     this.entitiesTable = config.entitiesTable ?? `${prefix}typegraph_semantic_entities`
     this.edgesTable = config.edgesTable ?? `${prefix}typegraph_semantic_edges`
     this.chunkMentionsTable = config.chunkMentionsTable ?? `${prefix}typegraph_entity_chunk_mentions`
+    this.passageNodesTable = config.passageNodesTable ?? `${prefix}typegraph_passage_nodes`
+    this.passageEntityEdgesTable = config.passageEntityEdgesTable ?? `${prefix}typegraph_passage_entity_edges`
+    this.factRecordsTable = config.factRecordsTable ?? `${prefix}typegraph_fact_records`
     this.embeddingDimensions = config.embeddingDimensions ?? 1536
   }
 
@@ -263,6 +380,9 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
       ENTITIES_DDL(this.entitiesTable, this.embeddingDimensions),
       EDGES_DDL(this.edgesTable),
       CHUNK_MENTIONS_DDL(this.chunkMentionsTable),
+      PASSAGE_NODES_DDL(this.passageNodesTable),
+      PASSAGE_ENTITY_EDGES_DDL(this.passageEntityEdgesTable),
+      FACT_RECORDS_DDL(this.factRecordsTable, this.embeddingDimensions),
     ]
     for (const ddl of allDdl) {
       const statements = ddl
@@ -804,6 +924,295 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
       .slice(0, maxRows)
   }
 
+  // ── Passage + Fact Graph Storage ──
+
+  async upsertPassageNodes(nodes: SemanticPassageNode[]): Promise<void> {
+    if (nodes.length === 0) return
+
+    const values: string[] = []
+    const params: unknown[] = []
+    for (const node of nodes) {
+      const base = params.length
+      values.push(`($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16})`)
+      params.push(
+        node.id,
+        node.bucketId,
+        node.documentId,
+        node.chunkIndex,
+        node.chunkId ?? null,
+        node.embeddingModel,
+        node.contentHash,
+        JSON.stringify(node.metadata),
+        JSON.stringify(node.scope),
+        node.scope.tenantId ?? null,
+        node.scope.groupId ?? null,
+        node.scope.userId ?? null,
+        node.scope.agentId ?? null,
+        node.scope.conversationId ?? null,
+        node.visibility ?? null,
+        node.updatedAt.toISOString(),
+      )
+    }
+
+    const tbl = unqualified(this.passageNodesTable)
+    await this.sqlWithRetry(
+      `INSERT INTO ${this.passageNodesTable}
+        (id, bucket_id, document_id, chunk_index, chunk_id, embedding_model, content_hash,
+         metadata, scope, tenant_id, group_id, user_id, agent_id, conversation_id, visibility, updated_at)
+       VALUES ${values.join(',')}
+       ON CONFLICT (bucket_id, document_id, chunk_index, embedding_model) DO UPDATE SET
+         chunk_id = COALESCE(EXCLUDED.chunk_id, ${tbl}.chunk_id),
+         content_hash = EXCLUDED.content_hash,
+         metadata = EXCLUDED.metadata,
+         scope = EXCLUDED.scope,
+         tenant_id = EXCLUDED.tenant_id,
+         group_id = EXCLUDED.group_id,
+         user_id = EXCLUDED.user_id,
+         agent_id = EXCLUDED.agent_id,
+         conversation_id = EXCLUDED.conversation_id,
+         visibility = EXCLUDED.visibility,
+         updated_at = EXCLUDED.updated_at`,
+      params
+    )
+  }
+
+  async upsertPassageEntityEdges(edges: SemanticPassageEntityEdge[]): Promise<void> {
+    if (edges.length === 0) return
+
+    const values: string[] = []
+    const params: unknown[] = []
+    for (const edge of edges) {
+      const base = params.length
+      values.push(`($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7})`)
+      params.push(
+        edge.passageId,
+        edge.entityId,
+        edge.weight,
+        edge.mentionCount,
+        edge.confidence ?? null,
+        edge.surfaceTexts,
+        edge.mentionTypes,
+      )
+    }
+
+    const tbl = unqualified(this.passageEntityEdgesTable)
+    await this.sqlWithRetry(
+      `INSERT INTO ${this.passageEntityEdgesTable}
+        (passage_id, entity_id, weight, mention_count, confidence, surface_texts, mention_types)
+       VALUES ${values.join(',')}
+       ON CONFLICT (passage_id, entity_id) DO UPDATE SET
+         weight = LEAST(5.0, ${tbl}.weight + EXCLUDED.weight),
+         mention_count = ${tbl}.mention_count + EXCLUDED.mention_count,
+         confidence = GREATEST(COALESCE(${tbl}.confidence, 0), COALESCE(EXCLUDED.confidence, 0)),
+         surface_texts = ARRAY(SELECT DISTINCT v FROM unnest(${tbl}.surface_texts || EXCLUDED.surface_texts) AS v WHERE v <> ''),
+         mention_types = ARRAY(SELECT DISTINCT v FROM unnest(${tbl}.mention_types || EXCLUDED.mention_types) AS v WHERE v <> ''),
+         updated_at = NOW()`,
+      params
+    )
+  }
+
+  async upsertFactRecord(fact: SemanticFactRecord): Promise<SemanticFactRecord> {
+    const embeddingStr = fact.embedding ? `[${fact.embedding.join(',')}]` : null
+    const rows = await this.sqlWithRetry(
+      `INSERT INTO ${this.factRecordsTable}
+        (id, edge_id, source_entity_id, target_entity_id, relation, fact_text, weight,
+         evidence_count, embedding, scope, tenant_id, group_id, user_id, agent_id,
+         conversation_id, visibility, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::vector,$10,$11,$12,$13,$14,$15,$16,$17)
+       ON CONFLICT (edge_id) DO UPDATE SET
+         relation = EXCLUDED.relation,
+         fact_text = EXCLUDED.fact_text,
+         weight = GREATEST(${unqualified(this.factRecordsTable)}.weight, EXCLUDED.weight),
+         evidence_count = GREATEST(${unqualified(this.factRecordsTable)}.evidence_count, EXCLUDED.evidence_count),
+         embedding = COALESCE(EXCLUDED.embedding, ${unqualified(this.factRecordsTable)}.embedding),
+         scope = EXCLUDED.scope,
+         tenant_id = EXCLUDED.tenant_id,
+         group_id = EXCLUDED.group_id,
+         user_id = EXCLUDED.user_id,
+         agent_id = EXCLUDED.agent_id,
+         conversation_id = EXCLUDED.conversation_id,
+         visibility = EXCLUDED.visibility,
+         updated_at = EXCLUDED.updated_at
+       RETURNING *`,
+      [
+        fact.id,
+        fact.edgeId,
+        fact.sourceEntityId,
+        fact.targetEntityId,
+        fact.relation,
+        fact.factText,
+        fact.weight,
+        fact.evidenceCount,
+        embeddingStr,
+        JSON.stringify(fact.scope),
+        fact.scope.tenantId ?? null,
+        fact.scope.groupId ?? null,
+        fact.scope.userId ?? null,
+        fact.scope.agentId ?? null,
+        fact.scope.conversationId ?? null,
+        fact.visibility ?? null,
+        fact.updatedAt.toISOString(),
+      ]
+    )
+    return mapRowToFact(rows[0]!)
+  }
+
+  async searchFacts(embedding: number[], scope: typegraphIdentity, limit?: number): Promise<SemanticFactRecord[]> {
+    const vectorStr = `[${embedding.join(',')}]`
+    const identity = buildIdentityWhere(scope, 1)
+    const scopeClause = identity.where ? ` AND ${identity.where}` : ''
+    const limitParam = `$${2 + identity.params.length}`
+    const rows = await this.sqlWithRetry(
+      `SELECT *, 1 - (embedding <=> $1::vector) AS similarity
+         FROM ${this.factRecordsTable}
+        WHERE embedding IS NOT NULL
+          ${scopeClause}
+        ORDER BY embedding <=> $1::vector
+        LIMIT ${limitParam}`,
+      [vectorStr, ...identity.params, limit ?? 20]
+    )
+    return rows.map(mapRowToFact)
+  }
+
+  async getPassageEdgesForEntities(
+    entityIds: string[],
+    opts?: {
+      scope?: typegraphIdentity | undefined
+      bucketIds?: string[] | undefined
+      limit?: number | undefined
+    }
+  ): Promise<SemanticPassageEntityEdge[]> {
+    if (entityIds.length === 0) return []
+
+    const params: unknown[] = [entityIds]
+    let bucketClause = ''
+    if (opts?.bucketIds && opts.bucketIds.length > 0) {
+      params.push(opts.bucketIds)
+      bucketClause = `AND p.bucket_id = ANY($${params.length}::text[])`
+    }
+    const identity = opts?.scope ? buildAliasedIdentityWhere('p', opts.scope, params.length) : { where: '', params: [] }
+    params.push(...identity.params)
+    params.push(opts?.limit ?? entityIds.length * 200)
+    const limitParam = `$${params.length}`
+    const scopeClause = identity.where ? `AND ${identity.where}` : ''
+
+    const rows = await this.sqlWithRetry(
+      `SELECT pe.*
+         FROM ${this.passageEntityEdgesTable} pe
+         JOIN ${this.passageNodesTable} p ON p.id = pe.passage_id
+        WHERE pe.entity_id = ANY($1::text[])
+          ${bucketClause}
+          ${scopeClause}
+        ORDER BY pe.weight DESC, pe.mention_count DESC
+        LIMIT ${limitParam}`,
+      params
+    )
+    return rows.map(mapRowToPassageEntityEdge)
+  }
+
+  async getPassagesByIds(
+    passageIds: string[],
+    opts: {
+      chunksTable: string
+      bucketIds?: string[] | undefined
+    }
+  ): Promise<Array<{
+    passageId: string
+    content: string
+    bucketId: string
+    documentId: string
+    chunkIndex: number
+    totalChunks: number
+    metadata: Record<string, unknown>
+    tenantId?: string | undefined
+    groupId?: string | undefined
+    userId?: string | undefined
+    agentId?: string | undefined
+    conversationId?: string | undefined
+  }>> {
+    if (passageIds.length === 0) return []
+    const params: unknown[] = [passageIds]
+    let bucketClause = ''
+    if (opts.bucketIds && opts.bucketIds.length > 0) {
+      params.push(opts.bucketIds)
+      bucketClause = `AND p.bucket_id = ANY($${params.length}::text[])`
+    }
+    const rows = await this.sqlWithRetry(
+      `SELECT p.id AS passage_id, c.content, c.bucket_id, c.document_id, c.chunk_index,
+              c.total_chunks, c.metadata, c.tenant_id, c.group_id, c.user_id,
+              c.agent_id, c.conversation_id
+         FROM ${this.passageNodesTable} p
+         JOIN ${opts.chunksTable} c
+           ON p.document_id = c.document_id
+          AND p.chunk_index = c.chunk_index
+          AND p.bucket_id = c.bucket_id
+        WHERE p.id = ANY($1::text[])
+          ${bucketClause}`,
+      params
+    )
+    return rows.map(mapRowToPassageContent)
+  }
+
+  async searchPassageNodes(
+    embedding: number[],
+    scope: typegraphIdentity,
+    opts: {
+      chunksTable: string
+      bucketIds?: string[] | undefined
+      limit?: number | undefined
+    }
+  ): Promise<Array<{
+    passageId: string
+    content: string
+    bucketId: string
+    documentId: string
+    chunkIndex: number
+    totalChunks: number
+    metadata: Record<string, unknown>
+    similarity: number
+    tenantId?: string | undefined
+    groupId?: string | undefined
+    userId?: string | undefined
+    agentId?: string | undefined
+    conversationId?: string | undefined
+  }>> {
+    const vectorStr = `[${embedding.join(',')}]`
+    const params: unknown[] = [vectorStr]
+    let bucketClause = ''
+    if (opts.bucketIds && opts.bucketIds.length > 0) {
+      params.push(opts.bucketIds)
+      bucketClause = `AND p.bucket_id = ANY($${params.length}::text[])`
+    }
+    const identity = buildAliasedIdentityWhere('p', scope, params.length)
+    params.push(...identity.params)
+    params.push(opts.limit ?? 200)
+    const limitParam = `$${params.length}`
+    const scopeClause = identity.where ? `AND ${identity.where}` : ''
+
+    const rows = await this.sqlWithRetry(
+      `SELECT p.id AS passage_id, c.content, c.bucket_id, c.document_id, c.chunk_index,
+              c.total_chunks, c.metadata, c.tenant_id, c.group_id, c.user_id,
+              c.agent_id, c.conversation_id,
+              1 - (c.embedding <=> $1::vector) AS similarity
+         FROM ${this.passageNodesTable} p
+         JOIN ${opts.chunksTable} c
+           ON p.document_id = c.document_id
+          AND p.chunk_index = c.chunk_index
+          AND p.bucket_id = c.bucket_id
+        WHERE c.embedding IS NOT NULL
+          ${bucketClause}
+          ${scopeClause}
+        ORDER BY c.embedding <=> $1::vector
+        LIMIT ${limitParam}`,
+      params
+    )
+
+    return rows.map(row => ({
+      ...mapRowToPassageContent(row),
+      similarity: row.similarity as number,
+    }))
+  }
+
   // ── Edge Storage ──
 
   async upsertEdge(edge: SemanticEdge): Promise<SemanticEdge> {
@@ -893,7 +1302,7 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     )
   }
 
-  // ── Entity ↔ Chunk Junction ──
+  // ── Entity ↔ Chunk Mention Evidence ──
 
   async upsertEntityChunkMentions(mentions: SemanticEntityMention[]): Promise<void> {
     if (mentions.length === 0) return
@@ -933,63 +1342,110 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
     )
   }
 
-  async getChunksForEntitiesViaJunction(
-    entityIds: string[],
-    opts: {
-      chunksTable: string
-      bucketIds?: string[] | undefined
-      limit?: number | undefined
-    }
-  ): Promise<Array<{
-    content: string
-    bucketId: string
-    documentId: string
-    chunkIndex: number
-    entityId: string
-    surfaceText?: string | undefined
-    normalizedSurfaceText?: string | undefined
-    mentionType?: SemanticEntityMention['mentionType'] | undefined
-    confidence: number | null
-  }>> {
-    if (entityIds.length === 0) return []
-
-    const params: unknown[] = [entityIds]
+  async listPassageBackfillChunks(opts: {
+    chunksTable: string
+    scope?: typegraphIdentity | undefined
+    bucketIds?: string[] | undefined
+    limit?: number | undefined
+    offset?: number | undefined
+  }): Promise<PassageBackfillChunk[]> {
+    const params: unknown[] = []
     let bucketClause = ''
     if (opts.bucketIds && opts.bucketIds.length > 0) {
       params.push(opts.bucketIds)
-      bucketClause = `AND m.bucket_id = ANY($${params.length}::text[])`
+      bucketClause = `AND c.bucket_id = ANY($${params.length}::text[])`
     }
-    params.push(opts.limit ?? 20)
+    const identity = opts.scope ? buildAliasedIdentityWhere('c', opts.scope, params.length) : { where: '', params: [] }
+    params.push(...identity.params)
+    const scopeClause = identity.where ? `AND ${identity.where}` : ''
+    params.push(opts.limit ?? 500)
     const limitParam = `$${params.length}`
+    params.push(opts.offset ?? 0)
+    const offsetParam = `$${params.length}`
 
-    // DISTINCT ON collapses duplicate (document, chunk) rows when one chunk
-    // mentions multiple of the requested entities — we keep one per chunk and
-    // let the caller re-associate to entities via the returned entity_id.
     const rows = await this.sqlWithRetry(
-      `SELECT DISTINCT ON (c.document_id, c.chunk_index)
-              c.content, c.bucket_id, c.document_id, c.chunk_index,
-              m.entity_id, m.surface_text, m.normalized_surface_text, m.mention_type, m.confidence
-         FROM ${this.chunkMentionsTable} m
-         JOIN ${opts.chunksTable} c
-           ON m.document_id = c.document_id AND m.chunk_index = c.chunk_index
-        WHERE m.entity_id = ANY($1::text[])
+      `SELECT c.id AS chunk_id, c.bucket_id, c.document_id, c.chunk_index,
+              c.embedding_model, c.content, c.metadata, c.visibility,
+              c.tenant_id, c.group_id, c.user_id, c.agent_id, c.conversation_id
+         FROM ${opts.chunksTable} c
+        WHERE TRUE
           ${bucketClause}
+          ${scopeClause}
         ORDER BY c.document_id, c.chunk_index
-        LIMIT ${limitParam}`,
+        LIMIT ${limitParam} OFFSET ${offsetParam}`,
       params
     )
+    return rows.map(mapRowToPassageBackfillChunk)
+  }
 
-    return rows.map(r => ({
-      content: r.content as string,
-      bucketId: r.bucket_id as string,
-      documentId: r.document_id as string,
-      chunkIndex: r.chunk_index as number,
-      entityId: r.entity_id as string,
-      surfaceText: (r.surface_text as string | null) ?? undefined,
-      normalizedSurfaceText: (r.normalized_surface_text as string | null) ?? undefined,
-      mentionType: (r.mention_type as SemanticEntityMention['mentionType'] | null) ?? undefined,
-      confidence: (r.confidence as number | null) ?? null,
+  async listPassageMentionBackfillRows(opts: {
+    chunksTable: string
+    scope?: typegraphIdentity | undefined
+    bucketIds?: string[] | undefined
+    limit?: number | undefined
+    offset?: number | undefined
+  }): Promise<PassageMentionBackfillRow[]> {
+    const params: unknown[] = []
+    let bucketClause = ''
+    if (opts.bucketIds && opts.bucketIds.length > 0) {
+      params.push(opts.bucketIds)
+      bucketClause = `AND c.bucket_id = ANY($${params.length}::text[])`
+    }
+    const identity = opts.scope ? buildAliasedIdentityWhere('c', opts.scope, params.length) : { where: '', params: [] }
+    params.push(...identity.params)
+    const scopeClause = identity.where ? `AND ${identity.where}` : ''
+    params.push(opts.limit ?? 500)
+    const limitParam = `$${params.length}`
+    params.push(opts.offset ?? 0)
+    const offsetParam = `$${params.length}`
+
+    const rows = await this.sqlWithRetry(
+      `SELECT c.id AS chunk_id, c.bucket_id, c.document_id, c.chunk_index,
+              c.embedding_model, c.content, c.metadata, c.visibility,
+              c.tenant_id, c.group_id, c.user_id, c.agent_id, c.conversation_id,
+              m.entity_id, m.mention_type, m.surface_text, m.normalized_surface_text, m.confidence
+         FROM ${this.chunkMentionsTable} m
+         JOIN ${opts.chunksTable} c
+           ON m.document_id = c.document_id
+          AND m.chunk_index = c.chunk_index
+          AND m.bucket_id = c.bucket_id
+        WHERE TRUE
+          ${bucketClause}
+          ${scopeClause}
+        ORDER BY c.document_id, c.chunk_index, m.entity_id
+        LIMIT ${limitParam} OFFSET ${offsetParam}`,
+      params
+    )
+    return rows.map(row => ({
+      ...mapRowToPassageBackfillChunk(row),
+      entityId: row.entity_id as string,
+      mentionType: row.mention_type as SemanticEntityMention['mentionType'],
+      surfaceText: (row.surface_text as string | null) ?? undefined,
+      normalizedSurfaceText: (row.normalized_surface_text as string | null) ?? undefined,
+      confidence: (row.confidence as number | null) ?? undefined,
     }))
+  }
+
+  async listSemanticEdgesForBackfill(opts?: {
+    scope?: typegraphIdentity | undefined
+    limit?: number | undefined
+    offset?: number | undefined
+  }): Promise<SemanticEdge[]> {
+    const identity = opts?.scope ? buildIdentityWhere(opts.scope) : { where: '', params: [] }
+    const scopeClause = identity.where ? `AND ${identity.where}` : ''
+    const params = [...identity.params, opts?.limit ?? 500, opts?.offset ?? 0]
+    const limitParam = `$${params.length - 1}`
+    const offsetParam = `$${params.length}`
+    const rows = await this.sqlWithRetry(
+      `SELECT *
+         FROM ${this.edgesTable}
+        WHERE invalid_at IS NULL
+          ${scopeClause}
+        ORDER BY created_at, id
+        LIMIT ${limitParam} OFFSET ${offsetParam}`,
+      params
+    )
+    return rows.map(mapRowToEdge)
   }
 
   // ── Counts ──
@@ -1160,6 +1616,87 @@ function mapRowToEdge(row: Record<string, unknown>): SemanticEdge {
   }
 }
 
+function mapRowToFact(row: Record<string, unknown>): SemanticFactRecord {
+  return {
+    id: row.id as string,
+    edgeId: row.edge_id as string,
+    sourceEntityId: row.source_entity_id as string,
+    targetEntityId: row.target_entity_id as string,
+    relation: row.relation as string,
+    factText: row.fact_text as string,
+    weight: row.weight as number,
+    evidenceCount: row.evidence_count as number,
+    embedding: undefined,
+    scope: rowToIdentity(row),
+    visibility: (row.visibility as SemanticFactRecord['visibility']) ?? undefined,
+    createdAt: new Date(row.created_at as string),
+    updatedAt: new Date(row.updated_at as string),
+    similarity: (row.similarity as number | null) ?? undefined,
+  }
+}
+
+function mapRowToPassageEntityEdge(row: Record<string, unknown>): SemanticPassageEntityEdge {
+  return {
+    passageId: row.passage_id as string,
+    entityId: row.entity_id as string,
+    weight: row.weight as number,
+    mentionCount: row.mention_count as number,
+    confidence: (row.confidence as number | null) ?? undefined,
+    surfaceTexts: (row.surface_texts as string[] | null) ?? [],
+    mentionTypes: (row.mention_types as SemanticPassageEntityEdge['mentionTypes'] | null) ?? [],
+    createdAt: row.created_at ? new Date(row.created_at as string) : undefined,
+    updatedAt: row.updated_at ? new Date(row.updated_at as string) : undefined,
+  }
+}
+
+function mapRowToPassageBackfillChunk(row: Record<string, unknown>): PassageBackfillChunk {
+  return {
+    chunkId: row.chunk_id as string,
+    bucketId: row.bucket_id as string,
+    documentId: row.document_id as string,
+    chunkIndex: row.chunk_index as number,
+    embeddingModel: row.embedding_model as string,
+    content: row.content as string,
+    metadata: parseJson(row.metadata),
+    visibility: (row.visibility as PassageBackfillChunk['visibility']) ?? undefined,
+    tenantId: (row.tenant_id as string) ?? undefined,
+    groupId: (row.group_id as string) ?? undefined,
+    userId: (row.user_id as string) ?? undefined,
+    agentId: (row.agent_id as string) ?? undefined,
+    conversationId: (row.conversation_id as string) ?? undefined,
+  }
+}
+
+function mapRowToPassageContent(row: Record<string, unknown>): {
+  passageId: string
+  content: string
+  bucketId: string
+  documentId: string
+  chunkIndex: number
+  totalChunks: number
+  metadata: Record<string, unknown>
+  tenantId?: string | undefined
+  groupId?: string | undefined
+  userId?: string | undefined
+  agentId?: string | undefined
+  conversationId?: string | undefined
+} {
+  return {
+    passageId: row.passage_id as string,
+    content: row.content as string,
+    bucketId: row.bucket_id as string,
+    documentId: row.document_id as string,
+    chunkIndex: row.chunk_index as number,
+    totalChunks: row.total_chunks as number,
+    metadata: parseJson(row.metadata),
+    tenantId: (row.tenant_id as string) ?? undefined,
+    groupId: (row.group_id as string) ?? undefined,
+    userId: (row.user_id as string) ?? undefined,
+    agentId: (row.agent_id as string) ?? undefined,
+    conversationId: (row.conversation_id as string) ?? undefined,
+  }
+}
+
 // ── Helpers ──
 
 function parseJson(val: unknown): Record<string, unknown> {
@@ -1306,6 +1843,19 @@ function buildIdentityWhere(
   return {
     where: conditions.join(' AND '),
     params,
+  }
+}
+
+function buildAliasedIdentityWhere(
+  alias: string,
+  identity: typegraphIdentity,
+  paramOffset = 0
+): { where: string; params: unknown[] } {
+  const base = buildIdentityWhere(identity, paramOffset)
+  if (!base.where) return base
+  return {
+    where: base.where.replace(/\b(tenant_id|group_id|user_id|agent_id|conversation_id)\b/g, `${alias}.$1`),
+    params: base.params,
   }
 }
 

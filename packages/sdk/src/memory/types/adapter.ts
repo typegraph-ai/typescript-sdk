@@ -7,6 +7,9 @@ import type {
   SemanticEntity,
   SemanticEntityMention,
   SemanticEdge,
+  SemanticFactRecord,
+  SemanticPassageEntityEdge,
+  SemanticPassageNode,
 } from './memory.js'
 
 // ── Memory Filtering ──
@@ -41,6 +44,37 @@ export interface MemorySearchOpts {
   includeExpired?: boolean | undefined
   /** Point-in-time query: only return records valid at this timestamp */
   temporalAt?: Date | undefined
+}
+
+export interface GraphBackfillPageOpts {
+  scope?: typegraphIdentity | undefined
+  bucketIds?: string[] | undefined
+  limit?: number | undefined
+  offset?: number | undefined
+}
+
+export interface PassageBackfillChunk {
+  chunkId: string
+  bucketId: string
+  documentId: string
+  chunkIndex: number
+  embeddingModel: string
+  content: string
+  metadata: Record<string, unknown>
+  visibility?: Visibility | undefined
+  tenantId?: string | undefined
+  groupId?: string | undefined
+  userId?: string | undefined
+  agentId?: string | undefined
+  conversationId?: string | undefined
+}
+
+export interface PassageMentionBackfillRow extends PassageBackfillChunk {
+  entityId: string
+  mentionType: SemanticEntityMention['mentionType']
+  surfaceText?: string | undefined
+  normalizedSurfaceText?: string | undefined
+  confidence?: number | undefined
 }
 
 // ── Memory Store Adapter ──
@@ -91,6 +125,82 @@ export interface MemoryStoreAdapter {
   searchEntities?(embedding: number[], scope: typegraphIdentity, limit?: number): Promise<SemanticEntity[]>
   searchEntitiesHybrid?(query: string, embedding: number[], scope: typegraphIdentity, limit?: number): Promise<SemanticEntity[]>
 
+  // ── Passage + Fact Graph Storage (optional - needed for heterogeneous graph retrieval) ──
+
+  upsertPassageNodes?(nodes: SemanticPassageNode[]): Promise<void>
+
+  upsertPassageEntityEdges?(edges: SemanticPassageEntityEdge[]): Promise<void>
+
+  upsertFactRecord?(fact: SemanticFactRecord): Promise<SemanticFactRecord>
+
+  searchFacts?(embedding: number[], scope: typegraphIdentity, limit?: number): Promise<SemanticFactRecord[]>
+
+  getPassageEdgesForEntities?(
+    entityIds: string[],
+    opts?: {
+      scope?: typegraphIdentity | undefined
+      bucketIds?: string[] | undefined
+      limit?: number | undefined
+    }
+  ): Promise<SemanticPassageEntityEdge[]>
+
+  getPassagesByIds?(
+    passageIds: string[],
+    opts: {
+      chunksTable: string
+      bucketIds?: string[] | undefined
+    }
+  ): Promise<Array<{
+    passageId: string
+    content: string
+    bucketId: string
+    documentId: string
+    chunkIndex: number
+    totalChunks: number
+    metadata: Record<string, unknown>
+    tenantId?: string | undefined
+    groupId?: string | undefined
+    userId?: string | undefined
+    agentId?: string | undefined
+    conversationId?: string | undefined
+  }>>
+
+  searchPassageNodes?(
+    embedding: number[],
+    scope: typegraphIdentity,
+    opts: {
+      chunksTable: string
+      bucketIds?: string[] | undefined
+      limit?: number | undefined
+    }
+  ): Promise<Array<{
+    passageId: string
+    content: string
+    bucketId: string
+    documentId: string
+    chunkIndex: number
+    totalChunks: number
+    metadata: Record<string, unknown>
+    similarity: number
+    tenantId?: string | undefined
+    groupId?: string | undefined
+    userId?: string | undefined
+    agentId?: string | undefined
+    conversationId?: string | undefined
+  }>>
+
+  listPassageBackfillChunks?(
+    opts: GraphBackfillPageOpts & { chunksTable: string }
+  ): Promise<PassageBackfillChunk[]>
+
+  listPassageMentionBackfillRows?(
+    opts: GraphBackfillPageOpts & { chunksTable: string }
+  ): Promise<PassageMentionBackfillRow[]>
+
+  listSemanticEdgesForBackfill?(
+    opts?: GraphBackfillPageOpts
+  ): Promise<SemanticEdge[]>
+
   // ── Edge Storage (optional - needed for semantic memory graph) ──
 
   upsertEdge?(edge: SemanticEdge): Promise<SemanticEdge>
@@ -99,36 +209,15 @@ export interface MemoryStoreAdapter {
   findEdges?(sourceId: string, targetId: string, relation?: string): Promise<SemanticEdge[]>
   invalidateEdge?(id: string, invalidAt?: Date): Promise<void>
 
-  // ── Entity ↔ Chunk Junction (optional - needed for graph-augmented retrieval) ──
-  // Records which chunks mentioned which entities during extraction. Enables
-  // entity → chunk lookup without storing chunk text in edge properties.
+  // ── Entity ↔ Chunk Mention Evidence ──
+  // Records which chunks mentioned which entities during extraction. Used for
+  // lexical entity lookup, provenance/debugging, and passage-edge backfill.
 
   /** Record one or more (entity, chunk, bucket) mentions. Idempotent on
    *  (entityId, documentId, chunkIndex, mentionType, normalizedSurfaceText). */
   upsertEntityChunkMentions?(
     mentions: SemanticEntityMention[]
   ): Promise<void>
-
-  /** Get chunks that mention any of the given entities, optionally bucket-scoped.
-   *  Requires a caller-provided chunks table (resolved per embedding model). */
-  getChunksForEntitiesViaJunction?(
-    entityIds: string[],
-    opts: {
-      chunksTable: string
-      bucketIds?: string[] | undefined
-      limit?: number | undefined
-    }
-  ): Promise<Array<{
-    content: string
-    bucketId: string
-    documentId: string
-    chunkIndex: number
-    entityId: string
-    surfaceText?: string | undefined
-    normalizedSurfaceText?: string | undefined
-    mentionType?: SemanticEntityMention['mentionType'] | undefined
-    confidence: number | null
-  }>>
 
   // ── Counts & Aggregates (optional - used for health checks and graph exploration) ──
 

@@ -7,7 +7,10 @@ export type {
   SemanticEntity,
   EntityMentionType,
   SemanticEntityMention,
+  SemanticPassageNode,
+  SemanticPassageEntityEdge,
   SemanticEdge,
+  SemanticFactRecord,
   SemanticFact,
   ProceduralMemory,
 } from './memory.js'
@@ -20,6 +23,9 @@ export {
 } from './scope.js'
 
 export type {
+  GraphBackfillPageOpts,
+  PassageBackfillChunk,
+  PassageMentionBackfillRow,
   MemoryFilter,
   MemorySearchOpts,
   MemoryStoreAdapter,

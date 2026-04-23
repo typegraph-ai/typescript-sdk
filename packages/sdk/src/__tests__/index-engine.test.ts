@@ -223,6 +223,40 @@ describe('IndexEngine', () => {
       }))
     })
 
+    it('persists passage nodes before graph extraction', async () => {
+      const doc = createTestDocument({ id: 'doc-passages' })
+      const { bucket } = createMockBucket({ documents: [] })
+      const chunks = [
+        { content: 'Alice met Bob.', chunkIndex: 0 },
+        { content: 'Bob works at Acme.', chunkIndex: 1 },
+      ]
+      const persistPassageNodes = vi.fn().mockResolvedValue(undefined)
+      const extractFromChunk = vi.fn().mockResolvedValue({ entities: [] })
+      const engine = new IndexEngine(adapter, embedding)
+      engine.tripleExtractor = { persistPassageNodes, extractFromChunk } as any
+
+      await engine.ingestWithChunks(bucket.id, doc, chunks, { graphExtraction: true, tenantId: 'tenant-1' })
+
+      expect(persistPassageNodes).toHaveBeenCalledTimes(1)
+      expect(persistPassageNodes.mock.calls[0]![0]).toEqual([
+        expect.objectContaining({
+          bucketId: bucket.id,
+          documentId: 'doc-passages',
+          chunkIndex: 0,
+          tenantId: 'tenant-1',
+        }),
+        expect.objectContaining({
+          bucketId: bucket.id,
+          documentId: 'doc-passages',
+          chunkIndex: 1,
+          tenantId: 'tenant-1',
+        }),
+      ])
+      const upsertCallIndex = adapter.calls.findIndex(call => call.method === 'upsertDocument')
+      expect(upsertCallIndex).toBeGreaterThanOrEqual(0)
+      expect(extractFromChunk).toHaveBeenCalled()
+    })
+
     it('passes accumulated entity context to later chunks', async () => {
       const doc = createTestDocument()
       const { bucket } = createMockBucket({ documents: [] })

@@ -36,6 +36,7 @@ describe('TripleExtractor', () => {
         ],
       }),
       graph,
+      twoPass: false,
     })
 
     await extractor.extractFromChunk(
@@ -94,6 +95,7 @@ describe('TripleExtractor', () => {
         relationships: [],
       }),
       graph,
+      twoPass: false,
     })
 
     await extractor.extractFromChunk(
@@ -125,6 +127,52 @@ describe('TripleExtractor', () => {
     expect(paducah.aliases).toContain('Paducah')
   })
 
+  it('rejects greeting, imperative, possessive, and quantifier alias fragments', async () => {
+    const graph: KnowledgeGraphBridge = {
+      addEntityMentions: vi.fn().mockResolvedValue(undefined),
+      addTriple: vi.fn().mockResolvedValue(undefined),
+    }
+    const extractor = new TripleExtractor({
+      llm: mockLLM({
+        entities: [
+          {
+            name: 'Adarsh Tadimari',
+            type: 'person',
+            description: 'A technical team member involved in SDK integration support.',
+            aliases: [
+              'Adarsh',
+              'Hi Adarsh',
+              'Inform Adarsh Tadimari',
+              "Plotline's Adarsh",
+              "Adarsh's",
+              'Both Adarsh',
+            ],
+          },
+        ],
+        relationships: [],
+      }),
+      graph,
+      twoPass: false,
+    })
+
+    await extractor.extractFromChunk(
+      'Hi Adarsh Tadimari, please help with the Plotline SDK integration issue.',
+      'bucket-1',
+      0,
+      'doc-1',
+    )
+
+    const mentions = vi.mocked(graph.addEntityMentions).mock.calls[0]![0]
+    expect(mentions[0]!.aliases).toContain('Adarsh')
+    expect(mentions[0]!.aliases).not.toEqual(expect.arrayContaining([
+      'Hi Adarsh',
+      'Inform Adarsh Tadimari',
+      "Plotline's Adarsh",
+      "Adarsh's",
+      'Both Adarsh',
+    ]))
+  })
+
   it('propagates extraction errors to the index engine', async () => {
     const graph: KnowledgeGraphBridge = {
       addEntityMentions: vi.fn().mockResolvedValue(undefined),
@@ -136,6 +184,7 @@ describe('TripleExtractor', () => {
         generateJSON: vi.fn().mockRejectedValue(new Error('No output generated.')),
       },
       graph,
+      twoPass: false,
     })
 
     await expect(extractor.extractFromChunk('Alice met Bob.', 'bucket-1', 0, 'doc-1'))

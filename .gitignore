@@ -14,7 +14,7 @@ CLAUDE.local.md
 CLAUDE.md
 .claude/*
 .claude/
-docs/
+internal_documentation/
 
 # macOS
 .DS_Store

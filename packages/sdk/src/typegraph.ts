@@ -10,7 +10,7 @@ import type { typegraphHooks } from './types/hooks.js'
 import type { LLMProvider, LLMConfig } from './types/llm-provider.js'
 import type {
   MemoryBridge, KnowledgeGraphBridge,
-  EntityResult, EntityDetail, EdgeResult,
+  EntityResult, EntityDetail, EdgeResult, FactResult, FactSearchOpts, GraphExploreOpts, GraphExploreResult, GraphBackfillOpts, GraphBackfillResult, GraphExplainOpts, GraphSearchOpts, GraphSearchTrace, PassageResult,
   SubgraphOpts, SubgraphResult, GraphStats,
   RememberOpts, ForgetOpts, CorrectOpts, AddConversationTurnOpts,
   RecallOpts, HealthCheckOpts,
@@ -177,6 +177,14 @@ export interface GraphApi {
     relation?: string
     limit?: number
   }): Promise<EdgeResult[]>
+  searchFacts(query: string, opts?: FactSearchOpts & TelemetryOpts): Promise<FactResult[]>
+  explore(query: string, opts?: GraphExploreOpts): Promise<GraphExploreResult>
+  getPassagesForEntity(entityId: string, opts?: {
+    bucketIds?: string[] | undefined
+    limit?: number | undefined
+  }): Promise<PassageResult[]>
+  explainQuery(query: string, opts?: GraphExplainOpts & TelemetryOpts): Promise<GraphSearchTrace>
+  backfill(identity: typegraphIdentity, opts?: GraphBackfillOpts & TelemetryOpts): Promise<GraphBackfillResult>
   getSubgraph(opts: SubgraphOpts): Promise<SubgraphResult>
   stats(identity: typegraphIdentity, opts?: TelemetryOpts): Promise<GraphStats>
   getRelationTypes(identity: typegraphIdentity, opts?: TelemetryOpts): Promise<Array<{ relation: string; count: number }>>
@@ -523,6 +531,39 @@ class TypegraphImpl implements typegraphInstance {
       const kg = this.requireKnowledgeGraph()
       if (!kg.getEdges) throw new ConfigError('Knowledge graph bridge does not support edge queries.')
       return kg.getEdges(entityId, opts)
+    },
+
+    searchFacts: async (query: string, opts?: FactSearchOpts & TelemetryOpts): Promise<FactResult[]> => {
+      const kg = this.requireKnowledgeGraph()
+      if (!kg.searchFacts) throw new ConfigError('Knowledge graph bridge does not support fact search.')
+      return kg.searchFacts(query, opts)
+    },
+
+    explore: async (query: string, opts?: GraphExploreOpts): Promise<GraphExploreResult> => {
+      const kg = this.requireKnowledgeGraph()
+      if (!kg.explore) throw new ConfigError('Knowledge graph bridge does not support graph exploration.')
+      return kg.explore(query, opts)
+    },
+
+    getPassagesForEntity: async (entityId: string, opts?: {
+      bucketIds?: string[] | undefined
+      limit?: number | undefined
+    }): Promise<PassageResult[]> => {
+      const kg = this.requireKnowledgeGraph()
+      if (!kg.getPassagesForEntity) throw new ConfigError('Knowledge graph bridge does not support passage lookup.')
+      return kg.getPassagesForEntity(entityId, opts)
+    },
+
+    explainQuery: async (query: string, opts?: GraphExplainOpts & TelemetryOpts): Promise<GraphSearchTrace> => {
+      const kg = this.requireKnowledgeGraph()
+      if (!kg.explainQuery) throw new ConfigError('Knowledge graph bridge does not support graph query explanations.')
+      return kg.explainQuery(query, opts)
+    },
+
+    backfill: async (identity: typegraphIdentity, opts?: GraphBackfillOpts & TelemetryOpts): Promise<GraphBackfillResult> => {
+      const kg = this.requireKnowledgeGraph()
+      if (!kg.backfill) throw new ConfigError('Knowledge graph bridge does not support graph backfill.')
+      return kg.backfill(identity, opts)
     },
 
     getSubgraph: async (opts: SubgraphOpts): Promise<SubgraphResult> => {
@@ -1039,7 +1080,7 @@ class TypegraphImpl implements typegraphInstance {
         llm: ext?.entityLlm ? resolveLLMProvider(ext.entityLlm) : mainLlm,
         relationshipLlm: ext?.relationshipLlm ? resolveLLMProvider(ext.relationshipLlm) : undefined,
         graph: kg,
-        twoPass: ext?.twoPass ?? false,
+        twoPass: ext?.twoPass ?? true,
       })
     }
     return engine

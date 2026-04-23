@@ -1,3 +1,7 @@
+import type { GraphSearchOpts } from './graph-bridge.js'
+
+export type QueryGraphOptions = GraphSearchOpts
+
 /** Which retrieval signals to activate. All fields default to false except `semantic` which defaults to true. */
 export interface QuerySignals {
   /** Semantic embedding search against chunk embeddings. Default: true */
@@ -104,6 +108,9 @@ export interface QueryOpts {
    *  - 'prefer': boost matching results, but keep novel graph results at lower weight
    *  - 'off': include all graph results as-is */
   graphReinforcement?: 'only' | 'prefer' | 'off' | undefined
+
+  /** Heterogeneous graph traversal options. */
+  graph?: GraphSearchOpts | undefined
 
   /** Timeouts per retrieval signal (milliseconds). */
   timeouts?: {
