@@ -1,6 +1,6 @@
 {
   "name": "@typegraph-ai/sdk",
-  "version": "0.3.1",
+  "version": "0.3.4",
   "description": "TypeScript SDK for retrieval, knowledge graph, and cognitive memory for AI agents",
   "type": "module",
   "main": "./dist/index.js",
@@ -31,9 +31,9 @@
     "zod": "^3.0.0 || ^4.0.0"
   },
   "publishConfig": {
-  "registry": "https://registry.npmjs.org/",
-  "access": "public"
-},
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "devDependencies": {
     "@ai-sdk/gateway": "^3.0.0",
     "ai": "^6.0.0",

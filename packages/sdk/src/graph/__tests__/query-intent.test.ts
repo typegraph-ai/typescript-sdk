@@ -70,7 +70,73 @@ describe('parseGraphExploreIntent', () => {
       anchorText: "Scottish Women's Hospitals",
       mode: 'relationship',
     }))
+    expect(result.anchorSide).toBe('target')
     expect(result.intent.predicates.map(predicate => predicate.name)).toEqual(['SUPPORTED'])
+  })
+
+  it('infers source-side anchors from direct object questions', async () => {
+    const result = await parseGraphExploreIntent({
+      query: 'Who did Elsie support?',
+    })
+
+    expect(result.intent).toEqual(expect.objectContaining({
+      anchorText: 'Elsie',
+      mode: 'relationship',
+    }))
+    expect(result.anchorSide).toBe('source')
+    expect(result.intent.predicates.map(predicate => predicate.name)).toEqual(['SUPPORTED'])
+  })
+
+  it('infers target-side anchors for non-support predicates', async () => {
+    const result = await parseGraphExploreIntent({
+      query: 'Who founded Maternity Hospice?',
+    })
+
+    expect(result.intent).toEqual(expect.objectContaining({
+      anchorText: 'Maternity Hospice',
+      mode: 'relationship',
+      targetEntityTypes: ['person'],
+    }))
+    expect(result.anchorSide).toBe('target')
+    expect(result.intent.predicates.map(predicate => predicate.name)).toEqual(expect.arrayContaining([
+      'FOUNDED',
+      'CO_FOUNDED',
+    ]))
+  })
+
+  it('infers source-side anchors for non-support predicates', async () => {
+    const result = await parseGraphExploreIntent({
+      query: 'What did Elsie found?',
+    })
+
+    expect(result.intent).toEqual(expect.objectContaining({
+      anchorText: 'Elsie',
+      mode: 'relationship',
+      targetEntityTypes: ['organization'],
+    }))
+    expect(result.anchorSide).toBe('source')
+    expect(result.intent.predicates.map(predicate => predicate.name)).toEqual(expect.arrayContaining([
+      'FOUNDED',
+      'CO_FOUNDED',
+    ]))
+  })
+
+  it('keeps symmetric relationship questions as either-side anchors', async () => {
+    const result = await parseGraphExploreIntent({
+      query: 'Who worked with Elsie?',
+    })
+
+    expect(result.intent).toEqual(expect.objectContaining({
+      anchorText: 'Elsie',
+      mode: 'relationship',
+    }))
+    expect(result.anchorSide).toBe('either')
+    expect(result.intent.predicates.map(predicate => predicate.name)).toEqual(expect.arrayContaining([
+      'COLLABORATED_WITH',
+      'PARTNERED_WITH',
+      'ALLIED_WITH',
+      'CORRESPONDS_WITH',
+    ]))
   })
 
   it('handles short indirect wording with deterministic fallback', async () => {
@@ -102,8 +168,26 @@ describe('parseGraphExploreIntent', () => {
       mode: 'relationship',
       targetEntityTypes: ['organization', 'person'],
     }))
+    expect(result.anchorSide).toBe('target')
     expect(result.intent.predicates).toEqual([
       { name: 'SUPPORTED', confidence: 0.93 },
     ])
+  })
+
+  it('repairs incorrect LLM anchor side from query syntax', async () => {
+    const result = await parseGraphExploreIntent({
+      query: 'Who supported Elsie?',
+      llm: mockLlm({
+        anchorText: 'Elsie',
+        anchorSide: 'source',
+        mode: 'relationship',
+        predicates: [{ name: 'SUPPORTED', confidence: 0.93 }],
+        targetEntityTypes: ['person', 'organization'],
+      }),
+    })
+
+    expect(result.parser).toBe('llm')
+    expect(result.anchorSide).toBe('target')
+    expect(result.intent.anchorText).toBe('Elsie')
   })
 })

@@ -771,6 +771,85 @@ describe('createKnowledgeGraphBridge', () => {
       }))
     })
 
+    it('filters directed support queries to the requested anchor side', async () => {
+      const entities = new Map<string, SemanticEntity>([
+        ['elsie', makeEntity('elsie', 'Elsie', 'person')],
+        ['bishop', makeEntity('bishop', 'Bishop Gore', 'person')],
+        ['jugoslav', makeEntity('jugoslav', 'Jugoslav Division', 'organization')],
+      ])
+      const edges = [
+        makeEdge('edge-incoming-support', 'bishop', 'elsie', 'SUPPORTED'),
+        makeEdge('edge-outgoing-support', 'elsie', 'jugoslav', 'SUPPORTED'),
+      ]
+      const store = mockStore(entities, edges)
+      const bridge = createKnowledgeGraphBridge({
+        memoryStore: store,
+        embedding: mockEmbedding(),
+        scope: testScope,
+      })
+
+      const incoming = await bridge.explore!('Who supported Elsie?', {
+        userId: 'test-user',
+        explain: true,
+      })
+
+      expect(incoming.trace?.anchorSide).toBe('target')
+      expect(incoming.entities.map(entity => entity.name)).toEqual(['Bishop Gore'])
+      expect(incoming.entities.map(entity => entity.name)).not.toContain('Jugoslav Division')
+      expect(incoming.facts.map(fact => fact.edgeId)).toEqual(['edge-incoming-support'])
+      expect(incoming.trace?.droppedByDirection).toBeGreaterThanOrEqual(1)
+
+      const outgoing = await bridge.explore!('Who did Elsie support?', {
+        userId: 'test-user',
+        explain: true,
+      })
+
+      expect(outgoing.trace?.anchorSide).toBe('source')
+      expect(outgoing.entities.map(entity => entity.name)).toEqual(['Jugoslav Division'])
+      expect(outgoing.entities.map(entity => entity.name)).not.toContain('Bishop Gore')
+      expect(outgoing.facts.map(fact => fact.edgeId)).toEqual(['edge-outgoing-support'])
+      expect(outgoing.trace?.droppedByDirection).toBeGreaterThanOrEqual(1)
+    })
+
+    it('applies direction filtering to non-support predicates', async () => {
+      const entities = new Map<string, SemanticEntity>([
+        ['elsie', makeEntity('elsie', 'Elsie', 'person')],
+        ['hospice', makeEntity('hospice', 'Maternity Hospice', 'organization')],
+        ['committee', makeEntity('committee', 'Hospital Committee', 'organization')],
+      ])
+      const edges = [
+        makeEdge('edge-founded-correct', 'elsie', 'hospice', 'FOUNDED'),
+        makeEdge('edge-founded-opposite', 'hospice', 'committee', 'FOUNDED'),
+      ]
+      const store = mockStore(entities, edges)
+      const bridge = createKnowledgeGraphBridge({
+        memoryStore: store,
+        embedding: mockEmbedding(),
+        scope: testScope,
+      })
+
+      const founderResult = await bridge.explore!('Who founded Maternity Hospice?', {
+        userId: 'test-user',
+        explain: true,
+      })
+
+      expect(founderResult.trace?.anchorSide).toBe('target')
+      expect(founderResult.entities.map(entity => entity.name)).toEqual(['Elsie'])
+      expect(founderResult.entities.map(entity => entity.name)).not.toContain('Hospital Committee')
+      expect(founderResult.facts.map(fact => fact.edgeId)).toEqual(['edge-founded-correct'])
+      expect(founderResult.trace?.droppedByDirection).toBeGreaterThanOrEqual(1)
+
+      const foundedResult = await bridge.explore!('What did Elsie found?', {
+        userId: 'test-user',
+        explain: true,
+      })
+
+      expect(foundedResult.trace?.anchorSide).toBe('source')
+      expect(foundedResult.entities.map(entity => entity.name)).toEqual(['Maternity Hospice'])
+      expect(foundedResult.entities.map(entity => entity.name)).not.toContain('Hospital Committee')
+      expect(foundedResult.facts.map(fact => fact.edgeId)).toEqual(['edge-founded-correct'])
+    })
+
     it('keeps relationship traversal working beyond the anchor while enforcing target types', async () => {
       const entities = new Map<string, SemanticEntity>([
         ['plotline', makeEntity('plotline', 'Plotline', 'organization')],

@@ -794,6 +794,7 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       parser: parsed.parser,
       fallbackUsed: parsed.fallbackUsed,
       mode: parsed.intent.mode,
+      anchorSide: parsed.anchorSide,
       selectedPredicates: [...selectedPredicates],
       targetEntityTypes: parsed.intent.targetEntityTypes,
       anchorCandidates: [],
@@ -801,6 +802,7 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       matchedEdgeIds: [],
       matchedRelations: [],
       droppedByPredicate: 0,
+      droppedByDirection: 0,
       droppedByType: 0,
     }
 
@@ -918,6 +920,11 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
           ...(sourceIsAnchor && parsed.anchorSide !== 'target' ? [edge.targetEntityId] : []),
           ...(targetIsAnchor && parsed.anchorSide !== 'source' ? [edge.sourceEntityId] : []),
         ])
+        if (resultEntityIds.length === 0) {
+          trace.droppedByDirection++
+          continue
+        }
+
         const filteredResultEntityIds = resultEntityIds.filter(entityId =>
           typeMatches(entityById.get(entityId)?.entityType, parsed.intent.targetEntityTypes),
         )
@@ -940,9 +947,14 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
           ? [edge.sourceEntityId]
           : [edge.sourceEntityId, edge.targetEntityId]
 
-      if (directAnchorTouch) {
-        if (sourceIsAnchor && !targetIsAnchor && parsed.anchorSide === 'target') continue
-        if (targetIsAnchor && !sourceIsAnchor && parsed.anchorSide === 'source') continue
+      if (parsed.anchorSide !== 'either') {
+        const hasAnchorOnRequestedSide = parsed.anchorSide === 'source'
+          ? sourceIsAnchor
+          : targetIsAnchor
+        if (!directAnchorTouch || !hasAnchorOnRequestedSide) {
+          trace.droppedByDirection++
+          continue
+        }
       }
 
       resultEntityIds = resultEntityIds.filter(entityId =>

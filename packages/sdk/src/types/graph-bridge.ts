@@ -282,6 +282,7 @@ export interface GraphExploreTrace {
   parser: 'llm' | 'fallback'
   fallbackUsed: boolean
   mode: 'attribute' | 'relationship'
+  anchorSide: 'source' | 'target' | 'either'
   selectedPredicates: string[]
   targetEntityTypes: string[]
   anchorCandidates: EntityResult[]
@@ -289,6 +290,7 @@ export interface GraphExploreTrace {
   matchedEdgeIds: string[]
   matchedRelations: string[]
   droppedByPredicate: number
+  droppedByDirection: number
   droppedByType: number
 }
 
