@@ -4,7 +4,7 @@ import { embeddingModelKey } from '../embedding/provider.js'
 import type { typegraphIdentity } from '../types/identity.js'
 import type { EmbeddingConfig } from '../types/bucket.js'
 import type { LLMConfig, LLMProvider } from '../types/llm-provider.js'
-import type { KnowledgeGraphBridge, EntityDetail, EntityResult, EdgeResult, FactRelevanceFilter, FactResult, FactSearchOpts, GraphExploreOpts, GraphExploreResult, GraphExploreTrace, GraphBackfillOpts, GraphBackfillResult, GraphExplainOpts, GraphSearchOpts, GraphSearchResult, GraphSearchTrace, PassageResult, SubgraphOpts, SubgraphResult, GraphStats } from '../types/graph-bridge.js'
+import type { KnowledgeGraphBridge, EntityDetail, EntityResult, EdgeResult, FactChainResult, FactRelevanceFilter, FactResult, FactSearchOpts, GraphExploreOpts, GraphExploreResult, GraphExploreTrace, GraphBackfillOpts, GraphBackfillResult, GraphExplainOpts, GraphSearchOpts, GraphSearchResult, GraphSearchTrace, PassageResult, SubgraphOpts, SubgraphResult, GraphStats } from '../types/graph-bridge.js'
 import { resolveEmbeddingProvider, resolveLLMProvider } from '../typegraph.js'
 import type { MemoryStoreAdapter, SemanticEdge, SemanticEntity, SemanticEntityMention, SemanticFactRecord, SemanticPassageEntityEdge } from '../memory/types/index.js'
 import { EntityResolver, PredicateNormalizer, createTemporal } from '../memory/index.js'
@@ -173,6 +173,129 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
 
   function uniqueIds(ids: string[]): string[] {
     return [...new Set(ids)]
+  }
+
+  const QUERY_STOP_WORDS = new Set([
+    'the', 'and', 'that', 'this', 'with', 'from', 'into', 'about', 'what', 'which',
+    'who', 'whom', 'whose', 'when', 'where', 'why', 'how', 'did', 'does', 'are',
+    'was', 'were', 'is', 'in', 'on', 'of', 'to', 'for', 'by', 'as', 'a', 'an',
+    'including', 'include', 'relation', 'relationship', 'novel', 'narrative',
+  ])
+
+  function queryTokens(query: string): Set<string> {
+    const normalized = normalizeSurfaceText(query)
+    return new Set(normalized.split(/\s+/).filter(token => token.length >= 3 && !QUERY_STOP_WORDS.has(token)))
+  }
+
+  function tokenOverlapScore(queryTokenSet: Set<string>, text: string): number {
+    if (queryTokenSet.size === 0) return 0
+    const textTokens = new Set(normalizeSurfaceText(text).split(/\s+/).filter(Boolean))
+    let hits = 0
+    for (const token of queryTokenSet) {
+      if (textTokens.has(token)) hits++
+    }
+    return hits / Math.max(1, queryTokenSet.size)
+  }
+
+  function entityAnchorScore(queryTokenSet: Set<string>, fact: SemanticFactRecord, entityNameById: Map<string, string>): number {
+    const sourceName = entityNameById.get(fact.sourceEntityId) ?? ''
+    const targetName = entityNameById.get(fact.targetEntityId) ?? ''
+    return Math.max(
+      tokenOverlapScore(queryTokenSet, sourceName),
+      tokenOverlapScore(queryTokenSet, targetName),
+    )
+  }
+
+  function relationRelevanceScore(queryTokenSet: Set<string>, relation: string): number {
+    return tokenOverlapScore(queryTokenSet, relationToPhrase(relation))
+  }
+
+  function rerankFactRecords(
+    facts: SemanticFactRecord[],
+    query: string,
+    entityNameById: Map<string, string>,
+  ): SemanticFactRecord[] {
+    const tokens = queryTokens(query)
+    const seenCanonical = new Map<string, number>()
+    return facts
+      .map((fact, index) => {
+        const lexical = tokenOverlapScore(tokens, fact.factText)
+        const entityAnchor = entityAnchorScore(tokens, fact, entityNameById)
+        const relation = relationRelevanceScore(tokens, fact.relation)
+        const semantic = normalizeSeedScore(fact.similarity ?? 0)
+        const canonical = normalizeSurfaceText(`${fact.sourceEntityId}:${fact.relation}:${fact.targetEntityId}:${fact.factText}`)
+        const duplicateCount = seenCanonical.get(canonical) ?? 0
+        seenCanonical.set(canonical, duplicateCount + 1)
+        const duplicatePenalty = duplicateCount * 0.2
+        const score =
+          semantic * 0.45 +
+          lexical * 0.28 +
+          entityAnchor * 0.22 +
+          relation * 0.05 -
+          duplicatePenalty
+        return { fact, index, score }
+      })
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .map(item => ({
+        ...item.fact,
+        properties: {
+          ...(item.fact as unknown as { properties?: Record<string, unknown> }).properties,
+          relevanceScore: item.score,
+        },
+      }) as SemanticFactRecord)
+  }
+
+  function buildFactChains(facts: FactResult[], limit: number): FactChainResult[] {
+    if (facts.length < 2 || limit <= 0) return []
+    const candidates: FactChainResult[] = []
+    const top = facts.slice(0, 16)
+    for (let i = 0; i < top.length; i++) {
+      for (let j = 0; j < top.length; j++) {
+        if (i === j) continue
+        const a = top[i]!
+        const b = top[j]!
+        const shared = sharedFactEntity(a, b)
+        if (!shared) continue
+        candidates.push({
+          facts: [a, b],
+          content: `${a.factText}; ${b.factText}`,
+          score: factResultScore(a) + factResultScore(b) + shared.bonus,
+          entityIds: uniqueIds([a.sourceEntityId, a.targetEntityId, b.sourceEntityId, b.targetEntityId]),
+        })
+      }
+    }
+    const seen = new Set<string>()
+    return candidates
+      .sort((a, b) => b.score - a.score)
+      .filter(chain => {
+        const key = normalizeSurfaceText(chain.content)
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+      .slice(0, limit)
+  }
+
+  function sharedFactEntity(a: FactResult, b: FactResult): { id: string; bonus: number } | null {
+    const checks: Array<[string, string, number]> = [
+      [a.targetEntityId, b.sourceEntityId, 1.5],
+      [a.sourceEntityId, b.targetEntityId, 1.25],
+      [a.sourceEntityId, b.sourceEntityId, 0.5],
+      [a.targetEntityId, b.targetEntityId, 0.5],
+    ]
+    for (const [left, right, bonus] of checks) {
+      if (left === right) return { id: left, bonus }
+    }
+    return null
+  }
+
+  function factResultScore(fact: FactResult): number {
+    const relevance = fact.properties?.relevanceScore
+    if (typeof relevance === 'number' && Number.isFinite(relevance)) return relevance
+    if (typeof fact.similarity === 'number' && Number.isFinite(fact.similarity)) return fact.similarity
+    const explore = fact.properties?.exploreScore
+    if (typeof explore === 'number' && Number.isFinite(explore)) return explore
+    return fact.weight
   }
 
   async function hydrateEntityResults(
@@ -1119,6 +1242,7 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     const maxIterations = opts.maxPprIterations ?? 50
     const minPprScore = opts.minPprScore ?? 1e-10
     const maxExpansionEdgesPerEntity = opts.maxExpansionEdgesPerEntity ?? 100
+    const factChainLimit = opts.factChainLimit ?? 3
 
     const emptyTrace = (): GraphSearchTrace => ({
       entitySeedCount: 0,
@@ -1133,10 +1257,14 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       selectedFactIds: [],
       selectedEntityIds: [],
       selectedPassageIds: [],
+      finalPassageIds: [],
+      selectedFactTexts: [],
+      selectedEntityNames: [],
+      selectedFactChains: [],
     })
 
     if (!config.resolveChunksTable) {
-      return { results: [], trace: emptyTrace() }
+      return { results: [], facts: [], entities: [], factChains: [], trace: emptyTrace() }
     }
 
     const queryEmbedding = await embedding.embed(query)
@@ -1145,14 +1273,20 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     const factCandidates = memoryStore.searchFacts
       ? await memoryStore.searchFacts(queryEmbedding, identity, factCandidateLimit)
       : []
-    let selectedFacts = factCandidates.slice(0, factSeedLimit)
+    const candidateEntityIds = uniqueIds(factCandidates.flatMap(fact => [fact.sourceEntityId, fact.targetEntityId]))
+    const candidateEntities = candidateEntityIds.length > 0
+      ? await graph.getEntitiesBatch(candidateEntityIds, identity)
+      : []
+    const entityNameById = new Map(candidateEntities.map(entity => [entity.id, entity.name]))
+    const rankedFactCandidates = rerankFactRecords(factCandidates, query, entityNameById)
+    let selectedFacts = rankedFactCandidates.slice(0, factSeedLimit)
     if (opts.factFilter && config.factRelevanceFilter && factCandidates.length > 0) {
-      const filterInput = await hydrateFacts(factCandidates.slice(0, factFilterInputLimit), identity)
+      const filterInput = await hydrateFacts(rankedFactCandidates.slice(0, factFilterInputLimit), identity)
       try {
         const selectedIds = new Set(await config.factRelevanceFilter(query, filterInput))
-        selectedFacts = factCandidates.filter(f => selectedIds.has(f.id)).slice(0, factSeedLimit)
+        selectedFacts = rankedFactCandidates.filter(f => selectedIds.has(f.id)).slice(0, factSeedLimit)
       } catch {
-        selectedFacts = factCandidates.slice(0, factSeedLimit)
+        selectedFacts = rankedFactCandidates.slice(0, factSeedLimit)
       }
     }
 
@@ -1217,7 +1351,14 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
           limit: Math.max(100, activeEntityIds.size * maxExpansionEdgesPerEntity),
         })
       : []
+    const entityIdsByPassage = new Map<string, Set<string>>()
     for (const edge of passageEntityEdges) {
+      let passageEntityIds = entityIdsByPassage.get(edge.passageId)
+      if (!passageEntityIds) {
+        passageEntityIds = new Set()
+        entityIdsByPassage.set(edge.passageId, passageEntityIds)
+      }
+      passageEntityIds.add(edge.entityId)
       const weight = Math.log2(1 + edge.weight)
       addWeightedEdge(edge.entityId, edge.passageId, weight)
       addWeightedEdge(edge.passageId, edge.entityId, weight)
@@ -1232,7 +1373,7 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     for (const [id, score] of passageSeeds) seedWeights.set(id, Math.max(seedWeights.get(id) ?? 0, score))
 
     if (seedWeights.size === 0) {
-      return { results: [], trace: emptyTrace() }
+      return { results: [], facts: [], entities: [], factChains: [], trace: emptyTrace() }
     }
 
     const pprScores = runWeightedPPR(adjacency, seedWeights, restartProbability, maxIterations, minPprScore)
@@ -1251,22 +1392,36 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       ? await memoryStore.getPassagesByIds(passageIds, { chunksTable, bucketIds: opts.bucketIds, scope: identity })
       : []
     const denseScoreByPassage = new Map(passageSeedRows.map(row => [row.passageId, row.similarity]))
+    const selectedFactResults = await hydrateFacts(selectedFacts, identity)
+    const factChains = buildFactChains(selectedFactResults, factChainLimit)
+    const evidenceEntityIds = uniqueIds([
+      ...entitySeeds.keys(),
+      ...selectedFactResults.flatMap(fact => [fact.sourceEntityId, fact.targetEntityId]),
+      ...factChains.flatMap(chain => chain.entityIds),
+      ...passageIds.flatMap(passageId => [...(entityIdsByPassage.get(passageId) ?? [])]),
+    ])
+    const entityOrder = new Map(evidenceEntityIds.map((id, index) => [id, index]))
+    const selectedEntityRows = await graph.getEntitiesBatch(evidenceEntityIds, identity)
+    const selectedEntityResults = (await hydrateEntityResults(selectedEntityRows, undefined, identity))
+      .sort((a, b) => (entityOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (entityOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER))
     const results = passageRows
-      .map(row => ({
-        passageId: row.passageId,
-        content: row.content,
-        bucketId: row.bucketId,
-        documentId: row.documentId,
-        chunkIndex: row.chunkIndex,
-        totalChunks: row.totalChunks,
-        score: pprScores.get(row.passageId) ?? ((denseScoreByPassage.get(row.passageId) ?? 0) * passageSeedWeight),
-        metadata: row.metadata,
-        tenantId: row.tenantId,
-        groupId: row.groupId,
-        userId: row.userId,
-        agentId: row.agentId,
-        conversationId: row.conversationId,
-      }))
+      .map(row => {
+        return {
+          passageId: row.passageId,
+          content: row.content,
+          bucketId: row.bucketId,
+          documentId: row.documentId,
+          chunkIndex: row.chunkIndex,
+          totalChunks: row.totalChunks,
+          score: pprScores.get(row.passageId) ?? ((denseScoreByPassage.get(row.passageId) ?? 0) * passageSeedWeight),
+          metadata: row.metadata,
+          tenantId: row.tenantId,
+          groupId: row.groupId,
+          userId: row.userId,
+          agentId: row.agentId,
+          conversationId: row.conversationId,
+        }
+      })
       .filter(row => row.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, count)
@@ -1284,9 +1439,17 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       selectedFactIds: selectedFacts.map(fact => fact.id),
       selectedEntityIds: [...entitySeeds.keys()],
       selectedPassageIds: [...passageSeeds.keys()].slice(0, 20),
+      finalPassageIds: results.map(result => result.passageId),
+      selectedFactTexts: selectedFactResults.map(fact => ({ id: fact.id, content: fact.factText })),
+      selectedEntityNames: selectedEntityResults.map(entity => ({ id: entity.id, content: entity.name })),
+      selectedFactChains: factChains.map(chain => ({
+        content: chain.content,
+        score: chain.score,
+        factIds: chain.facts.map(fact => fact.id),
+      })),
     }
 
-    return { results, trace }
+    return { results, facts: selectedFactResults, entities: selectedEntityResults, factChains, trace }
   }
 
   async function explainQuery(query: string, opts: GraphExplainOpts = {}): Promise<GraphSearchTrace> {
@@ -1306,19 +1469,23 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     const entityIds = [...new Set(facts.flatMap(f => [f.sourceEntityId, f.targetEntityId]))]
     const entities = await graph.getEntitiesBatch(entityIds, identity)
     const nameMap = new Map(entities.map(entity => [entity.id, entity.name]))
-    return facts.map(fact => ({
-      id: fact.id,
-      edgeId: fact.edgeId,
-      sourceEntityId: fact.sourceEntityId,
-      sourceEntityName: nameMap.get(fact.sourceEntityId),
-      targetEntityId: fact.targetEntityId,
-      targetEntityName: nameMap.get(fact.targetEntityId),
-      relation: fact.relation,
-      factText: fact.factText,
-      weight: fact.weight,
-      evidenceCount: fact.evidenceCount,
-      similarity: fact.similarity,
-    }))
+    return facts.map(fact => {
+      const properties = (fact as unknown as { properties?: Record<string, unknown> }).properties
+      return {
+        id: fact.id,
+        edgeId: fact.edgeId,
+        sourceEntityId: fact.sourceEntityId,
+        sourceEntityName: nameMap.get(fact.sourceEntityId),
+        targetEntityId: fact.targetEntityId,
+        targetEntityName: nameMap.get(fact.targetEntityId),
+        relation: fact.relation,
+        factText: fact.factText,
+        weight: fact.weight,
+        evidenceCount: fact.evidenceCount,
+        similarity: fact.similarity,
+        ...(properties ? { properties } : {}),
+      }
+    })
   }
 
   async function backfill(

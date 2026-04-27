@@ -16,6 +16,25 @@ describe('GraphRunner', () => {
         metadata: { source: 'test' },
         tenantId: 'tenant-1',
       }],
+      facts: [{
+        id: 'fact-1',
+        edgeId: 'edge-1',
+        sourceEntityId: 'ent-1',
+        sourceEntityName: 'Adarsh Tadimari',
+        targetEntityId: 'ent-2',
+        targetEntityName: 'Plotline SDK',
+        relation: 'WORKS_ON',
+        factText: 'Adarsh works on Plotline SDK',
+        weight: 1,
+        evidenceCount: 1,
+      }],
+      entities: [{
+        id: 'ent-1',
+        name: 'Adarsh Tadimari',
+        entityType: 'person',
+        aliases: [],
+        edgeCount: 1,
+      }],
       trace: {
         entitySeedCount: 1,
         factSeedCount: 1,
@@ -33,7 +52,7 @@ describe('GraphRunner', () => {
     })
 
     const runner = new GraphRunner({ searchGraphPassages } satisfies KnowledgeGraphBridge)
-    const results = await runner.run(
+    const run = await runner.run(
       'Adarsh Plotline SDK',
       { tenantId: 'tenant-1' },
       3,
@@ -46,7 +65,9 @@ describe('GraphRunner', () => {
       { tenantId: 'tenant-1' },
       { restartProbability: 0.5, count: 3, bucketIds: ['bucket-1'] }
     )
-    expect(results).toEqual([
+    expect(run.facts).toEqual([expect.objectContaining({ id: 'fact-1', factText: 'Adarsh works on Plotline SDK' })])
+    expect(run.entities).toEqual([expect.objectContaining({ id: 'ent-1', name: 'Adarsh Tadimari' })])
+    expect(run.results).toEqual([
       expect.objectContaining({
         content: 'Adarsh Tadimari is debugging Plotline SDK initialization.',
         bucketId: 'bucket-1',
@@ -57,9 +78,6 @@ describe('GraphRunner', () => {
         metadata: expect.objectContaining({
           source: 'test',
           passageId: 'passage-1',
-          _graphTrace: expect.objectContaining({
-            selectedPassageIds: ['passage-1'],
-          }),
         }),
         tenantId: 'tenant-1',
       }),

@@ -336,6 +336,14 @@ export interface GraphSearchOpts {
   maxPprIterations?: number | undefined
   minPprScore?: number | undefined
   factFilter?: boolean | undefined
+  factChainLimit?: number | undefined
+}
+
+export interface FactChainResult {
+  facts: FactResult[]
+  content: string
+  score: number
+  entityIds: string[]
 }
 
 export type GraphExplainOpts = GraphSearchOpts & typegraphIdentity
@@ -353,10 +361,17 @@ export interface GraphSearchTrace {
   selectedFactIds: string[]
   selectedEntityIds: string[]
   selectedPassageIds: string[]
+  finalPassageIds?: string[] | undefined
+  selectedFactTexts?: Array<{ id: string; content: string }> | undefined
+  selectedEntityNames?: Array<{ id: string; content: string }> | undefined
+  selectedFactChains?: Array<{ content: string; score: number; factIds: string[] }> | undefined
 }
 
 export interface GraphSearchResult {
   results: PassageResult[]
+  facts: FactResult[]
+  entities: EntityResult[]
+  factChains?: FactChainResult[] | undefined
   trace: GraphSearchTrace
 }
 

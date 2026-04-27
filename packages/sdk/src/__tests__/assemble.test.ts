@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { assemble } from '../query/assemble.js'
-import type { typegraphResult } from '../types/query.js'
+import type { QueryChunkResult, QueryResults } from '../types/query.js'
 
-function makeResult(overrides: Partial<typegraphResult> = {}): typegraphResult {
+function makeChunk(overrides: Partial<QueryChunkResult> = {}): QueryChunkResult {
   return {
     content: 'Test passage content',
     score: 0.85,
@@ -21,9 +21,19 @@ function makeResult(overrides: Partial<typegraphResult> = {}): typegraphResult {
   }
 }
 
+function makeResults(chunks: QueryChunkResult[] = [makeChunk()], overrides: Partial<QueryResults> = {}): QueryResults {
+  return {
+    chunks,
+    facts: [],
+    entities: [],
+    memories: [],
+    ...overrides,
+  }
+}
+
 describe('assemble', () => {
   it('defaults to XML format with context/source/passage tags', () => {
-    const results = [makeResult()]
+    const results = makeResults()
     const output = assemble(results)
     expect(output).toContain('<context>')
     expect(output).toContain('</context>')
@@ -34,7 +44,7 @@ describe('assemble', () => {
   })
 
   it('includes source attributes in XML', () => {
-    const results = [makeResult()]
+    const results = makeResults()
     const output = assemble(results)
     expect(output).toContain('id="src-1"')
     expect(output).toContain('title="Test Document"')
@@ -42,17 +52,18 @@ describe('assemble', () => {
   })
 
   it('includes score in XML passage', () => {
-    const results = [makeResult({ score: 0.8500 })]
+    const results = makeResults([makeChunk({ score: 0.8500 })])
     const output = assemble(results)
     expect(output).toContain('score="0.8500"')
   })
 
   it('groups by bucket in XML', () => {
-    const results = [
-      makeResult({ content: 'A', document: { ...makeResult().document, bucketId: 'src-1' } }),
-      makeResult({ content: 'B', document: { ...makeResult().document, bucketId: 'src-1' } }),
-      makeResult({ content: 'C', document: { ...makeResult().document, bucketId: 'src-2', title: 'Other' } }),
-    ]
+    const baseDocument = makeChunk().document
+    const results = makeResults([
+      makeChunk({ content: 'A', document: { ...baseDocument, bucketId: 'src-1' } }),
+      makeChunk({ content: 'B', document: { ...baseDocument, bucketId: 'src-1' } }),
+      makeChunk({ content: 'C', document: { ...baseDocument, bucketId: 'src-2', title: 'Other' } }),
+    ])
     const output = assemble(results)
     // Should have two <source> blocks
     const sourceMatches = output.match(/<source /g)
@@ -60,10 +71,10 @@ describe('assemble', () => {
   })
 
   it('escapes XML special chars', () => {
-    const results = [makeResult({
+    const results = makeResults([makeChunk({
       content: 'Use <div> & "quotes"',
-      document: { ...makeResult().document, title: 'A & B <C>' },
-    })]
+      document: { ...makeChunk().document, title: 'A & B <C>' },
+    })])
     const output = assemble(results)
     expect(output).toContain('&amp;')
     expect(output).toContain('&lt;')
@@ -72,10 +83,10 @@ describe('assemble', () => {
   })
 
   it('assembles markdown format with headings and horizontal rules', () => {
-    const results = [
-      makeResult({ content: 'First' }),
-      makeResult({ content: 'Second' }),
-    ]
+    const results = makeResults([
+      makeChunk({ content: 'First' }),
+      makeChunk({ content: 'Second' }),
+    ])
     const output = assemble(results, { format: 'markdown' })
     expect(output).toContain('# [Test Document]')
     expect(output).toContain('First')
@@ -84,36 +95,83 @@ describe('assemble', () => {
   })
 
   it('assembles markdown with linked title when url present', () => {
-    const results = [makeResult({
+    const results = makeResults([makeChunk({
       content: 'Content here',
-      document: { ...makeResult().document, title: 'My Page', url: 'https://example.com' },
-    })]
+      document: { ...makeChunk().document, title: 'My Page', url: 'https://example.com' },
+    })])
     const output = assemble(results, { format: 'markdown' })
     expect(output).toContain('# [My Page](https://example.com)')
   })
 
   it('assembles markdown with plain title when no url', () => {
-    const results = [makeResult({
+    const results = makeResults([makeChunk({
       content: 'Content here',
-      document: { ...makeResult().document, title: 'FAQ Item', url: undefined },
-    })]
+      document: { ...makeChunk().document, title: 'FAQ Item', url: undefined },
+    })])
     const output = assemble(results, { format: 'markdown' })
     expect(output).toContain('# FAQ Item')
     expect(output).not.toContain('[')
   })
 
   it('assembles plain format with double newlines', () => {
-    const results = [
-      makeResult({ content: 'First' }),
-      makeResult({ content: 'Second' }),
-    ]
+    const results = makeResults([
+      makeChunk({ content: 'First' }),
+      makeChunk({ content: 'Second' }),
+    ])
     const output = assemble(results, { format: 'plain' })
     expect(output).toBe('First\n\nSecond')
   })
 
   it('supports custom format function', () => {
-    const results = [makeResult({ content: 'Test' })]
-    const output = assemble(results, { format: (r) => r.map(x => x.content.toUpperCase()).join(',') })
+    const results = makeResults([makeChunk({ content: 'Test' })])
+    const output = assemble(results, { format: (r) => r.chunks.map(x => x.content.toUpperCase()).join(',') })
     expect(output).toBe('TEST')
+  })
+
+  it('renders graph evidence and memories as separate sections', () => {
+    const results = makeResults([], {
+      facts: [{
+        id: 'fact-1',
+        edgeId: 'edge-1',
+        sourceEntityId: 'ent-1',
+        sourceEntityName: 'Tennyson',
+        targetEntityId: 'ent-2',
+        targetEntityName: 'Maud',
+        relation: 'WROTE',
+        factText: 'Tennyson wrote Maud',
+        weight: 1,
+        evidenceCount: 1,
+      }],
+      entities: [{
+        id: 'ent-1',
+        name: 'Tennyson',
+        entityType: 'person',
+        aliases: [],
+        edgeCount: 1,
+      }],
+      memories: [{
+        id: 'mem-1',
+        category: 'semantic',
+        status: 'active',
+        content: 'Remembered context',
+        importance: 0.8,
+        accessCount: 0,
+        lastAccessedAt: new Date('2024-01-01'),
+        metadata: {},
+        scope: {},
+        validAt: new Date('2024-01-01'),
+        createdAt: new Date('2024-01-01'),
+        score: 0.7,
+        scores: { raw: { memorySimilarity: 0.7 }, normalized: { memory: 0.7 } },
+      }],
+    })
+
+    const output = assemble(results, { format: 'markdown' })
+    expect(output).toContain('# Facts')
+    expect(output).toContain('Tennyson wrote Maud')
+    expect(output).toContain('# Entities')
+    expect(output).toContain('Tennyson')
+    expect(output).toContain('# Memories')
+    expect(output).toContain('Remembered context')
   })
 })

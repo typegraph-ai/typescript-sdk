@@ -9,6 +9,8 @@ export interface SearchOpts {
   filter?: ChunkFilter | undefined
   approximate?: boolean | undefined
   iterativeScan?: boolean | undefined
+  /** Internal indexed-search signal selection. Defaults to semantic-only for search(), semantic+keyword for hybridSearch(). */
+  signals?: { semantic?: boolean | undefined; keyword?: boolean | undefined } | undefined
   /** Only return chunks indexed before this date. Used for point-in-time queries. */
   temporalAt?: Date | undefined
 }

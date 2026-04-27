@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { dedupKey, minMaxNormalize, mergeAndRank, normalizeRRF, normalizePPR, calibrateSemantic, calibrateKeyword, type NormalizedResult } from '../query/merger.js'
+import { dedupKey, minMaxNormalize, mergeAndRank, normalizeRRF, normalizePPR, normalizeGraphPPR, calibrateSemantic, calibrateKeyword, type NormalizedResult } from '../query/merger.js'
 
 function makeResult(overrides: Partial<NormalizedResult> = {}): NormalizedResult {
   return {
@@ -135,6 +135,18 @@ describe('normalizePPR', () => {
     const query2Result = normalizePPR(0.15, 0.35)
     expect(query1Result).toBe(query2Result)
     expect(query1Result).toBeCloseTo(0.4286, 3)
+  })
+})
+
+describe('normalizeGraphPPR', () => {
+  it('uses fourth-root scaling for graph PPR', () => {
+    expect(normalizeGraphPPR(0.03)).toBeCloseTo(Math.sqrt(Math.sqrt(0.03)))
+  })
+
+  it('returns 0 for non-positive values and caps at 1', () => {
+    expect(normalizeGraphPPR(0)).toBe(0)
+    expect(normalizeGraphPPR(-0.1)).toBe(0)
+    expect(normalizeGraphPPR(2)).toBe(1)
   })
 })
 
@@ -321,8 +333,7 @@ describe('mergeAndRank', () => {
     expect(result.rawScores.graph).toBe(0.15)
   })
 
-  it('normalizes graph PPR scores via query-relative min-max', () => {
-    // Single graph result — gets 1.0 (best by definition)
+  it('normalizes graph PPR scores with fourth-root scaling', () => {
     const graphResult = makeResult({
       content: 'graph only',
       mode: 'graph',
@@ -331,12 +342,10 @@ describe('mergeAndRank', () => {
     })
     const merged = mergeAndRank([[graphResult]], 10)
     const result = merged[0] as any
-    // With min-max, single graph result gets graph=1.0
-    // Graph weight in composite contributes meaningfully
     expect(result.compositeScore).toBeGreaterThan(0)
   })
 
-  it('graph min-max: best graph result gets 1.0, no connection gets 0', () => {
+  it('graph fourth-root score lets graph-connected results beat no-graph results', () => {
     const withGraph = [makeResult({
       content: 'has graph',
       mode: 'indexed',
@@ -352,7 +361,6 @@ describe('mergeAndRank', () => {
     const merged = mergeAndRank([withGraph, noGraph], 10)
     const graphResult = merged.find(r => r.content === 'has graph') as any
     const noGraphResult = merged.find(r => r.content === 'no graph') as any
-    // With graph signal active (default), graph-connected result should score higher
     expect(graphResult.compositeScore).toBeGreaterThan(noGraphResult.compositeScore)
   })
 
@@ -391,11 +399,10 @@ describe('mergeAndRank', () => {
     expect(gswResult.compositeScore).toBeGreaterThan(celticsResult.compositeScore)
   })
 
-  it('graph min-max: equal graph scores all get 1.0', () => {
+  it('graph fourth-root: equal graph scores produce equal composites', () => {
     const a = [makeResult({ content: 'a', mode: 'indexed', normalizedScore: 0.5, rawScores: { semantic: 0.5, graph: 0.01 } })]
     const b = [makeResult({ content: 'b', mode: 'indexed', normalizedScore: 0.5, rawScores: { semantic: 0.5, graph: 0.01 } })]
     const merged = mergeAndRank([a, b], 10)
-    // Both have same graph score → both should get same composite
     const resultA = merged.find(r => r.content === 'a') as any
     const resultB = merged.find(r => r.content === 'b') as any
     expect(resultA.compositeScore).toBeCloseTo(resultB.compositeScore)

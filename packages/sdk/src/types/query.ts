@@ -1,4 +1,5 @@
-import type { GraphSearchOpts } from './graph-bridge.js'
+import type { EntityResult, FactResult, GraphSearchOpts } from './graph-bridge.js'
+import type { MemoryRecord } from '../memory/types/memory.js'
 
 export type QueryGraphOptions = GraphSearchOpts
 
@@ -36,7 +37,7 @@ export interface NormalizedScores {
   memory?: number | undefined
 }
 
-export interface typegraphResult {
+export interface QueryChunkResult {
   content: string
 
   /** Composite score — the final ranking value regardless of mode (0-1) */
@@ -74,6 +75,23 @@ export interface typegraphResult {
   tenantId?: string | undefined
 }
 
+export type QueryMemoryRecord = Omit<MemoryRecord, 'embedding'>
+
+export type QueryMemoryResult = QueryMemoryRecord & {
+  score: number
+  scores: {
+    raw: RawScores
+    normalized: NormalizedScores
+  }
+}
+
+export interface QueryResults {
+  chunks: QueryChunkResult[]
+  facts: FactResult[]
+  entities: EntityResult[]
+  memories: QueryMemoryResult[]
+}
+
 export interface QueryOpts {
   /** Which retrieval signals to activate. Default: { semantic: true } (semantic-only search). */
   signals?: QuerySignals | undefined
@@ -104,9 +122,9 @@ export interface QueryOpts {
   semanticCalibration?: { floor: number; ceiling: number } | undefined
 
   /** Controls how graph results interact with indexed results.
-   *  - 'only': keep graph results only if they also appear in indexed results (default)
+   *  - 'off': include all graph results as-is (default)
    *  - 'prefer': boost matching results, but keep novel graph results at lower weight
-   *  - 'off': include all graph results as-is */
+   *  - 'only': keep graph results only if they also appear in indexed results */
   graphReinforcement?: 'only' | 'prefer' | 'off' | undefined
 
   /** Heterogeneous graph traversal options. */
@@ -134,7 +152,7 @@ export interface QueryOpts {
   includeInvalidated?: boolean | undefined
 
   /** Format results into an LLM-ready context string. When set, response includes `context`. */
-  format?: 'xml' | 'markdown' | 'plain' | ((results: typegraphResult[]) => string) | undefined
+  format?: 'xml' | 'markdown' | 'plain' | ((results: QueryResults) => string) | undefined
   /** Token budget for formatted context. Trims lowest-scored results to fit. */
   maxTokens?: number | undefined
 
@@ -145,7 +163,7 @@ export interface QueryOpts {
 }
 
 export interface QueryResponse {
-  results: typegraphResult[]
+  results: QueryResults
   buckets: Record<string, {
     mode: 'indexed' | 'live' | 'cached'
     resultCount: number

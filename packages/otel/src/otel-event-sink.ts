@@ -129,8 +129,8 @@ function buildAttributes(
       if (typeof payload['mode'] === 'string') {
         attrs[ATTR.TYPEGRAPH_QUERY_MODE] = payload['mode']
       }
-      if (typeof payload['count'] === 'number') {
-        attrs[ATTR.GEN_AI_REQUEST_TOP_K] = payload['count']
+      if (typeof payload['requested_count'] === 'number') {
+        attrs[ATTR.GEN_AI_REQUEST_TOP_K] = payload['requested_count']
       }
       break
     }

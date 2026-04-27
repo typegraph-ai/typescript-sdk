@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createKnowledgeGraphBridge } from '../graph-bridge.js'
-import type { MemoryStoreAdapter, SemanticEntity, SemanticEdge } from '../../memory/types/index.js'
+import type { MemoryStoreAdapter, SemanticEntity, SemanticEdge, SemanticFactRecord } from '../../memory/types/index.js'
 import { buildScope } from '../../memory/index.js'
 
 const testScope = buildScope({ userId: 'test-user' })
@@ -655,6 +655,220 @@ describe('createKnowledgeGraphBridge', () => {
       expect(result.results[0]!.score).toBeGreaterThan(0)
       expect(result.trace.entitySeedCount).toBeGreaterThan(0)
       expect(result.trace.selectedEntityIds).toContain('adarsh')
+    })
+
+    it('attaches selected graph facts and entity names to evidence passages', async () => {
+      const entities = new Map<string, SemanticEntity>([
+        ['tennyson', makeEntity('tennyson', 'Tennyson', 'person')],
+        ['maud', makeEntity('maud', 'Maud', 'work_of_art')],
+      ])
+      const edges = [makeEdge('edge-1', 'tennyson', 'maud', 'WROTE')]
+      const fact: SemanticFactRecord = {
+        id: 'fact-1',
+        edgeId: 'edge-1',
+        sourceEntityId: 'tennyson',
+        targetEntityId: 'maud',
+        relation: 'WROTE',
+        factText: 'Tennyson wrote Maud',
+        weight: 1,
+        evidenceCount: 1,
+        scope: testScope,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        similarity: 0.9,
+      }
+      const store = mockStore(entities, edges)
+      Object.assign(store, {
+        searchFacts: vi.fn().mockResolvedValue([fact]),
+        searchPassageNodes: vi.fn().mockResolvedValue([]),
+        getPassageEdgesForEntities: vi.fn().mockResolvedValue([
+          {
+            passageId: 'passage_maud',
+            entityId: 'tennyson',
+            weight: 1,
+            mentionCount: 1,
+            surfaceTexts: ['Tennyson'],
+            mentionTypes: ['subject'],
+          },
+          {
+            passageId: 'passage_maud',
+            entityId: 'maud',
+            weight: 1,
+            mentionCount: 1,
+            surfaceTexts: ['Maud'],
+            mentionTypes: ['object'],
+          },
+        ]),
+        getPassagesByIds: vi.fn().mockResolvedValue([{
+          passageId: 'passage_maud',
+          content: 'A tiny shell was moralised over by Tennyson in Maud.',
+          bucketId: 'bucket-1',
+          documentId: 'doc-1',
+          chunkIndex: 0,
+          totalChunks: 1,
+          metadata: { source: 'test' },
+          userId: 'test-user',
+        }]),
+      })
+
+      const bridge = createKnowledgeGraphBridge({
+        memoryStore: store,
+        embedding: mockEmbedding(),
+        scope: testScope,
+        resolveChunksTable: () => 'typegraph_chunks_mock',
+      })
+
+      const result = await bridge.searchGraphPassages!('Who moralised Maud?', testScope, { count: 5 })
+
+      expect(result.facts).toEqual([expect.objectContaining({ id: 'fact-1', factText: 'Tennyson wrote Maud' })])
+      expect(result.facts[0]!.properties?.relevanceScore).toEqual(expect.any(Number))
+      expect(result.entities).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'tennyson', name: 'Tennyson' }),
+        expect.objectContaining({ id: 'maud', name: 'Maud' }),
+      ]))
+      expect(result.results[0]).not.toHaveProperty('facts')
+      expect(result.results[0]).not.toHaveProperty('entities')
+      expect(result.trace.finalPassageIds).toEqual(['passage_maud'])
+      expect(result.trace.selectedFactTexts).toEqual([{ id: 'fact-1', content: 'Tennyson wrote Maud' }])
+      expect(result.trace.selectedEntityNames).toEqual(expect.arrayContaining([
+        { id: 'tennyson', content: 'Tennyson' },
+        { id: 'maud', content: 'Maud' },
+      ]))
+    })
+
+    it('ranks exact entity-constrained facts ahead of weaker adjacent facts and emits chains', async () => {
+      const entities = new Map<string, SemanticEntity>([
+        ['tennyson', makeEntity('tennyson', 'Tennyson', 'person')],
+        ['maud', makeEntity('maud', 'Maud', 'work_of_art')],
+        ['shell', makeEntity('shell', 'Tiny shell', 'object')],
+        ['lizard', makeEntity('lizard', 'Lizard', 'place')],
+      ])
+      const edges = [
+        makeEdge('edge-1', 'tennyson', 'maud', 'WROTE'),
+        makeEdge('edge-2', 'maud', 'shell', 'MORALISED'),
+        makeEdge('edge-3', 'lizard', 'shell', 'CONTAINS'),
+      ]
+      const facts: SemanticFactRecord[] = [
+        {
+          id: 'fact-noisy',
+          edgeId: 'edge-3',
+          sourceEntityId: 'lizard',
+          targetEntityId: 'shell',
+          relation: 'CONTAINS',
+          factText: 'Lizard contains a tiny shell',
+          weight: 1,
+          evidenceCount: 1,
+          scope: testScope,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          similarity: 0.6,
+        },
+        {
+          id: 'fact-maud',
+          edgeId: 'edge-1',
+          sourceEntityId: 'tennyson',
+          targetEntityId: 'maud',
+          relation: 'WROTE',
+          factText: 'Tennyson wrote Maud',
+          weight: 1,
+          evidenceCount: 1,
+          scope: testScope,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          similarity: 0.3,
+        },
+        {
+          id: 'fact-shell',
+          edgeId: 'edge-2',
+          sourceEntityId: 'maud',
+          targetEntityId: 'shell',
+          relation: 'MORALISED',
+          factText: 'Maud moralised a tiny shell',
+          weight: 1,
+          evidenceCount: 1,
+          scope: testScope,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          similarity: 0.2,
+        },
+      ]
+      const store = mockStore(entities, edges)
+      Object.assign(store, {
+        searchFacts: vi.fn().mockResolvedValue(facts),
+        searchPassageNodes: vi.fn().mockResolvedValue([]),
+        getPassageEdgesForEntities: vi.fn().mockResolvedValue([
+          {
+            passageId: 'passage_maud',
+            entityId: 'tennyson',
+            weight: 1,
+            mentionCount: 1,
+            surfaceTexts: ['Tennyson'],
+            mentionTypes: ['subject'],
+          },
+          {
+            passageId: 'passage_maud',
+            entityId: 'maud',
+            weight: 1,
+            mentionCount: 1,
+            surfaceTexts: ['Maud'],
+            mentionTypes: ['object'],
+          },
+          {
+            passageId: 'passage_shell',
+            entityId: 'shell',
+            weight: 0.4,
+            mentionCount: 1,
+            surfaceTexts: ['shell'],
+            mentionTypes: ['object'],
+          },
+        ]),
+        getPassagesByIds: vi.fn().mockResolvedValue([
+          {
+            passageId: 'passage_maud',
+            content: 'A tiny shell was moralised over by Tennyson in Maud.',
+            bucketId: 'bucket-1',
+            documentId: 'doc-1',
+            chunkIndex: 0,
+            totalChunks: 1,
+            metadata: { source: 'test' },
+            userId: 'test-user',
+          },
+          {
+            passageId: 'passage_shell',
+            content: 'The Lizard coast contains shells.',
+            bucketId: 'bucket-1',
+            documentId: 'doc-2',
+            chunkIndex: 0,
+            totalChunks: 1,
+            metadata: { source: 'test' },
+            userId: 'test-user',
+          },
+        ]),
+      })
+
+      const bridge = createKnowledgeGraphBridge({
+        memoryStore: store,
+        embedding: mockEmbedding(),
+        scope: testScope,
+        resolveChunksTable: () => 'typegraph_chunks_mock',
+      })
+
+      const result = await bridge.searchGraphPassages!('Who wrote Maud?', testScope, {
+        count: 5,
+        factSeedLimit: 3,
+        factChainLimit: 2,
+      })
+
+      expect(result.trace.selectedFactIds[0]).toBe('fact-maud')
+      expect(result.facts[0]).toEqual(expect.objectContaining({ id: 'fact-maud', factText: 'Tennyson wrote Maud' }))
+      expect(result.factChains?.[0]).toEqual(expect.objectContaining({
+        content: expect.stringContaining('Tennyson wrote Maud'),
+        facts: expect.arrayContaining([
+          expect.objectContaining({ id: 'fact-maud' }),
+          expect.objectContaining({ id: 'fact-shell' }),
+        ]),
+      }))
+      expect(result.trace.selectedFactChains?.[0]?.factIds).toEqual(expect.arrayContaining(['fact-maud', 'fact-shell']))
     })
   })
 

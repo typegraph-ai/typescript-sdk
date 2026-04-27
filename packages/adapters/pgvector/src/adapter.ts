@@ -34,6 +34,39 @@ export type SqlExecutor = (
   params?: unknown[]
 ) => Promise<Record<string, unknown>[]>
 
+const RELAXED_KEYWORD_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'have',
+  'how', 'in', 'into', 'is', 'it', 'its', 'of', 'on', 'or', 'that', 'the',
+  'their', 'there', 'these', 'this', 'those', 'to', 'was', 'were', 'what',
+  'when', 'where', 'which', 'who', 'whom', 'why', 'with', 'within',
+])
+
+function buildRelaxedKeywordQuery(query: string): string {
+  const terms: string[] = []
+  const seen = new Set<string>()
+  const add = (value: string) => {
+    const normalized = value
+      .replace(/[^\p{L}\p{N}\s'-]+/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (!normalized) return
+    const key = normalized.toLowerCase()
+    if (seen.has(key)) return
+    if (!normalized.includes(' ') && (normalized.length <= 2 || RELAXED_KEYWORD_STOP_WORDS.has(key))) return
+    seen.add(key)
+    terms.push(normalized.includes(' ') ? `"${normalized.replace(/"/g, ' ')}"` : normalized)
+  }
+
+  for (const match of query.matchAll(/["'“”‘’]([^"'“”‘’]{2,80})["'“”‘’]/g)) {
+    add(match[1] ?? '')
+  }
+  for (const match of query.matchAll(/[\p{L}\p{N}][\p{L}\p{N}'-]*/gu)) {
+    add(match[0])
+  }
+
+  return terms.slice(0, 16).join(' OR ') || query
+}
+
 export interface PgVectorAdapterConfig {
   sql: SqlExecutor
   /** Optional transaction wrapper for drivers that need explicit transaction blocks.
@@ -368,6 +401,10 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     const table = await this.getTable(model)
     const vectorStr = `[${embedding.join(',')}]`
     const count = opts.count
+    const useSemantic = opts.signals?.semantic !== false
+    const useKeyword = opts.signals?.keyword ?? true
+    if (!useSemantic && !useKeyword) return []
+    const relaxedQuery = buildRelaxedKeywordQuery(query)
     const { where: filterWhere, params: filterParams } = buildWhere(opts.filter)
     // Add temporal filtering — appended to filterParams so it gets reindexed with everything else
     if (opts.temporalAt) {
@@ -376,8 +413,9 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     const temporalCond = opts.temporalAt ? ` AND indexed_at <= $${filterParams.length}` : ''
     const filterClause = (filterWhere ? `AND ${filterWhere}` : '') + temporalCond
 
-    // Offset param indices past filter params: $1=vectorStr, $2=query, $3=count, then filter params
-    const baseOffset = 3
+    // Offset param indices past filter params: $1=vectorStr, $2=strict query,
+    // $3=count, $4=relaxed query, then filter params.
+    const baseOffset = 4
     const reindexedFilter = filterClause.replace(
       /\$(\d+)/g,
       (_, n) => `$${parseInt(n) + baseOffset}`
@@ -390,40 +428,59 @@ export class PgVectorAdapter implements VectorStoreAdapter {
 
       const rows = await sql(
         `WITH
-          tsq AS (
-            SELECT websearch_to_tsquery('english', $2) AS q
+          __tg_base_params AS (
+            SELECT $1::vector AS query_embedding,
+                   $2::text AS strict_query_text,
+                   $3::integer AS result_count,
+                   $4::text AS relaxed_query_text
           ),
-          vector_ranked AS (
-            SELECT *, 1 - (embedding <=> $1::vector) AS similarity,
-                   ROW_NUMBER() OVER (ORDER BY embedding <=> $1::vector) AS vrank
+          ${useKeyword ? `tsq AS (
+            SELECT websearch_to_tsquery('english', strict_query_text) AS strict_q,
+                   websearch_to_tsquery('english', relaxed_query_text) AS relaxed_q
+            FROM __tg_base_params
+          ),` : ''}
+          ${useSemantic ? `vector_ranked AS (
+            SELECT *, 1 - (embedding <=> query_embedding) AS similarity,
+                   ROW_NUMBER() OVER (ORDER BY embedding <=> query_embedding) AS vrank
             FROM ${table}
+            CROSS JOIN __tg_base_params
             WHERE TRUE ${reindexedFilter}
-            ORDER BY embedding <=> $1::vector
+            ORDER BY embedding <=> query_embedding
             LIMIT ${count * 3}
-          ),
-          keyword_ranked AS (
-            SELECT *, ts_rank(search_vector, tsq.q) AS kw_score,
-                   ROW_NUMBER() OVER (ORDER BY ts_rank(search_vector, tsq.q) DESC) AS krank
+          ),` : ''}
+          ${useKeyword ? `keyword_ranked AS (
+            SELECT *,
+                   GREATEST(
+                     ts_rank(search_vector, tsq.strict_q),
+                     ts_rank(search_vector, tsq.relaxed_q) * 0.75
+                   ) AS kw_score,
+                   ROW_NUMBER() OVER (ORDER BY GREATEST(
+                     ts_rank(search_vector, tsq.strict_q),
+                     ts_rank(search_vector, tsq.relaxed_q) * 0.75
+                   ) DESC) AS krank
             FROM ${table}, tsq
-            WHERE search_vector @@ tsq.q ${reindexedFilter}
-            ORDER BY ts_rank(search_vector, tsq.q) DESC
+            WHERE (search_vector @@ tsq.strict_q OR search_vector @@ tsq.relaxed_q) ${reindexedFilter}
+            ORDER BY kw_score DESC
             LIMIT ${count * 3}
-          ),
+          ),` : ''}
           combined AS (
-            SELECT id, bucket_id, tenant_id, document_id, idempotency_key, content,
+            ${[
+              useSemantic ? `SELECT id, bucket_id, tenant_id, document_id, idempotency_key, content,
                    embedding, embedding_model, chunk_index, total_chunks, metadata, indexed_at,
                    similarity, NULL::double precision AS kw_score,
                    vrank, NULL::bigint AS krank
-            FROM vector_ranked
-            UNION ALL
-            SELECT id, bucket_id, tenant_id, document_id, idempotency_key, content,
+            FROM vector_ranked` : '',
+              useKeyword ? `SELECT id, bucket_id, tenant_id, document_id, idempotency_key, content,
                    embedding, embedding_model, chunk_index, total_chunks, metadata, indexed_at,
                    NULL::double precision AS similarity, kw_score,
                    NULL::bigint AS vrank, krank
-            FROM keyword_ranked
+            FROM keyword_ranked` : '',
+            ].filter(Boolean).join('\n            UNION ALL\n            ')}
           ),
           scored AS (
-            SELECT *,
+            SELECT id, bucket_id, tenant_id, document_id, idempotency_key, content,
+                   embedding_model, chunk_index, total_chunks, metadata, indexed_at,
+                   similarity, kw_score,
               (COALESCE(1.0::float8 / (60 + vrank), 0) + COALESCE(1.0::float8 / (60 + krank), 0))::double precision AS rrf_score
             FROM combined
           )
@@ -437,7 +494,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
                  embedding_model, chunk_index, total_chunks, metadata, indexed_at
         ORDER BY SUM(rrf_score)::double precision DESC
         LIMIT $3`,
-        [vectorStr, query, count, ...filterParams]
+        [vectorStr, query, count, relaxedQuery, ...filterParams]
       )
 
       return rows.map(row => mapRowToScoredChunk(row, {
@@ -563,6 +620,10 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     const table = await this.getTable(model)
     const vectorStr = `[${embedding.join(',')}]`
     const count = opts.count
+    const useSemantic = opts.signals?.semantic !== false
+    const useKeyword = opts.signals?.keyword ?? true
+    if (!useSemantic && !useKeyword) return []
+    const relaxedQuery = buildRelaxedKeywordQuery(query)
     const { where: chunkFilterWhere, params: chunkFilterParams } = buildWhere(opts.filter)
     // Add temporal filtering
     if (opts.temporalAt) {
@@ -572,9 +633,9 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     const chunkFilterClause = (chunkFilterWhere ? `AND ${chunkFilterWhere}` : '') + temporalCond
     const { where: docFilterWhere, params: docFilterParams } = buildDocWhere(opts.documentFilter ?? {})
 
-    // Base params: $1=vector, $2=query, $3=count
+    // Base params: $1=vector, $2=strict query, $3=count, $4=relaxed query
     // Then chunk filter params, then doc filter params
-    const baseOffset = 3
+    const baseOffset = 4
     const reindexedChunkFilter = chunkFilterClause.replace(
       /\$(\d+)/g,
       (_, n) => `$${parseInt(n) + baseOffset}`
@@ -584,7 +645,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
       ? `AND ${docFilterWhere.replace(/\$(\d+)/g, (_, n) => `$${parseInt(n) + docParamOffset}`)}`
       : ''
 
-    const allParams = [vectorStr, query, count, ...chunkFilterParams, ...docFilterParams]
+    const allParams = [vectorStr, query, count, relaxedQuery, ...chunkFilterParams, ...docFilterParams]
 
     const runQuery = async (sql: SqlExecutor, inTransaction: boolean): Promise<ScoredChunkWithDocument[]> => {
       if (inTransaction && opts.iterativeScan !== false) {
@@ -593,40 +654,57 @@ export class PgVectorAdapter implements VectorStoreAdapter {
 
       const rows = await sql(
         `WITH
-          tsq AS (
-            SELECT websearch_to_tsquery('english', $2) AS q
+          __tg_base_params AS (
+            SELECT $1::vector AS query_embedding,
+                   $2::text AS strict_query_text,
+                   $3::integer AS result_count,
+                   $4::text AS relaxed_query_text
           ),
-          vector_ranked AS (
-            SELECT c.*, 1 - (c.embedding <=> $1::vector) AS similarity,
-                   ROW_NUMBER() OVER (ORDER BY c.embedding <=> $1::vector) AS vrank
+          ${useKeyword ? `tsq AS (
+            SELECT websearch_to_tsquery('english', strict_query_text) AS strict_q,
+                   websearch_to_tsquery('english', relaxed_query_text) AS relaxed_q
+            FROM __tg_base_params
+          ),` : ''}
+          ${useSemantic ? `vector_ranked AS (
+            SELECT c.*, 1 - (c.embedding <=> query_embedding) AS similarity,
+                   ROW_NUMBER() OVER (ORDER BY c.embedding <=> query_embedding) AS vrank
             FROM ${table} c
+            CROSS JOIN __tg_base_params
             JOIN ${this.documentsTable} d ON c.document_id = d.id
             WHERE TRUE ${reindexedChunkFilter} ${docFilterClause}
-            ORDER BY c.embedding <=> $1::vector
+            ORDER BY c.embedding <=> query_embedding
             LIMIT ${count * 3}
-          ),
-          keyword_ranked AS (
-            SELECT c.*, ts_rank(c.search_vector, tsq.q) AS kw_score,
-                   ROW_NUMBER() OVER (ORDER BY ts_rank(c.search_vector, tsq.q) DESC) AS krank
+          ),` : ''}
+          ${useKeyword ? `keyword_ranked AS (
+            SELECT c.*,
+                   GREATEST(
+                     ts_rank(c.search_vector, tsq.strict_q),
+                     ts_rank(c.search_vector, tsq.relaxed_q) * 0.75
+                   ) AS kw_score,
+                   ROW_NUMBER() OVER (ORDER BY GREATEST(
+                     ts_rank(c.search_vector, tsq.strict_q),
+                     ts_rank(c.search_vector, tsq.relaxed_q) * 0.75
+                   ) DESC) AS krank
             FROM ${table} c
             CROSS JOIN tsq
             JOIN ${this.documentsTable} d ON c.document_id = d.id
-            WHERE c.search_vector @@ tsq.q ${reindexedChunkFilter} ${docFilterClause}
-            ORDER BY ts_rank(c.search_vector, tsq.q) DESC
+            WHERE (c.search_vector @@ tsq.strict_q OR c.search_vector @@ tsq.relaxed_q) ${reindexedChunkFilter} ${docFilterClause}
+            ORDER BY kw_score DESC
             LIMIT ${count * 3}
-          ),
+          ),` : ''}
           combined AS (
-            SELECT id, bucket_id, tenant_id, document_id, idempotency_key, content,
+            ${[
+              useSemantic ? `SELECT id, bucket_id, tenant_id, document_id, idempotency_key, content,
                    embedding_model, chunk_index, total_chunks, metadata, indexed_at,
                    similarity, NULL::double precision AS kw_score,
                    vrank, NULL::bigint AS krank
-            FROM vector_ranked
-            UNION ALL
-            SELECT id, bucket_id, tenant_id, document_id, idempotency_key, content,
+            FROM vector_ranked` : '',
+              useKeyword ? `SELECT id, bucket_id, tenant_id, document_id, idempotency_key, content,
                    embedding_model, chunk_index, total_chunks, metadata, indexed_at,
                    NULL::double precision AS similarity, kw_score,
                    NULL::bigint AS vrank, krank
-            FROM keyword_ranked
+            FROM keyword_ranked` : '',
+            ].filter(Boolean).join('\n            UNION ALL\n            ')}
           ),
           scored AS (
             SELECT *,

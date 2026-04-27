@@ -199,7 +199,9 @@ export function createMockAdapter(): VectorStoreAdapter & {
       }
 
       const queryTerms = query.toLowerCase().split(/\s+/)
-      const k = 60
+      const useSemantic = opts.signals?.semantic !== false
+      const useKeyword = opts.signals?.keyword ?? true
+      if (!useSemantic && !useKeyword) return []
 
       return filtered
         .map(c => {
@@ -207,13 +209,18 @@ export function createMockAdapter(): VectorStoreAdapter & {
           const contentLower = c.content.toLowerCase()
           const keywordHits = queryTerms.filter(t => contentLower.includes(t)).length
           const keywordScore = keywordHits / Math.max(queryTerms.length, 1)
-          // Simple RRF-style combination
-          const rrf = vectorScore * 0.7 + keywordScore * 0.3
+          const activeScores = [
+            useSemantic ? vectorScore : undefined,
+            useKeyword ? keywordScore : undefined,
+          ].filter((score): score is number => score != null)
+          const rrf = activeScores.length > 0
+            ? activeScores.reduce((sum, score) => sum + score, 0) / activeScores.length
+            : 0
           return {
             ...c,
             scores: {
-              semantic: vectorScore,
-              keyword: keywordScore,
+              semantic: useSemantic ? vectorScore : undefined,
+              keyword: useKeyword ? keywordScore : undefined,
               rrf,
             },
           }

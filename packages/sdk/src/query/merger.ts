@@ -1,5 +1,5 @@
 import { createHash } from 'crypto'
-import type { QuerySignals, NormalizedScores } from '../types/query.js'
+import type { QueryMemoryRecord, QuerySignals, NormalizedScores } from '../types/query.js'
 import { computeCompositeScore } from './planner.js'
 
 export interface NormalizedResult {
@@ -22,6 +22,7 @@ export interface NormalizedResult {
   groupId?: string | undefined
   agentId?: string | undefined
   conversationId?: string | undefined
+  memoryRecord?: QueryMemoryRecord | undefined
 }
 
 export function dedupKey(r: NormalizedResult): string {
@@ -51,12 +52,21 @@ export function normalizeRRF(rrfScore: number, numLists: number, k = 60): number
 }
 
 /** Normalize a raw PPR score to 0-1 by dividing by a reference value.
- *  Kept for backward compatibility — composite scoring now uses query-relative
- *  min-max normalization instead. This function is still exported for tests
+ *  Kept for backward compatibility — composite scoring now uses
+ *  normalizeGraphPPR() fourth-root scaling instead. This function is still exported for tests
  *  and any direct consumers. */
 export function normalizePPR(pprScore: number, reference = 0.30): number {
   if (reference <= 0) return 0
   return Math.min(pprScore / reference, 1.0)
+}
+
+/** Normalize graph PPR scores with fourth-root scaling.
+ *  PPR is a probability mass and useful passage scores are often small
+ *  absolute values. Fourth-root scaling expands low-but-meaningful scores
+ *  while keeping the mapping deterministic and comparable across queries. */
+export function normalizeGraphPPR(pprScore: number): number {
+  if (!Number.isFinite(pprScore) || pprScore <= 0) return 0
+  return Math.min(Math.sqrt(Math.sqrt(pprScore)), 1)
 }
 
 /** Calibrate raw cosine similarity to a 0-1 relevance scale.
@@ -169,10 +179,10 @@ export function mergeAndRank(
         : (hasMemory && aggregatedScores.memorySimilarity != null) ? calibrateSemantic(aggregatedScores.memorySimilarity)
         : (hasIndexed ? 0 : undefined),
       keyword: aggregatedScores.keyword != null ? calibrateKeyword(aggregatedScores.keyword) : (resolvedSignals.keyword ? 0 : undefined),
-      // Graph: sqrt normalization for stable absolute scores across queries.
+      // Graph: fourth-root PPR normalization for stable absolute scores across queries.
       // When graph signal is active, ALL results get a score (0 if no connection), never undefined.
       graph: resolvedSignals.graph
-        ? Math.min(Math.sqrt(aggregatedScores.graph ?? 0), 1)
+        ? normalizeGraphPPR(aggregatedScores.graph ?? 0)
         : undefined,
       memory: hasMemory
         ? Math.min(Math.max(aggregatedScores.memory ?? 0, 0), 1)

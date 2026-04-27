@@ -29,7 +29,8 @@ export class IndexedRunner {
   ): Promise<NormalizedResult[]> {
     const allResults: NormalizedResult[] = []
     const fetchCount = count * 3
-    const vectorOnly = !signals?.keyword
+    const useSemantic = signals?.semantic ?? true
+    const useKeyword = signals?.keyword ?? false
 
     for (const [, group] of sourcesByModel) {
       const modelId = group.ingestModelId
@@ -52,6 +53,7 @@ export class IndexedRunner {
           filter,
           documentFilter,
           temporalAt,
+          signals: { semantic: useSemantic, keyword: useKeyword },
         })
 
         for (const chunk of chunks) {
@@ -87,9 +89,16 @@ export class IndexedRunner {
         }
       } else {
         // Fall back to standard hybrid/semantic search (or semantic-only in fast mode)
-        const chunks = (!vectorOnly && this.adapter.hybridSearch)
-          ? await this.adapter.hybridSearch(modelId, queryEmbedding, text, { count: fetchCount, filter, temporalAt })
-          : await this.adapter.search(modelId, queryEmbedding, { count: fetchCount, filter, temporalAt })
+        const chunks = useKeyword && this.adapter.hybridSearch
+          ? await this.adapter.hybridSearch(modelId, queryEmbedding, text, {
+              count: fetchCount,
+              filter,
+              temporalAt,
+              signals: { semantic: useSemantic, keyword: useKeyword },
+            })
+          : useSemantic
+            ? await this.adapter.search(modelId, queryEmbedding, { count: fetchCount, filter, temporalAt })
+            : []
 
         for (const chunk of chunks) {
           allResults.push({

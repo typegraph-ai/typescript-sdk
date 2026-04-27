@@ -1,9 +1,9 @@
-import type { typegraphResult } from './query.js'
+import type { QueryResults } from './query.js'
 import type { IngestOptions, IndexResult } from './index-types.js'
 
 export interface typegraphHooks {
   /** Fired after query() returns results. Use for citation tracking. */
-  onQueryResults?: ((query: string, results: typegraphResult[]) => void | Promise<void>) | undefined
+  onQueryResults?: ((query: string, results: QueryResults) => void | Promise<void>) | undefined
   /** Fired before indexing starts for a bucket. */
   onIndexStart?: ((bucketId: string, opts: IngestOptions) => void | Promise<void>) | undefined
   /** Fired after indexing completes for a bucket. */

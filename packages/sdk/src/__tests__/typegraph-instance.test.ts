@@ -281,7 +281,7 @@ describe('typegraphInit', () => {
       registerTestBucket(instance, bucket, embedding)
       await instance.ingest(documents, { ...ingestOptions, bucketId: bucket.id })
       const response = await instance.query('Document 1')
-      expect(response.results.length).toBeGreaterThan(0)
+      expect(response.results.chunks.length).toBeGreaterThan(0)
     })
 
     it('passes tenantId from config', async () => {

@@ -26,7 +26,7 @@ describe('integration', () => {
     await instance.ingest(documents, { ...ingestOptions, bucketId: bucket.id })
 
     const response = await instance.query('Document 1', { format: 'xml' })
-    expect(response.results.length).toBeGreaterThan(0)
+    expect(response.results.chunks.length).toBeGreaterThan(0)
     expect(response.context).toContain('<context>')
     expect(response.context).toContain('<source')
     expect(response.context).toContain('<passage')
@@ -46,8 +46,8 @@ describe('integration', () => {
     await instance.ingest(updatedDocs, { ...ingestOptions, bucketId: bucket.id })
 
     const response = await instance.query('Updated content')
-    expect(response.results.length).toBeGreaterThan(0)
-    expect(response.results[0]!.content).toContain('Updated')
+    expect(response.results.chunks.length).toBeGreaterThan(0)
+    expect(response.results.chunks[0]!.content).toContain('Updated')
   })
 
   it('multi-bucket → merged query results', async () => {
@@ -64,8 +64,8 @@ describe('integration', () => {
     await instance.ingest(docs2, { ...ingestOptions2, bucketId: 'src-2' })
 
     const response = await instance.query('content')
-    expect(response.results.length).toBeGreaterThan(0)
-    const bucketIds = new Set(response.results.map(r => r.document.bucketId))
+    expect(response.results.chunks.length).toBeGreaterThan(0)
+    const bucketIds = new Set(response.results.chunks.map(r => r.document.bucketId))
     expect(bucketIds.size).toBeGreaterThanOrEqual(1)
   })
 
@@ -137,7 +137,7 @@ describe('integration', () => {
     await instance.ingestPreChunked(doc, chunks, { bucketId: bucket.id })
 
     const response = await instance.query('Chunk zero text')
-    expect(response.results.length).toBeGreaterThan(0)
+    expect(response.results.chunks.length).toBeGreaterThan(0)
   })
 
   it('query format pipeline (same results → xml/md/plain/custom)', async () => {
@@ -152,7 +152,7 @@ describe('integration', () => {
     const xmlResponse = await instance.query('Document', { format: 'xml' })
     const mdResponse = await instance.query('Document', { format: 'markdown' })
     const plainResponse = await instance.query('Document', { format: 'plain' })
-    const customResponse = await instance.query('Document', { format: (r) => `Count: ${r.length}` })
+    const customResponse = await instance.query('Document', { format: (r) => `Count: ${r.chunks.length}` })
 
     expect(xmlResponse.context).toContain('<context>')
     expect(mdResponse.context).toContain('---')
@@ -186,13 +186,13 @@ describe('integration', () => {
       })
 
       const unscoped = await instance.query('PrivateDoc', { tenantId })
-      expect(unscoped.results).toHaveLength(0)
+      expect(unscoped.results.chunks).toHaveLength(0)
 
       const wrongIdentity = await instance.query('PrivateDoc', { tenantId, ...wrong })
-      expect(wrongIdentity.results).toHaveLength(0)
+      expect(wrongIdentity.results.chunks).toHaveLength(0)
 
       const matchingIdentity = await instance.query('PrivateDoc', { tenantId, ...match })
-      expect(matchingIdentity.results.length).toBeGreaterThan(0)
+      expect(matchingIdentity.results.chunks.length).toBeGreaterThan(0)
     })
 
     it('visibility=undefined (public) returns rows on fully-unscoped queries — the RAG default', async () => {
@@ -209,7 +209,7 @@ describe('integration', () => {
       await instance.ingest(docs, { ...ingestOptions, bucketId: bucket.id })
 
       const unscoped = await instance.query('PublicDoc')
-      expect(unscoped.results.length).toBeGreaterThan(0)
+      expect(unscoped.results.chunks.length).toBeGreaterThan(0)
     })
 
     it('visibility=tenant requires tenantId on the query — unscoped calls cannot see it', async () => {
@@ -230,11 +230,11 @@ describe('integration', () => {
 
       // No tenantId on the query → blocked, even though the doc is 'tenant' visibility.
       const unscoped = await instance.query('TenantGated')
-      expect(unscoped.results).toHaveLength(0)
+      expect(unscoped.results.chunks).toHaveLength(0)
 
       // Wrong tenant → blocked.
       const wrongTenant = await instance.query('TenantGated', { tenantId: 'tenant-y' })
-      expect(wrongTenant.results).toHaveLength(0)
+      expect(wrongTenant.results.chunks).toHaveLength(0)
     })
 
     it('visibility=tenant returns rows on tenant-only queries (no identity narrowing)', async () => {
@@ -256,7 +256,7 @@ describe('integration', () => {
       })
 
       const unscoped = await instance.query('TenantDoc', { tenantId })
-      expect(unscoped.results.length).toBeGreaterThan(0)
+      expect(unscoped.results.chunks.length).toBeGreaterThan(0)
     })
 
     it('cascading visibility tighten (tenant → user) hides rows from unscoped queries', async () => {
@@ -277,7 +277,7 @@ describe('integration', () => {
       })
 
       const before = await instance.query('MigratingDoc', { tenantId })
-      expect(before.results.length).toBeGreaterThan(0)
+      expect(before.results.chunks.length).toBeGreaterThan(0)
 
       // Simulate the chunk-level cascade PgVectorAdapter.updateDocument() applies.
       for (const chunks of adapter._chunks.values()) {
@@ -285,10 +285,10 @@ describe('integration', () => {
       }
 
       const afterUnscoped = await instance.query('MigratingDoc', { tenantId })
-      expect(afterUnscoped.results).toHaveLength(0)
+      expect(afterUnscoped.results.chunks).toHaveLength(0)
 
       const afterScoped = await instance.query('MigratingDoc', { tenantId, userId: 'u1' })
-      expect(afterScoped.results.length).toBeGreaterThan(0)
+      expect(afterScoped.results.chunks.length).toBeGreaterThan(0)
     })
   })
 

@@ -1,6 +1,6 @@
 import type { VectorStoreAdapter, UndeployResult } from './types/adapter.js'
 import type { Bucket, CreateBucketInput, BucketListFilter, EmbeddingConfig } from './types/bucket.js'
-import type { QueryOpts, QueryResponse, typegraphResult } from './types/query.js'
+import type { QueryChunkResult, QueryOpts, QueryResponse } from './types/query.js'
 import type { IngestOptions, IndexResult } from './types/index-types.js'
 import type { EmbeddingProvider } from './embedding/provider.js'
 import { embeddingModelKey } from './embedding/provider.js'
@@ -905,7 +905,10 @@ class TypegraphImpl implements typegraphInstance {
     if (opts?.format) {
       const { assemble } = await import('./query/assemble.js')
       const resultsToFormat = opts.maxTokens
-        ? trimToTokenBudget(response.results, opts.maxTokens, this.config.tokenizer)
+        ? {
+            ...response.results,
+            chunks: trimToTokenBudget(response.results.chunks, opts.maxTokens, this.config.tokenizer),
+          }
         : response.results
       response.context = typeof opts.format === 'function'
         ? opts.format(resultsToFormat)
@@ -1110,12 +1113,12 @@ class TypegraphImpl implements typegraphInstance {
 
 /** Trim results to fit within a token budget, keeping highest-scored results first. */
 function trimToTokenBudget(
-  results: typegraphResult[],
+  results: QueryChunkResult[],
   maxTokens: number,
   tokenizer?: (text: string) => number
-): typegraphResult[] {
+): QueryChunkResult[] {
   const countTokens = tokenizer ?? ((text: string) => Math.ceil(text.split(/\s+/).length * 1.3))
-  const trimmed: typegraphResult[] = []
+  const trimmed: QueryChunkResult[] = []
   let budget = maxTokens
   for (const r of results) {
     const tokens = countTokens(r.content)

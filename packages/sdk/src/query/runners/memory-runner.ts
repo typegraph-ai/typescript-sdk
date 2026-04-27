@@ -55,6 +55,8 @@ export class MemoryRunner {
         W_SIMILARITY * similarity + W_IMPORTANCE * importance + W_RECENCY * recency,
       0), 1)
 
+      const { embedding: _embedding, ...memoryRecord } = m
+
       return {
         content: m.content ?? '',
         bucketId: '__memory__',
@@ -70,6 +72,7 @@ export class MemoryRunner {
         normalizedScore: compositeMemoryScore,
         mode: 'memory' as const,
         metadata: (m.metadata ?? {}) as Record<string, unknown>,
+        memoryRecord,
         tenantId: identity.tenantId,
       }
     })

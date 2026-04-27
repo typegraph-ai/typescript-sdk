@@ -1,15 +1,15 @@
 import type { Bucket } from '../types/bucket.js'
-import type { QueryOpts, QueryResponse, QuerySignals, typegraphResult, RawScores, NormalizedScores } from '../types/query.js'
+import type { QueryChunkResult, QueryMemoryResult, QueryOpts, QueryResponse, QueryResults, QuerySignals, RawScores, NormalizedScores } from '../types/query.js'
 import type { VectorStoreAdapter } from '../types/adapter.js'
 import type { EmbeddingProvider } from '../embedding/provider.js'
 import { embeddingModelKey } from '../embedding/provider.js'
-import type { MemoryBridge, KnowledgeGraphBridge } from '../types/graph-bridge.js'
+import type { EntityResult, FactResult, MemoryBridge, KnowledgeGraphBridge } from '../types/graph-bridge.js'
 import type { typegraphEvent, typegraphEventSink } from '../types/events.js'
 import type { typegraphLogger } from '../types/logger.js'
 import { IndexedRunner } from './runners/indexed.js'
 import { MemoryRunner } from './runners/memory-runner.js'
-import { GraphRunner } from './runners/graph-runner.js'
-import { mergeAndRank, normalizeRRF, normalizePPR, calibrateSemantic, calibrateKeyword, type NormalizedResult } from './merger.js'
+import { GraphRunner, type GraphRunResult } from './runners/graph-runner.js'
+import { mergeAndRank, normalizeRRF, normalizeGraphPPR, calibrateSemantic, calibrateKeyword, type NormalizedResult } from './merger.js'
 import { classifyQuery } from './classifier.js'
 
 /** Resolve user-provided signals (or defaults) into a fully-specified signal set. */
@@ -74,11 +74,13 @@ function getDefaultWeights(signals: Required<QuerySignals>): Record<string, numb
   if (s && k && g && m) return { semantic: 0.35, keyword: 0.05, graph: 0.30, memory: 0.30 }
   if (s && !k && g && m) return { semantic: 0.35, graph: 0.35, memory: 0.30 }
   // Non-semantic combinations (graph-only, memory-only, etc.)
-  if (!s && g && m) return { graph: 0.50, memory: 0.50 }
-  if (!s && g && !m) return { graph: 1.0 }
-  if (!s && !g && m) return { memory: 1.0 }
-  if (!s && k && g) return { keyword: 0.20, graph: 0.80 }
-  if (!s && k && m) return { keyword: 0.20, memory: 0.80 }
+  if (!s && k && !g && !m) return { keyword: 1.0 }
+  if (!s && k && g && !m) return { keyword: 0.20, graph: 0.80 }
+  if (!s && k && !g && m) return { keyword: 0.20, memory: 0.80 }
+  if (!s && k && g && m) return { keyword: 0.10, graph: 0.45, memory: 0.45 }
+  if (!s && !k && g && m) return { graph: 0.50, memory: 0.50 }
+  if (!s && !k && g && !m) return { graph: 1.0 }
+  if (!s && !k && !g && m) return { memory: 1.0 }
   // Fallback
   return { semantic: 1.0 }
 }
@@ -115,6 +117,189 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
     promise,
     new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback), ms) }),
   ]).finally(() => { clearTimeout(timer) })
+}
+
+function uniqueById<T extends { id: string }>(items: T[]): T[] {
+  const byId = new Map<string, T>()
+  for (const item of items) {
+    if (!byId.has(item.id)) byId.set(item.id, item)
+  }
+  return [...byId.values()]
+}
+
+interface ScoredCandidate {
+  score: number
+  scores: { raw: RawScores; normalized: NormalizedScores }
+  sources: string[]
+  modes: string[]
+}
+
+function scoreCandidate(
+  r: NormalizedResult,
+  signals: Required<QuerySignals>,
+  runnerArrayCount: number,
+  needsGraph: boolean,
+  needsMemory: boolean,
+  effectiveScoreWeights?: Partial<Record<'rrf' | 'semantic' | 'keyword' | 'graph' | 'memory', number>>,
+): ScoredCandidate {
+  const merged = r as NormalizedResult & { modes?: string[]; finalScore?: number; compositeScore?: number }
+  const agg = merged.rawScores ?? r.rawScores
+  const rawRrf = merged.finalScore ?? agg.rrf ?? r.normalizedScore
+  const rawScores: RawScores = {}
+  const normalizedScores: NormalizedScores = {}
+  const modes: string[] = merged.modes ?? [r.mode]
+  const isFromMemory = modes.includes('memory')
+
+  if (signals.semantic) {
+    const semanticScore = agg.semantic ?? (isFromMemory ? agg.memorySimilarity : undefined)
+    rawScores.cosineSimilarity = semanticScore
+    normalizedScores.semantic = calibrateSemantic(semanticScore ?? 0)
+  }
+
+  if (signals.keyword) {
+    rawScores.bm25 = agg.keyword
+    rawScores.rrf = rawRrf
+    normalizedScores.keyword = calibrateKeyword(agg.keyword ?? 0)
+    const numListsForRRF = merged.compositeScore != null ? runnerArrayCount : 2
+    const baseRRF = normalizeRRF(rawRrf, numListsForRRF)
+    const matchedBothLists = (agg.keyword ?? 0) > 0
+    normalizedScores.rrf = matchedBothLists ? baseRRF : baseRRF * 0.5
+  } else if (signals.semantic && (needsGraph || needsMemory) && merged.compositeScore != null) {
+    rawScores.rrf = rawRrf
+    normalizedScores.rrf = normalizeRRF(rawRrf, runnerArrayCount)
+  }
+
+  if (signals.graph) {
+    rawScores.ppr = agg.graph
+    normalizedScores.graph = normalizeGraphPPR(agg.graph ?? 0)
+  }
+
+  if (signals.memory) {
+    rawScores.importance = agg.memory
+    rawScores.memorySimilarity = agg.memorySimilarity
+    rawScores.memoryImportance = agg.memoryImportance
+    rawScores.memoryRecency = agg.memoryRecency
+    normalizedScores.memory = isFromMemory
+      ? Math.min(Math.max(agg.memory ?? 0, 0), 1)
+      : undefined
+  }
+
+  const score = computeCompositeScore(normalizedScores, signals, effectiveScoreWeights)
+  return {
+    score,
+    scores: { raw: rawScores, normalized: normalizedScores },
+    sources: sourcesForResult(modes, rawScores, signals),
+    modes,
+  }
+}
+
+function toChunkResult(r: NormalizedResult, scored: ScoredCandidate): QueryChunkResult {
+  return {
+    content: r.content,
+    score: scored.score,
+    scores: scored.scores,
+    sources: scored.sources,
+    document: {
+      id: r.documentId,
+      bucketId: r.bucketId,
+      title: r.title ?? '',
+      url: r.url,
+      updatedAt: r.updatedAt ?? new Date(),
+      status: r.documentStatus,
+      visibility: r.documentVisibility,
+      tenantId: r.tenantId,
+      userId: r.userId,
+      groupId: r.groupId,
+      agentId: r.agentId,
+      conversationId: r.conversationId,
+    },
+    chunk: r.chunk ?? { index: 0, total: 1, isNeighbor: false },
+    metadata: r.metadata,
+    tenantId: r.tenantId,
+  }
+}
+
+function fallbackMemoryRecord(r: NormalizedResult): Omit<QueryMemoryResult, 'score' | 'scores'> {
+  const now = new Date()
+  return {
+    id: r.documentId,
+    category: 'semantic',
+    status: 'active',
+    content: r.content,
+    importance: r.rawScores.memoryImportance ?? 0,
+    accessCount: 0,
+    lastAccessedAt: now,
+    metadata: r.metadata,
+    scope: {
+      tenantId: r.tenantId,
+      groupId: r.groupId,
+      userId: r.userId,
+      agentId: r.agentId,
+      conversationId: r.conversationId,
+    },
+    validAt: now,
+    createdAt: r.updatedAt ?? now,
+    visibility: undefined,
+  }
+}
+
+function toMemoryResult(r: NormalizedResult, scored: ScoredCandidate): QueryMemoryResult {
+  const memory = r.memoryRecord ?? fallbackMemoryRecord(r)
+  return {
+    ...memory,
+    score: scored.score,
+    scores: scored.scores,
+  }
+}
+
+function partitionResults(
+  candidates: NormalizedResult[],
+  signals: Required<QuerySignals>,
+  runnerArrayCount: number,
+  needsGraph: boolean,
+  needsMemory: boolean,
+  graphFacts: FactResult[],
+  graphEntities: EntityResult[],
+  effectiveScoreWeights?: Partial<Record<'rrf' | 'semantic' | 'keyword' | 'graph' | 'memory', number>>,
+): QueryResults {
+  const chunks: QueryChunkResult[] = []
+  const memories: QueryMemoryResult[] = []
+
+  for (const candidate of candidates) {
+    const scored = scoreCandidate(candidate, signals, runnerArrayCount, needsGraph, needsMemory, effectiveScoreWeights)
+    const memoryOnly = scored.modes.includes('memory')
+      && !scored.modes.some(mode => mode === 'indexed' || mode === 'graph' || mode === 'live')
+    if (memoryOnly) {
+      memories.push(toMemoryResult(candidate, scored))
+    } else {
+      chunks.push(toChunkResult(candidate, scored))
+    }
+  }
+
+  return {
+    chunks,
+    facts: signals.graph ? uniqueById(graphFacts) : [],
+    entities: signals.graph ? uniqueById(graphEntities) : [],
+    memories: signals.memory ? memories : [],
+  }
+}
+
+function resultCounts(results: QueryResults): {
+  resultCount: number
+  chunkCount: number
+  factCount: number
+  entityCount: number
+  memoryCount: number
+} {
+  const chunkCount = results.chunks.length
+  const memoryCount = results.memories.length
+  return {
+    resultCount: chunkCount + memoryCount,
+    chunkCount,
+    factCount: results.facts.length,
+    entityCount: results.entities.length,
+    memoryCount,
+  }
 }
 
 export class QueryPlanner {
@@ -175,8 +360,8 @@ export class QueryPlanner {
     }
 
     const needsIndexedSearch = signals.semantic || signals.keyword
-    const needsGraph = signals.graph && !!this.knowledgeGraph
-    const needsMemory = signals.memory && !!this.memory
+    const needsGraph = Boolean(signals.graph && this.knowledgeGraph)
+    const needsMemory = Boolean(signals.memory && this.memory)
     const identity = { tenantId: opts.tenantId, groupId: opts.groupId, userId: opts.userId, agentId: opts.agentId, conversationId: opts.conversationId }
 
     // Timeouts (user-configurable or defaults)
@@ -189,6 +374,8 @@ export class QueryPlanner {
     // Memory-only or graph-only (no indexed search)
     if (!needsIndexedSearch && (needsMemory || needsGraph)) {
       const runnerArrays: NormalizedResult[][] = []
+      let graphFacts: FactResult[] = []
+      let graphEntities: EntityResult[] = []
 
       // Memory runner
       if (needsMemory) {
@@ -211,11 +398,14 @@ export class QueryPlanner {
       if (needsGraph) {
         try {
           const graphRunner = new GraphRunner(this.knowledgeGraph!)
-          const graphResults = await withTimeout(
+          const graphRun = await withTimeout(
             graphRunner.run(text, identity, count, activeBucketIds, opts.graph),
             timeouts.graph,
-            [] as NormalizedResult[]
+            { results: [], facts: [], entities: [] } as GraphRunResult
           )
+          graphFacts = graphRun.facts
+          graphEntities = graphRun.entities
+          const graphResults = graphRun.results
           if (graphResults.length > 0) runnerArrays.push(graphResults)
         } catch (err) {
           const msg = `Graph search failed: ${err instanceof Error ? err.message : String(err)}`
@@ -228,67 +418,45 @@ export class QueryPlanner {
         ? mergeAndRank(runnerArrays, count, undefined, signals, effectiveScoreWeights)
         : (runnerArrays[0] ?? []).slice(0, count)
 
-      const results: typegraphResult[] = allResults.map(r => {
-        const merged = r as any
-        const agg = merged.rawScores ?? r.rawScores
-        const rawScores: RawScores = {}
-        const normalizedScores: NormalizedScores = {}
-
-        const modes: string[] = merged.modes ?? [r.mode]
-        const isFromMemory = modes.includes('memory')
-
-        // Graph: sqrt normalization for stable absolute scores
-        if (signals.graph) {
-          rawScores.ppr = agg.graph
-          normalizedScores.graph = Math.min(Math.sqrt(agg.graph ?? 0), 1)
-        }
-        if (signals.memory) {
-          rawScores.importance = agg.memory
-          rawScores.memorySimilarity = agg.memorySimilarity
-          rawScores.memoryImportance = agg.memoryImportance
-          rawScores.memoryRecency = agg.memoryRecency
-          normalizedScores.memory = isFromMemory
-            ? Math.min(Math.max(agg.memory ?? 0, 0), 1)
-            : undefined
-        }
-        // Memory results have semantic similarity from embedding search
-        if (signals.semantic && isFromMemory && agg.memorySimilarity != null) {
-          rawScores.cosineSimilarity = agg.memorySimilarity
-          normalizedScores.semantic = calibrateSemantic(agg.memorySimilarity)
-        }
-
-        const topScore = computeCompositeScore(normalizedScores, signals, effectiveScoreWeights)
-
-        const sources = modes.map(modeToSource)
-
-        return {
-          content: r.content,
-          score: topScore,
-          scores: { raw: rawScores, normalized: normalizedScores },
-          sources,
-          document: {
-            id: r.documentId,
-            bucketId: r.bucketId,
-            title: r.title ?? '',
-            url: r.url,
-            updatedAt: r.updatedAt ?? new Date(),
-          },
-          chunk: r.chunk ?? { index: 0, total: 1, isNeighbor: false },
-          metadata: r.metadata,
-          tenantId: r.tenantId,
-        }
-      })
+      const results = partitionResults(allResults, signals, Math.max(1, runnerArrays.length), needsGraph, needsMemory, graphFacts, graphEntities, effectiveScoreWeights)
 
       const bucketTimings: QueryResponse['buckets'] = {}
-      if (needsMemory) bucketTimings['__memory__'] = { mode: 'cached', resultCount: results.length, durationMs: Date.now() - startMs, status: 'ok' }
-      if (needsGraph) bucketTimings['__graph__'] = { mode: 'cached', resultCount: results.length, durationMs: Date.now() - startMs, status: 'ok' }
+      if (needsMemory) bucketTimings['__memory__'] = { mode: 'cached', resultCount: results.memories.length, durationMs: Date.now() - startMs, status: 'ok' }
+      if (needsGraph) bucketTimings['__graph__'] = { mode: 'cached', resultCount: results.chunks.filter(result => result.sources.includes('graph')).length, durationMs: Date.now() - startMs, status: 'ok' }
 
-      this.logger?.debug('Query complete', { durationMs: Date.now() - startMs, resultCount: results.length })
+      const durationMs = Date.now() - startMs
+      const counts = resultCounts(results)
+
+      if (this.eventSink) {
+        const event: typegraphEvent = {
+          id: crypto.randomUUID(),
+          eventType: 'query.execute',
+          identity,
+          payload: {
+            query: text,
+            signals,
+            requested_count: count,
+            result_count: counts.resultCount,
+            chunk_count: counts.chunkCount,
+            fact_count: counts.factCount,
+            entity_count: counts.entityCount,
+            memory_count: counts.memoryCount,
+            bucket_count: activeBucketIds.length,
+          },
+          durationMs,
+          traceId: opts.traceId,
+          spanId: opts.spanId,
+          timestamp: new Date(),
+        }
+        void this.eventSink.emit(event)
+      }
+
+      this.logger?.debug('Query complete', { durationMs, resultCount: counts.resultCount })
 
       return {
         results,
         buckets: bucketTimings,
-        query: { text, tenantId, durationMs: Date.now() - startMs, mergeStrategy: 'rrf' },
+        query: { text, tenantId, durationMs, mergeStrategy: 'rrf' },
         warnings: warnings.length > 0 ? warnings : undefined,
       }
     }
@@ -345,6 +513,8 @@ export class QueryPlanner {
 
     // Run graph + memory runners in parallel if signals request them
     const runnerArrays: NormalizedResult[][] = [allResults]
+    let graphFacts: FactResult[] = []
+    let graphEntities: EntityResult[] = []
     if (needsGraph || needsMemory) {
       // Skip memory runner if store has no memories (avoids empty table query per query)
       const skipMemory = !needsMemory || (this.memory?.hasMemories ? !(await this.memory.hasMemories()) : false)
@@ -361,18 +531,21 @@ export class QueryPlanner {
           )
 
       const graphPromise = !needsGraph
-        ? Promise.resolve([] as NormalizedResult[])
+        ? Promise.resolve({ results: [], facts: [], entities: [] } as GraphRunResult)
         : withTimeout(
             new GraphRunner(this.knowledgeGraph!).run(text, identity, count, activeBucketIds, opts.graph)
-              .catch((err) => { this.logger?.warn(`GraphRunner failed: ${err instanceof Error ? err.message : err}`); warnings.push(`Graph search failed: ${err instanceof Error ? err.message : String(err)}`); return [] as NormalizedResult[] }),
+              .catch((err) => { this.logger?.warn(`GraphRunner failed: ${err instanceof Error ? err.message : err}`); warnings.push(`Graph search failed: ${err instanceof Error ? err.message : String(err)}`); return { results: [], facts: [], entities: [] } as GraphRunResult }),
             timeouts.graph,
-            [] as NormalizedResult[]
+            { results: [], facts: [], entities: [] } as GraphRunResult
           )
 
-      const [memResults, graphResults] = await Promise.all([
+      const [memResults, graphRun] = await Promise.all([
         memoryPromise,
         graphPromise,
       ])
+      const graphResults = graphRun.results
+      graphFacts = graphRun.facts
+      graphEntities = graphRun.entities
 
       if (memResults.length > 0) {
         // Memory results already carry semantic similarity scores from the memory
@@ -421,96 +594,10 @@ export class QueryPlanner {
       ? mergeAndRank(runnerArrays, count, undefined, signals, effectiveScoreWeights)
       : allResults.slice(0, count)
 
-    // Map NormalizedResult → typegraphResult with raw/normalized score structure
-    const results: typegraphResult[] = mergedResults.map(r => {
-      const merged = r as any
-
-      // Get aggregated raw scores (from merger if merged, raw if not)
-      const agg = merged.rawScores ?? r.rawScores
-      const rawRrf = merged.finalScore ?? agg.rrf ?? r.normalizedScore
-
-      // Build raw scores (algorithm-level, mixed ranges)
-      const rawScores: RawScores = {}
-      // Build normalized scores (capability-level, all 0-1)
-      const normalizedScores: NormalizedScores = {}
-
-      // Determine result origin for eligible/ineligible scoring
-      const modes: string[] = merged.modes ?? [r.mode]
-      const isFromMemory = modes.includes('memory')
-      const isFromIndexed = modes.includes('indexed')
-
-      // Semantic: calibrate raw cosine similarity to 0-1 relevance scale.
-      // Both indexed chunks and memories use cosine similarity — same algorithm.
-      if (signals.semantic || signals.keyword) {
-        const semanticScore = agg.semantic ?? (isFromMemory ? agg.memorySimilarity : undefined)
-        rawScores.cosineSimilarity = semanticScore
-        normalizedScores.semantic = calibrateSemantic(semanticScore ?? 0)
-      }
-
-      // Keyword: calibrate raw ts_rank() BM25 to 0-1 scale.
-      if (signals.keyword) {
-        rawScores.bm25 = agg.keyword
-        rawScores.rrf = rawRrf
-        normalizedScores.keyword = calibrateKeyword(agg.keyword ?? 0)
-        const numListsForRRF = merged.compositeScore != null ? runnerArrays.length : 2
-        const baseRRF = normalizeRRF(rawRrf, numListsForRRF)
-        const matchedBothLists = (agg.keyword ?? 0) > 0
-        normalizedScores.rrf = matchedBothLists ? baseRRF : baseRRF * 0.5
-      } else if (signals.semantic && (needsGraph || needsMemory) && merged.compositeScore != null) {
-        rawScores.rrf = rawRrf
-        normalizedScores.rrf = normalizeRRF(rawRrf, runnerArrays.length)
-      }
-
-      // Graph: sqrt normalization for stable absolute scores.
-      // When graph signal is active, ALL results get a score — never undefined.
-      if (signals.graph) {
-        rawScores.ppr = agg.graph
-        normalizedScores.graph = Math.min(Math.sqrt(agg.graph ?? 0), 1)
-      }
-
-      // Memory: eligible for memory results, ineligible for bucket documents
-      if (signals.memory) {
-        rawScores.importance = agg.memory
-        rawScores.memorySimilarity = agg.memorySimilarity
-        rawScores.memoryImportance = agg.memoryImportance
-        rawScores.memoryRecency = agg.memoryRecency
-        normalizedScores.memory = isFromMemory
-          ? Math.min(Math.max(agg.memory ?? 0, 0), 1)
-          : undefined // Bucket documents are ineligible for memory scoring
-      }
-
-      // Composite score with calibrated signals and eligible/ineligible awareness.
-      const topScore = computeCompositeScore(normalizedScores, signals, effectiveScoreWeights)
-
-      // Sources: which retrieval systems contributed (user-facing labels)
-      const sources = modes.map(modeToSource)
-
-      return {
-        content: r.content,
-        score: topScore,
-        scores: { raw: rawScores, normalized: normalizedScores },
-        sources,
-        document: {
-          id: r.documentId,
-          bucketId: r.bucketId,
-          title: r.title ?? '',
-          url: r.url,
-          updatedAt: r.updatedAt ?? new Date(),
-          status: r.documentStatus,
-          visibility: r.documentVisibility,
-          tenantId: r.tenantId,
-          userId: r.userId,
-          groupId: r.groupId,
-          agentId: r.agentId,
-          conversationId: r.conversationId,
-        },
-        chunk: r.chunk ?? { index: 0, total: 1, isNeighbor: false },
-        metadata: r.metadata,
-        tenantId: r.tenantId,
-      }
-    })
+    const results = partitionResults(mergedResults, signals, Math.max(1, runnerArrays.length), needsGraph, needsMemory, graphFacts, graphEntities, effectiveScoreWeights)
 
     const durationMs = Date.now() - startMs
+    const counts = resultCounts(results)
 
     if (this.eventSink) {
       const event: typegraphEvent = {
@@ -518,10 +605,15 @@ export class QueryPlanner {
         eventType: 'query.execute',
         identity,
         payload: {
+          query: text,
           signals,
-          text,
-          resultCount: results.length,
-          bucketCount: activeBucketIds.length,
+          requested_count: count,
+          result_count: counts.resultCount,
+          chunk_count: counts.chunkCount,
+          fact_count: counts.factCount,
+          entity_count: counts.entityCount,
+          memory_count: counts.memoryCount,
+          bucket_count: activeBucketIds.length,
         },
         durationMs,
         traceId: opts.traceId,
@@ -531,7 +623,7 @@ export class QueryPlanner {
       void this.eventSink.emit(event)
     }
 
-    this.logger?.debug('Query complete', { durationMs, resultCount: results.length, signals })
+    this.logger?.debug('Query complete', { durationMs, resultCount: counts.resultCount, signals })
 
     return {
       results,
@@ -557,6 +649,19 @@ function modeToSource(mode: string): string {
     case 'live': return 'semantic'
     default: return mode
   }
+}
+
+function sourcesForResult(modes: string[], rawScores: RawScores, signals: Required<QuerySignals>): string[] {
+  const sources = new Set<string>()
+  for (const mode of modes) {
+    if (mode === 'indexed') {
+      if (signals.semantic && rawScores.cosineSimilarity != null) sources.add('semantic')
+      if (signals.keyword && rawScores.bm25 != null) sources.add('keyword')
+      continue
+    }
+    sources.add(modeToSource(mode))
+  }
+  return [...sources]
 }
 
 function resultIdentityKey(result: NormalizedResult): string {

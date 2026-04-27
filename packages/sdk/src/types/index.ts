@@ -30,7 +30,10 @@ export type {
 
 export type {
   QuerySignals,
-  typegraphResult,
+  QueryChunkResult,
+  QueryMemoryRecord,
+  QueryMemoryResult,
+  QueryResults,
   RawScores,
   NormalizedScores,
   QueryOpts,
