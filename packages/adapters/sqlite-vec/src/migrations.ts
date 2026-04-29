@@ -54,6 +54,9 @@ export const MODEL_CHUNKS_SQL = (chunksTable: string) => `
   CREATE UNIQUE INDEX IF NOT EXISTS ${chunksTable}_ikey_chunk_idx
     ON ${chunksTable} (idempotency_key, chunk_index, bucket_id);
 
+  CREATE UNIQUE INDEX IF NOT EXISTS ${chunksTable}_id_idx
+    ON ${chunksTable} (id);
+
   CREATE INDEX IF NOT EXISTS ${chunksTable}_bucket_tenant_idx
     ON ${chunksTable} (bucket_id, tenant_id);
 

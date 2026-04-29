@@ -59,6 +59,7 @@ export type {
   Visibility,
   DocumentFilter,
   UpsertDocumentInput,
+  UpsertedDocumentRecord,
 } from './typegraph-document.js'
 
 export type { typegraphHooks } from './hooks.js'

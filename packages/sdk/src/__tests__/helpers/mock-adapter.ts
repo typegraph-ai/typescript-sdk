@@ -1,6 +1,6 @@
 import type { VectorStoreAdapter, HashStoreAdapter, SearchOpts, HashRecord, UndeployResult } from '../../types/adapter.js'
 import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from '../../types/document.js'
-import type { typegraphDocument, DocumentStatus, DocumentFilter, UpsertDocumentInput } from '../../types/typegraph-document.js'
+import type { typegraphDocument, DocumentStatus, DocumentFilter, UpsertDocumentInput, UpsertedDocumentRecord } from '../../types/typegraph-document.js'
 import { createHash } from 'crypto'
 
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -235,14 +235,18 @@ export function createMockAdapter(): VectorStoreAdapter & {
       return store.filter(c => matchesFilter(c, filter)).length
     },
 
-    async upsertDocumentRecord(input: UpsertDocumentInput): Promise<typegraphDocument> {
+    async upsertDocumentRecord(input: UpsertDocumentInput): Promise<UpsertedDocumentRecord> {
       calls.push({ method: 'upsertDocumentRecord', args: [input] })
-      const id = createHash('sha256')
-        .update(`${input.bucketId}::${input.url ?? input.title}`)
+      const existing = [...documents.values()].find(doc =>
+        doc.bucketId === input.bucketId &&
+        doc.tenantId === input.tenantId &&
+        doc.contentHash === input.contentHash
+      )
+      const id = existing?.id ?? input.id ?? createHash('sha256')
+        .update(`${input.bucketId}::${input.tenantId ?? ''}::${input.contentHash}`)
         .digest('hex')
         .slice(0, 16)
       const now = new Date()
-      const existing = documents.get(id)
       const doc: typegraphDocument = {
         id,
         bucketId: input.bucketId,
@@ -263,7 +267,7 @@ export function createMockAdapter(): VectorStoreAdapter & {
         metadata: input.metadata ?? {},
       }
       documents.set(id, doc)
-      return doc
+      return { ...doc, wasCreated: !existing }
     },
 
     async getDocument(id: string): Promise<typegraphDocument | null> {

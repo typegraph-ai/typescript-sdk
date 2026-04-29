@@ -3,7 +3,7 @@ import type { EmbeddingProvider } from '../embedding/provider.js'
 import { embeddingModelKey } from '../embedding/provider.js'
 import type { IngestOptions, IndexResult, ExtractionFailure } from '../types/index-types.js'
 import type { RawDocument, Chunk } from '../types/connector.js'
-import { generateId } from '../utils/id.js'
+import { chunkIdFor, generateId } from '../utils/id.js'
 import { sha256, resolveIdempotencyKey, buildHashStoreKey } from './hash.js'
 import { stripMarkdown } from './strip-markdown.js'
 import type { TripleExtractor, EntityContext } from './triple-extractor.js'
@@ -105,9 +105,10 @@ export class IndexEngine {
     const deduplicateBy = opts.deduplicateBy ?? ['url']
     const ikey = resolveIdempotencyKey(cleanDoc, deduplicateBy)
 
-    const documentId = cleanDoc.id ?? generateId('doc')
+    let documentId = cleanDoc.id ?? generateId('doc')
+    let documentWasCreated = true
     if (this.adapter.upsertDocumentRecord && !dryRun) {
-      await this.adapter.upsertDocumentRecord({
+      const documentRecord = await this.adapter.upsertDocumentRecord({
         id: documentId,
         bucketId,
         tenantId,
@@ -124,6 +125,8 @@ export class IndexEngine {
         graphExtracted: shouldExtract,
         metadata: cleanDoc.metadata ?? {},
       })
+      documentId = documentRecord.id
+      documentWasCreated = documentRecord.wasCreated !== false
     }
 
     try {
@@ -133,6 +136,12 @@ export class IndexEngine {
       const propagated = this.propagateMetadata(cleanDoc, opts.propagateMetadata)
 
       const embeddedChunks = cleanChunks.map((chunk, i) => ({
+        id: chunkIdFor({
+          embeddingModel: modelId,
+          bucketId,
+          idempotencyKey: ikey,
+          chunkIndex: chunk.chunkIndex,
+        }),
         idempotencyKey: ikey,
         bucketId,
         tenantId,
@@ -158,6 +167,7 @@ export class IndexEngine {
             bucketId: chunk.bucketId,
             documentId: chunk.documentId,
             chunkIndex: chunk.chunkIndex,
+            chunkId: chunk.id,
             embeddingModel: chunk.embeddingModel,
             contentHash: sha256(chunk.content),
             metadata: chunk.metadata,
@@ -177,7 +187,7 @@ export class IndexEngine {
         extraction = await this.extractTriplesForChunks(
           bucketId,
           documentId,
-          cleanChunks,
+          embeddedChunks,
           propagated,
           documentTitle,
           { tenantId, groupId, userId, agentId, conversationId },
@@ -186,6 +196,25 @@ export class IndexEngine {
       }
 
       if (!dryRun) {
+        if (extraction && extraction.failed > 0) {
+          if (this.adapter.updateDocumentStatus) {
+            await this.adapter.updateDocumentStatus(documentId, 'failed')
+          }
+
+          return {
+            bucketId,
+            tenantId,
+            mode: 'upsert',
+            total: 1,
+            skipped: 0,
+            updated: 0,
+            inserted: 0,
+            pruned: 0,
+            durationMs: Date.now() - startMs,
+            extraction,
+          }
+        }
+
         if (this.adapter.updateDocumentStatus) {
           await this.adapter.updateDocumentStatus(documentId, 'complete', cleanChunks.length)
         }
@@ -208,8 +237,8 @@ export class IndexEngine {
         mode: 'upsert',
         total: 1,
         skipped: 0,
-        updated: 0,
-        inserted: 1,
+        updated: documentWasCreated ? 0 : 1,
+        inserted: documentWasCreated ? 1 : 0,
         pruned: 0,
         durationMs: Date.now() - startMs,
         extraction,
@@ -278,6 +307,7 @@ export class IndexEngine {
       ikey: string
       contentHash: string
       documentId: string
+      documentWasCreated: boolean
       textOffset: number
     }> = []
     const allTexts: string[] = []
@@ -311,6 +341,10 @@ export class IndexEngine {
           const actualChunks = await this.adapter.countChunks(modelId, {
             bucketId,
             tenantId,
+            groupId,
+            userId,
+            agentId,
+            conversationId,
             idempotencyKey: ikey,
           })
           if (actualChunks === stored.chunkCount) {
@@ -320,10 +354,11 @@ export class IndexEngine {
         }
       }
 
-      const documentId = doc.id ?? generateId('doc')
+      let documentId = doc.id ?? generateId('doc')
+      let documentWasCreated = true
 
       if (this.adapter.upsertDocumentRecord && !dryRun) {
-        await this.adapter.upsertDocumentRecord({
+        const documentRecord = await this.adapter.upsertDocumentRecord({
           id: documentId,
           bucketId,
           tenantId,
@@ -340,13 +375,15 @@ export class IndexEngine {
           graphExtracted: shouldExtract,
           metadata: doc.metadata ?? {},
         })
+        documentId = documentRecord.id
+        documentWasCreated = documentRecord.wasCreated !== false
       }
 
       const textOffset = allTexts.length
       const texts = chunks.map(c => this.preprocessForEmbedding(c.content, opts))
       allTexts.push(...texts)
 
-      prepared.push({ doc, chunks, ikey, contentHash, documentId, textOffset })
+      prepared.push({ doc, chunks, ikey, contentHash, documentId, documentWasCreated, textOffset })
     }
 
     // Phase 2: Single embedBatch call for all chunks across all documents
@@ -354,15 +391,23 @@ export class IndexEngine {
       ? await this.embedding.embedBatch(allTexts)
       : []
 
-    // Phase 3: Per-document upsert + hash store (with optional concurrency for triple extraction)
+    // Phase 3: Per-document upsert + hash store. Graph writes are serialized
+    // until the graph storage layer is race-safe.
     const { concurrency = 1 } = opts
+    const effectiveConcurrency = shouldExtract ? 1 : concurrency
 
     const processItem = async (item: typeof prepared[number]) => {
-      const { doc, chunks, ikey, contentHash, documentId, textOffset } = item
+      const { doc, chunks, ikey, contentHash, documentId, documentWasCreated, textOffset } = item
       const embeddings = allEmbeddings.slice(textOffset, textOffset + chunks.length)
       const propagated = this.propagateMetadata(doc, opts.propagateMetadata)
 
       const embeddedChunks = chunks.map((chunk, i) => ({
+        id: chunkIdFor({
+          embeddingModel: modelId,
+          bucketId,
+          idempotencyKey: ikey,
+          chunkIndex: chunk.chunkIndex,
+        }),
         idempotencyKey: ikey,
         bucketId,
         tenantId,
@@ -388,6 +433,7 @@ export class IndexEngine {
             bucketId: chunk.bucketId,
             documentId: chunk.documentId,
             chunkIndex: chunk.chunkIndex,
+            chunkId: chunk.id,
             embeddingModel: chunk.embeddingModel,
             contentHash: sha256(chunk.content),
             metadata: chunk.metadata,
@@ -401,12 +447,13 @@ export class IndexEngine {
         }
       }
 
+      let extraction: { succeeded: number; failed: number; failedChunks?: ExtractionFailure[] } | undefined
       if (shouldExtract) {
         const documentTitle = (propagated.title as string | undefined) ?? undefined
-        const extraction = await this.extractTriplesForChunks(
+        extraction = await this.extractTriplesForChunks(
           bucketId,
           documentId,
-          chunks,
+          embeddedChunks,
           propagated,
           documentTitle,
           { tenantId, groupId, userId, agentId, conversationId },
@@ -426,6 +473,26 @@ export class IndexEngine {
       }
 
       if (!dryRun) {
+        if (extraction && extraction.failed > 0) {
+          processingFailed++
+          if (this.adapter.updateDocumentStatus) {
+            await this.adapter.updateDocumentStatus(documentId, 'failed')
+          }
+
+          this.eventSink?.emit({
+            id: crypto.randomUUID(),
+            eventType: 'index.document',
+            identity: { tenantId, groupId, userId, agentId, conversationId },
+            targetId: documentId,
+            targetType: 'document',
+            payload: { bucketId, chunkCount: chunks.length, status: 'failed', extraction },
+            traceId,
+            spanId,
+            timestamp: new Date(),
+          })
+          return
+        }
+
         if (this.adapter.updateDocumentStatus) {
           await this.adapter.updateDocumentStatus(documentId, 'complete', chunks.length)
         }
@@ -442,7 +509,8 @@ export class IndexEngine {
         })
       }
 
-      result.inserted++
+      if (documentWasCreated) result.inserted++
+      else result.updated++
 
       this.eventSink?.emit({
         id: crypto.randomUUID(),
@@ -450,14 +518,14 @@ export class IndexEngine {
         identity: { tenantId, groupId, userId, agentId, conversationId },
         targetId: documentId,
         targetType: 'document',
-        payload: { bucketId, chunkCount: chunks.length, status: 'new' },
+        payload: { bucketId, chunkCount: chunks.length, status: documentWasCreated ? 'new' : 'updated' },
         traceId,
         spanId,
         timestamp: new Date(),
       })
     }
 
-    if (concurrency <= 1) {
+    if (effectiveConcurrency <= 1) {
       for (const item of prepared) {
         await processItem(item)
       }
@@ -486,7 +554,7 @@ export class IndexEngine {
       for (const item of prepared) {
         const p = safeProcessItem(item).then(() => { active.delete(p) })
         active.add(p)
-        if (active.size >= concurrency) {
+        if (active.size >= effectiveConcurrency) {
           await Promise.race(active)
         }
       }
@@ -501,7 +569,7 @@ export class IndexEngine {
       identity: { tenantId, groupId, userId, agentId, conversationId },
       payload: {
         bucketId,
-        documentsProcessed: result.inserted,
+        documentsProcessed: result.inserted + result.updated,
         documentsSkipped: result.skipped,
         documentsFailed: processingFailed,
         ...(result.extraction ? { extraction: result.extraction } : {}),
@@ -530,7 +598,7 @@ export class IndexEngine {
   private async extractTriplesForChunks(
     bucketId: string,
     documentId: string,
-    chunks: Chunk[],
+    chunks: Array<Pick<Chunk, 'content' | 'chunkIndex' | 'metadata'> & { id?: string | undefined }>,
     propagated: Record<string, unknown>,
     documentTitle?: string,
     identity?: {
@@ -564,6 +632,7 @@ export class IndexEngine {
             documentTitle,
             identity,
             visibility,
+            chunk.id,
           ),
           TRIPLE_EXTRACTION_TIMEOUT_MS,
         )

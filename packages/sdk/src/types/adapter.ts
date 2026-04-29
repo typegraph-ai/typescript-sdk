@@ -1,5 +1,5 @@
 import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from './document.js'
-import type { typegraphDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from './typegraph-document.js'
+import type { typegraphDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput, UpsertedDocumentRecord } from './typegraph-document.js'
 import type { Bucket, BucketListFilter } from './bucket.js'
 import type { PaginationOpts, PaginatedResult } from './pagination.js'
 import type { Job, JobFilter, UpsertJobInput, JobStatusPatch } from './job.js'
@@ -74,8 +74,8 @@ export interface VectorStoreAdapter {
 
   // --- Document record methods (optional - adapters that support documents implement these) ---
 
-  /** Create or update a document record. Returns the document with its UUID. */
-  upsertDocumentRecord?(input: UpsertDocumentInput): Promise<typegraphDocument>
+  /** Create or update a document record. Returns the canonical document row. */
+  upsertDocumentRecord?(input: UpsertDocumentInput): Promise<UpsertedDocumentRecord>
   /** Get a document by UUID. */
   getDocument?(id: string): Promise<typegraphDocument | null>
   /** List documents matching a filter. Supports optional pagination. */

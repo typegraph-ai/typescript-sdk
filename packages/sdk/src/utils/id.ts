@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 
 /**
  * Generate a prefixed ID. Format: `{prefix}_{uuid}`
@@ -17,4 +17,30 @@ import { randomUUID } from 'crypto'
  */
 export function generateId(prefix: string): string {
   return `${prefix}_${randomUUID()}`
+}
+
+export interface ChunkIdInput {
+  embeddingModel: string
+  bucketId: string
+  idempotencyKey: string
+  chunkIndex: number
+}
+
+/**
+ * Generate the stable chunk id used by vector rows and graph passage nodes.
+ *
+ * This keeps chunk identity in the SDK instead of letting each adapter invent
+ * storage-local ids that graph code cannot know about.
+ */
+export function chunkIdFor(input: ChunkIdInput): string {
+  const hash = createHash('sha256')
+    .update([
+      input.embeddingModel,
+      input.bucketId,
+      input.idempotencyKey,
+      String(input.chunkIndex),
+    ].join('\u001f'))
+    .digest('hex')
+    .slice(0, 32)
+  return `chk_${hash}`
 }

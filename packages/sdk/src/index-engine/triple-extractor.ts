@@ -28,6 +28,8 @@ interface ExtractedRelationship {
   predicate: string
   object: string
   confidence: number
+  description?: string | undefined
+  evidenceText?: string | undefined
 }
 
 interface ExtractionResult {
@@ -66,6 +68,8 @@ const relationshipSchema = z.array(z.object({
   predicate: z.string(),
   object: z.string(),
   confidence: z.number(),
+  description: z.optional(z.string()),
+  evidenceText: z.optional(z.string()),
 }))
 
 const singlePassSchema = z.object({
@@ -509,6 +513,8 @@ function postProcessExtraction(
       predicate,
       object,
       confidence: typeof rel.confidence === 'number' ? rel.confidence : 1,
+      description: sanitizeField(rel.description ?? ''),
+      evidenceText: sanitizeField(rel.evidenceText ?? ''),
     })
   }
 
@@ -591,6 +597,8 @@ For each relationship between the entities you identified, provide:
 - "predicate": A canonical relationship verb from the vocabulary below
 - "object": Must be one of the entity names from Step 1
 - "confidence": How confident you are (0.0 to 1.0)
+- "description": One standalone sentence describing the relationship as a complete fact. It must be understandable without the source text.
+- "evidenceText": A concise source-backed excerpt or paraphrase that justifies the relationship. Keep it short; do not include full paragraphs.
 
 ${getPredicatesForPrompt()}
 
@@ -601,6 +609,7 @@ Relationship rules:
 - Use the most specific predicate that accurately captures the relationship
 - Extract relationships that are explicitly stated or strongly implied in the text
 - Do not emit self-relationships or alias relationships. Relationships are only for two different entities after alias resolution.
+- Prefer relationship descriptions that preserve the source's important names, dates, places, objects, and negation.
 
 ## Example
 
@@ -619,12 +628,12 @@ Output:
   {"name": "Old Smith", "type": "person", "description": "Farm owner near the Tennessee River who employed Rob Roy", "aliases": ["Smith"]},
   {"name": "Tennessee River", "type": "location", "description": "River near Old Smith's farm", "aliases": []}
 ], "relationships": [
-  {"subject": "Cousin Cæsar", "predicate": "CHILD_OF", "object": "Nancy Wade", "confidence": 0.95},
-  {"subject": "Cousin Cæsar", "predicate": "BORN_IN", "object": "West Tennessee", "confidence": 0.95},
-  {"subject": "Cousin Cæsar", "predicate": "TRAVELED_TO", "object": "Paducah, Kentucky", "confidence": 0.85},
-  {"subject": "Cousin Cæsar", "predicate": "COLLABORATED_WITH", "object": "Steve Sharp", "confidence": 0.95},
-  {"subject": "Steve Sharp", "predicate": "WORKS_AS", "object": "pilot", "confidence": 0.9},
-  {"subject": "Old Smith", "predicate": "EMPLOYED", "object": "Rob Roy", "confidence": 0.9}
+  {"subject": "Cousin Cæsar", "predicate": "CHILD_OF", "object": "Nancy Wade", "confidence": 0.95, "description": "Cousin Cæsar was born to Nancy Wade.", "evidenceText": "Cousin Cæsar was born to Nancy Wade"},
+  {"subject": "Cousin Cæsar", "predicate": "BORN_IN", "object": "West Tennessee", "confidence": 0.95, "description": "Cousin Cæsar was born in West Tennessee.", "evidenceText": "born to Nancy Wade in West Tennessee"},
+  {"subject": "Cousin Cæsar", "predicate": "TRAVELED_TO", "object": "Paducah, Kentucky", "confidence": 0.85, "description": "Cousin Cæsar later went to Paducah, Kentucky.", "evidenceText": "we find Cousin Cæsar in Paducah, Kentucky"},
+  {"subject": "Cousin Cæsar", "predicate": "COLLABORATED_WITH", "object": "Steve Sharp", "confidence": 0.95, "description": "Cousin Cæsar and Steve Sharp were partners in a card game.", "evidenceText": "in company with one Steve Sharp; they were partners"},
+  {"subject": "Steve Sharp", "predicate": "WORKS_AS", "object": "pilot", "confidence": 0.9, "description": "Steve Sharp worked as a pilot.", "evidenceText": "Sharp, a pilot by profession"},
+  {"subject": "Old Smith", "predicate": "EMPLOYED", "object": "Rob Roy", "confidence": 0.9, "description": "Old Smith employed Rob Roy to cut wood.", "evidenceText": "Rob Roy cut wood for Old Smith"}
 ]}
 
 ## Self-review
@@ -825,6 +834,8 @@ For each relationship, provide:
 - "predicate": A canonical relationship verb from the vocabulary listed below
 - "object": Must be one of the entity names listed below
 - "confidence": How confident you are this relationship is stated or strongly implied (0.0 to 1.0)
+- "description": One standalone sentence describing the relationship as a complete fact.
+- "evidenceText": A concise source-backed excerpt or paraphrase that justifies the relationship.
 
 </TASK_INSTRUCTIONS>
 
@@ -838,6 +849,7 @@ For each relationship, provide:
 - Do not emit self-relationships or alias relationships. If two names refer to the same entity, they belong in aliases from the entity step, not in the relationships array.
 - Do not connect an entity to a generic description or role unless that role was extracted as a specific named entity.
 - When the text directly states a profession, office, or role for a named entity, emit a structured relationship to that role concept. Examples: person WORKS_AS doctor, person HELD_ROLE house surgeon, person PRACTICED_AS physician
+- Preserve important names, dates, places, objects, and negation in relationship descriptions and evidence text.
 - Return an empty array if no clear relationships exist between the entities listed below
 
 </TASK_RULES>
@@ -871,12 +883,12 @@ For each relationship, provide:
 
   <EXAMPLE_OUTPUT>
 
-    [{"subject": "Cousin Cæsar", "predicate": "CHILD_OF", "object": "Nancy Wade", "confidence": 0.95},
-    {"subject": "Cousin Cæsar", "predicate": "BORN_IN", "object": "West Tennessee", "confidence": 0.95},
-    {"subject": "Cousin Cæsar", "predicate": "TRAVELED_TO", "object": "Paducah, Kentucky", "confidence": 0.85},
-    {"subject": "Cousin Cæsar", "predicate": "COLLABORATED_WITH", "object": "Steve Sharp", "confidence": 0.95},
-    {"subject": "Steve Sharp", "predicate": "WORKS_AS", "object": "pilot", "confidence": 0.9},
-    {"subject": "Old Smith", "predicate": "EMPLOYED", "object": "Rob Roy", "confidence": 0.9}]
+    [{"subject": "Cousin Cæsar", "predicate": "CHILD_OF", "object": "Nancy Wade", "confidence": 0.95, "description": "Cousin Cæsar was born to Nancy Wade.", "evidenceText": "Cousin Cæsar was born to Nancy Wade"},
+    {"subject": "Cousin Cæsar", "predicate": "BORN_IN", "object": "West Tennessee", "confidence": 0.95, "description": "Cousin Cæsar was born in West Tennessee.", "evidenceText": "born to Nancy Wade in West Tennessee"},
+    {"subject": "Cousin Cæsar", "predicate": "TRAVELED_TO", "object": "Paducah, Kentucky", "confidence": 0.85, "description": "Cousin Cæsar later went to Paducah, Kentucky.", "evidenceText": "we find Cousin Cæsar in Paducah, Kentucky"},
+    {"subject": "Cousin Cæsar", "predicate": "COLLABORATED_WITH", "object": "Steve Sharp", "confidence": 0.95, "description": "Cousin Cæsar and Steve Sharp were partners in a card game.", "evidenceText": "in company with one Steve Sharp; they were partners"},
+    {"subject": "Steve Sharp", "predicate": "WORKS_AS", "object": "pilot", "confidence": 0.9, "description": "Steve Sharp worked as a pilot.", "evidenceText": "Sharp, a pilot by profession"},
+    {"subject": "Old Smith", "predicate": "EMPLOYED", "object": "Rob Roy", "confidence": 0.9, "description": "Old Smith employed Rob Roy to cut wood.", "evidenceText": "Rob Roy cut wood for Old Smith"}]
 
   </EXAMPLE_OUTPUT>
 
@@ -886,7 +898,7 @@ Now, below we are getting into the meat of the current task you are performing.
 
 <TASK_OUTPUT_REQUIREMENTS>
 
-- Return a JSON array: [{"subject": "...", "predicate": "...", "object": "...", "confidence": 0.9}, ...]
+- Return a JSON array: [{"subject": "...", "predicate": "...", "object": "...", "confidence": 0.9, "description": "...", "evidenceText": "..."}, ...]
 - Return an empty array if no relationships exist between the listed entities
 
 </TASK_OUTPUT_REQUIREMENTS>
@@ -949,6 +961,7 @@ export class TripleExtractor {
       conversationId?: string | undefined
     },
     visibility?: Visibility,
+    sourceChunkId?: string,
   ): Promise<{ entities: EntityContext[] } | undefined> {
     if (!this.graph.addTriple && !this.graph.addEntityMentions) return { entities: [] }
 
@@ -1001,6 +1014,9 @@ export class TripleExtractor {
           objectType: objectEntity.type,
           objectAliases: objectEntity.aliases ?? [],
           objectDescription: objectEntity.description,
+          relationshipDescription: rel.description,
+          evidenceText: rel.evidenceText,
+          sourceChunkId,
           confidence: typeof rel.confidence === 'number' ? Math.max(0, Math.min(1, rel.confidence)) : 1.0,
           content: cleanContent,
           bucketId,

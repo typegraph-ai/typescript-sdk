@@ -1,9 +1,10 @@
 import type { ContextFormat, ContextSection, QueryContextOptions, QueryContextStats, QueryResults } from '../types/query.js'
+import { formatFactEvidence } from '../graph/retrieval-primitives.js'
 
 const DEFAULT_CONTEXT_SECTIONS: ContextSection[] = ['chunks', 'facts', 'entities', 'memories']
 const DEFAULT_MAX_TOTAL_TOKENS = 30_000
-const DEFAULT_MAX_FACT_TOKENS = 8_000
-const DEFAULT_MAX_ENTITY_TOKENS = 6_000
+const DEFAULT_MAX_FACT_TOKENS = 1_500
+const DEFAULT_MAX_ENTITY_TOKENS = 1_500
 
 type TokenCounter = (text: string) => number
 
@@ -103,7 +104,7 @@ function entriesBySection(results: QueryResults): Record<ContextSection, Context
     facts: results.facts.map((fact, index) => ({
       section: 'facts',
       index: index + 1,
-      content: fact.factText,
+      content: formatFactEvidence(fact),
       attributes: {
         id: fact.id,
         edgeId: fact.edgeId,

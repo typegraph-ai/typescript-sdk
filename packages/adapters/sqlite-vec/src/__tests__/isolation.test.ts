@@ -7,6 +7,7 @@ const DIMS = 4
 
 function makeChunk(overrides: Partial<EmbeddedChunk> = {}): EmbeddedChunk {
   return {
+    id: overrides.id ?? `chunk-${overrides.idempotencyKey ?? 'ikey-default'}-${overrides.chunkIndex ?? 0}`,
     idempotencyKey: overrides.idempotencyKey ?? 'ikey-default',
     bucketId: overrides.bucketId ?? 'bucket-1',
     tenantId: overrides.tenantId ?? 'tenant-1',
@@ -110,6 +111,24 @@ describe('SqliteVecAdapter — identity isolation', () => {
     expect(await adapter.countChunks(MODEL, { userId: 'user-a' })).toBe(2)
     expect(await adapter.countChunks(MODEL, { userId: 'user-b' })).toBe(1)
     expect(await adapter.countChunks(MODEL, { tenantId: 'tenant-1' })).toBe(3)
+  })
+
+  it('updates documentId on idempotency conflict', async () => {
+    await adapter.upsertDocument(MODEL, [
+      makeChunk({ idempotencyKey: 'A', documentId: 'doc-stale' }),
+    ])
+    await adapter.upsertDocument(MODEL, [
+      makeChunk({ idempotencyKey: 'A', documentId: 'doc-canonical', content: 'updated content' }),
+    ])
+
+    const results = await adapter.search(MODEL, [1, 0, 0, 0], {
+      count: 1,
+      filter: { idempotencyKey: 'A' },
+    })
+
+    expect(results).toHaveLength(1)
+    expect(results[0]!.documentId).toBe('doc-canonical')
+    expect(results[0]!.content).toBe('updated content')
   })
 
   it('mapRowToScoredChunk returns all identity fields', async () => {

@@ -57,8 +57,8 @@ export interface IngestOptions {
   dryRun?: boolean | undefined
   /**
    * Controls inter-document parallelism inside a single `ingest()` call.
-   * A semaphore bounds how many documents run their storage + per-document
-   * extraction phase concurrently.
+   * A semaphore bounds how many documents run their storage phase concurrently.
+   * Graph extraction is currently serialized even when this value is higher.
    *
    * Does NOT affect:
    * - Embedding batching. All chunks in the batch are sent to `embedBatch`
@@ -66,8 +66,8 @@ export interface IngestOptions {
    * - Intra-document chunk processing. Chunks are always sequential within
    *   a single document so cross-chunk entity context can accumulate.
    *
-   * Default: 1 (sequential). Raise it to speed up LLM-heavy extraction
-   * (graph, memory) at the cost of provider rate-limit pressure.
+   * Default: 1 (sequential). Raise it to speed up vector-only indexing at the
+   * cost of provider/database pressure.
    */
   concurrency?: number | undefined
   onProgress?: ((event: IndexProgressEvent) => void) | undefined

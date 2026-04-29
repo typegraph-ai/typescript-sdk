@@ -32,7 +32,14 @@ describe('TripleExtractor', () => {
           },
         ],
         relationships: [
-          { subject: 'Cæsar Simon', predicate: 'collaborated_with', object: 'Steve Sharp', confidence: 0.9 },
+          {
+            subject: 'Cæsar Simon',
+            predicate: 'collaborated_with',
+            object: 'Steve Sharp',
+            confidence: 0.9,
+            description: 'Cæsar Simon and Steve Sharp were companions in Paducah.',
+            evidenceText: 'in Paducah, Kentucky, calling himself Cole Conway, in company with one Steve Sharp',
+          },
         ],
       }),
       graph,
@@ -44,6 +51,12 @@ describe('TripleExtractor', () => {
       'bucket-1',
       0,
       'doc-1',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'chk-1',
     )
 
     expect(graph.addEntityMentions).toHaveBeenCalled()
@@ -56,6 +69,9 @@ describe('TripleExtractor', () => {
       subject: 'Cæsar Simon',
       subjectAliases: expect.arrayContaining(['Cole Conway']),
       object: 'Steve Sharp',
+      relationshipDescription: 'Cæsar Simon and Steve Sharp were companions in Paducah.',
+      evidenceText: 'in Paducah, Kentucky, calling himself Cole Conway, in company with one Steve Sharp',
+      sourceChunkId: 'chk-1',
     }))
   })
 

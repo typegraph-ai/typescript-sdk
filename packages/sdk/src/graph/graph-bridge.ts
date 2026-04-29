@@ -11,6 +11,11 @@ import { EntityResolver, PredicateNormalizer, createTemporal } from '../memory/i
 import { EmbeddedGraph } from './graph/embedded-graph.js'
 import { parseGraphExploreIntent } from './query-intent.js'
 import { generateId } from '../utils/id.js'
+import {
+  buildFactSearchText,
+  decomposeGraphQuery,
+  formatFactEvidence,
+} from './retrieval-primitives.js'
 
 // ── Config ──
 
@@ -91,6 +96,16 @@ function relationToPhrase(relation: string): string {
 
 function factTextFor(sourceName: string, relation: string, targetName: string): string {
   return `${sourceName} ${relationToPhrase(relation)} ${targetName}`
+}
+
+function cleanOptionalText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const cleaned = value.replace(/\s+/g, ' ').trim()
+  return cleaned ? cleaned : undefined
+}
+
+function propertyString(properties: Record<string, unknown> | undefined, key: string): string | undefined {
+  return cleanOptionalText(properties?.[key])
 }
 
 function factSentenceForProfile(
@@ -219,11 +234,12 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     const seenCanonical = new Map<string, number>()
     return facts
       .map((fact, index) => {
-        const lexical = tokenOverlapScore(tokens, fact.factText)
+        const searchableText = fact.factSearchText ?? fact.factText
+        const lexical = tokenOverlapScore(tokens, searchableText)
         const entityAnchor = entityAnchorScore(tokens, fact, entityNameById)
         const relation = relationRelevanceScore(tokens, fact.relation)
         const semantic = normalizeSeedScore(fact.similarity ?? 0)
-        const canonical = normalizeSurfaceText(`${fact.sourceEntityId}:${fact.relation}:${fact.targetEntityId}:${fact.factText}`)
+        const canonical = normalizeSurfaceText(`${fact.sourceEntityId}:${fact.relation}:${fact.targetEntityId}:${searchableText}`)
         const duplicateCount = seenCanonical.get(canonical) ?? 0
         seenCanonical.set(canonical, duplicateCount + 1)
         const duplicatePenalty = duplicateCount * 0.2
@@ -258,7 +274,7 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
         if (!shared) continue
         candidates.push({
           facts: [a, b],
-          content: `${a.factText}; ${b.factText}`,
+          content: `${formatFactEvidence(a)}; ${formatFactEvidence(b)}`,
           score: factResultScore(a) + factResultScore(b) + shared.bonus,
           entityIds: uniqueIds([a.sourceEntityId, a.targetEntityId, b.sourceEntityId, b.targetEntityId]),
         })
@@ -364,6 +380,11 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
   ): FactResult {
     const sourceEntityName = nameMap.get(edge.sourceEntityId) ?? edge.sourceEntityId
     const targetEntityName = nameMap.get(edge.targetEntityId) ?? edge.targetEntityId
+    const factText = factTextFor(sourceEntityName, edge.relation, targetEntityName)
+    const description = propertyString(edge.properties, 'relationshipDescription')
+      ?? propertyString(edge.properties, 'description')
+    const evidenceText = propertyString(edge.properties, 'evidenceText')
+    const factSearchText = buildFactSearchText({ factText, description, evidenceText })
     return {
       id: stableGraphId('fact', [edge.sourceEntityId, edge.relation, edge.targetEntityId]),
       edgeId: edge.id,
@@ -372,7 +393,11 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       targetEntityId: edge.targetEntityId,
       targetEntityName,
       relation: edge.relation,
-      factText: factTextFor(sourceEntityName, edge.relation, targetEntityName),
+      factText,
+      description,
+      evidenceText,
+      factSearchText,
+      sourceChunkId: propertyString(edge.properties, 'sourceChunkId'),
       weight: edge.weight,
       evidenceCount: Math.max(1, Math.round(edge.weight)),
       properties: {
@@ -584,6 +609,9 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     objectType?: string
     objectAliases?: string[]
     objectDescription?: string
+    relationshipDescription?: string | undefined
+    evidenceText?: string | undefined
+    sourceChunkId?: string | undefined
     confidence?: number
     content: string
     bucketId: string
@@ -655,6 +683,9 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     if (subjectResult.id === objectResult.id) return
 
     const weight = triple.confidence ?? 1.0
+    const relationshipDescription = cleanOptionalText(triple.relationshipDescription)
+    const evidenceText = cleanOptionalText(triple.evidenceText)
+    const sourceChunkId = cleanOptionalText(triple.sourceChunkId)
 
     // Edges are deduplicated on (source, target, relation) at storage; chunk text
     // and provenance move to the entity↔chunk junction. Keep triple metadata in
@@ -665,7 +696,12 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       targetEntityId: objectResult.id,
       relation,
       weight,
-      properties: triple.metadata ? { metadata: triple.metadata } : {},
+      properties: {
+        ...(relationshipDescription ? { relationshipDescription } : {}),
+        ...(evidenceText ? { evidenceText } : {}),
+        ...(sourceChunkId ? { sourceChunkId } : {}),
+        ...(triple.metadata ? { metadata: triple.metadata } : {}),
+      },
       scope,
       visibility: triple.visibility,
       temporal: createTemporal(),
@@ -676,7 +712,12 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
 
     if (memoryStore.upsertFactRecord) {
       const factText = factTextFor(subjectResult.name, relation, objectResult.name)
-      const factEmbedding = await embedding.embed(factText)
+      const factSearchText = buildFactSearchText({
+        factText,
+        description: relationshipDescription,
+        evidenceText,
+      })
+      const factEmbedding = await embedding.embed(factSearchText)
       await memoryStore.upsertFactRecord({
         id: stableGraphId('fact', [storedEdge.sourceEntityId, storedEdge.relation, storedEdge.targetEntityId]),
         edgeId: storedEdge.id,
@@ -684,6 +725,10 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
         targetEntityId: storedEdge.targetEntityId,
         relation: storedEdge.relation,
         factText,
+        description: relationshipDescription,
+        evidenceText,
+        factSearchText,
+        sourceChunkId,
         weight: storedEdge.weight,
         evidenceCount: Math.max(1, Math.round(storedEdge.weight)),
         embedding: factEmbedding,
@@ -767,6 +812,34 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     }
 
     return hydrateEntityResults(entities, similarityById, identity)
+  }
+
+  async function collectEntityCandidates(
+    queries: string[],
+    identity: typegraphIdentity,
+    limit: number,
+    opts: { stopOnStrongMatch?: boolean } = {},
+  ): Promise<EntityResult[]> {
+    const byId = new Map<string, EntityResult>()
+    for (const query of queries) {
+      const trimmed = query.trim()
+      if (!trimmed) continue
+      const matches = await searchEntities(trimmed, identity, limit)
+      let strongMatches = 0
+      for (const match of matches) {
+        const similarity = match.similarity ?? 0
+        if (similarity >= 0.95) strongMatches++
+        const existing = byId.get(match.id)
+        if (!existing || similarity > (existing.similarity ?? 0)) {
+          byId.set(match.id, match)
+        }
+      }
+      if (opts.stopOnStrongMatch && strongMatches > 0) break
+      if (byId.size >= limit * 3) break
+    }
+    return [...byId.values()]
+      .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0))
+      .slice(0, limit)
   }
 
   async function getAdjacencyList(
@@ -920,6 +993,7 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     const factLimit = Math.max(1, opts.factLimit ?? 20)
     const passageLimit = Math.max(1, opts.passageLimit ?? 10)
     const depth: 1 | 2 = opts.depth === 2 ? 2 : 1
+    const decomposition = decomposeGraphQuery(query)
 
     const parsed = await parseGraphExploreIntent({
       query,
@@ -945,7 +1019,14 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     }
 
     const anchorQuery = parsed.intent.anchorText.trim() || query.trim()
-    let anchorCandidates = await searchEntities(anchorQuery, identity, Math.max(anchorLimit * 3, anchorLimit))
+    const anchorQueries = uniqueIds([
+      anchorQuery,
+      ...decomposition.entityPhrases,
+      ...decomposition.subqueries,
+    ]).slice(0, 6)
+    let anchorCandidates = await collectEntityCandidates(anchorQueries, identity, Math.max(anchorLimit * 3, anchorLimit), {
+      stopOnStrongMatch: true,
+    })
     trace.anchorCandidates = anchorCandidates
 
     if (parsed.anchorEntityTypes.length > 0) {
@@ -1267,6 +1348,7 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       return { results: [], facts: [], entities: [], factChains: [], trace: emptyTrace() }
     }
 
+    const decomposition = decomposeGraphQuery(query)
     const queryEmbedding = await embedding.embed(query)
     const chunksTable = await config.resolveChunksTable(embeddingModelKey(embedding))
 
@@ -1297,7 +1379,12 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       entitySeeds.set(fact.targetEntityId, Math.max(entitySeeds.get(fact.targetEntityId) ?? 0, score))
     }
 
-    const entityMatches = await searchEntities(query, identity, 10)
+    const entityQueries = uniqueIds([
+      query,
+      ...decomposition.entityPhrases,
+      ...decomposition.subqueries,
+    ]).slice(0, 8)
+    const entityMatches = await collectEntityCandidates(entityQueries, identity, 10)
     for (const entity of entityMatches) {
       const score = normalizeSeedScore(entity.similarity ?? 0.5) * entitySeedWeight * 0.75
       entitySeeds.set(entity.id, Math.max(entitySeeds.get(entity.id) ?? 0, score))
@@ -1362,6 +1449,11 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       const weight = Math.log2(1 + edge.weight)
       addWeightedEdge(edge.entityId, edge.passageId, weight)
       addWeightedEdge(edge.passageId, edge.entityId, weight)
+      const entitySeedScore = entitySeeds.get(edge.entityId)
+      if (entitySeedScore != null) {
+        const mentionSeedScore = entitySeedScore * weight * 0.6
+        passageSeeds.set(edge.passageId, Math.max(passageSeeds.get(edge.passageId) ?? 0, mentionSeedScore))
+      }
     }
 
     for (const passageId of passageSeeds.keys()) {
@@ -1404,8 +1496,16 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
     const selectedEntityRows = await graph.getEntitiesBatch(evidenceEntityIds, identity)
     const selectedEntityResults = (await hydrateEntityResults(selectedEntityRows, undefined, identity))
       .sort((a, b) => (entityOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (entityOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER))
+    const passageQueryTokens = queryTokens([
+      query,
+      ...decomposition.terms,
+      ...decomposition.entityPhrases,
+    ].join(' '))
     const results = passageRows
       .map(row => {
+        const pprScore = pprScores.get(row.passageId) ?? ((denseScoreByPassage.get(row.passageId) ?? 0) * passageSeedWeight)
+        const denseScore = denseScoreByPassage.get(row.passageId) ?? 0
+        const lexicalScore = tokenOverlapScore(passageQueryTokens, row.content)
         return {
           passageId: row.passageId,
           content: row.content,
@@ -1413,7 +1513,7 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
           documentId: row.documentId,
           chunkIndex: row.chunkIndex,
           totalChunks: row.totalChunks,
-          score: pprScores.get(row.passageId) ?? ((denseScoreByPassage.get(row.passageId) ?? 0) * passageSeedWeight),
+          score: pprScore + denseScore * 0.15 + lexicalScore * 0.12,
           metadata: row.metadata,
           tenantId: row.tenantId,
           groupId: row.groupId,
@@ -1440,7 +1540,7 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
       selectedEntityIds: [...entitySeeds.keys()],
       selectedPassageIds: [...passageSeeds.keys()].slice(0, 20),
       finalPassageIds: results.map(result => result.passageId),
-      selectedFactTexts: selectedFactResults.map(fact => ({ id: fact.id, content: fact.factText })),
+      selectedFactTexts: selectedFactResults.map(fact => ({ id: fact.id, content: formatFactEvidence(fact) })),
       selectedEntityNames: selectedEntityResults.map(entity => ({ id: entity.id, content: entity.name })),
       selectedFactChains: factChains.map(chain => ({
         content: chain.content,
@@ -1480,6 +1580,10 @@ export function createKnowledgeGraphBridge(config: CreateKnowledgeGraphBridgeCon
         targetEntityName: nameMap.get(fact.targetEntityId),
         relation: fact.relation,
         factText: fact.factText,
+        description: fact.description,
+        evidenceText: fact.evidenceText,
+        factSearchText: fact.factSearchText,
+        sourceChunkId: fact.sourceChunkId,
         weight: fact.weight,
         evidenceCount: fact.evidenceCount,
         similarity: fact.similarity,

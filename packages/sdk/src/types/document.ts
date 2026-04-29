@@ -1,4 +1,5 @@
 export interface EmbeddedChunk {
+  id: string
   idempotencyKey: string
   bucketId: string
   tenantId?: string | undefined

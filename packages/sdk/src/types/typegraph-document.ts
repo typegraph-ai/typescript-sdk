@@ -43,6 +43,11 @@ export interface typegraphDocument {
   metadata: Record<string, unknown>
 }
 
+export interface UpsertedDocumentRecord extends typegraphDocument {
+  /** True when the document row was inserted, false when an existing canonical row was updated. */
+  wasCreated?: boolean | undefined
+}
+
 export interface DocumentFilter {
   bucketId?: string | undefined
   tenantId?: string | undefined

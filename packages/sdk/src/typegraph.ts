@@ -848,7 +848,13 @@ class TypegraphImpl implements typegraphInstance {
     const result = await engine.ingestBatch(resolvedBucketId, items, resolvedOpts)
     result.status = 'complete'
     await this.config.hooks?.onIndexComplete?.(resolvedBucketId, result)
-    this.logger?.info('Ingestion complete', { bucketId: resolvedBucketId, inserted: result.inserted, skipped: result.skipped, durationMs: result.durationMs })
+    this.logger?.info('Ingestion complete', {
+      bucketId: resolvedBucketId,
+      inserted: result.inserted,
+      updated: result.updated,
+      skipped: result.skipped,
+      durationMs: result.durationMs,
+    })
     return result
   }
 

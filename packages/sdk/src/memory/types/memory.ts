@@ -156,6 +156,10 @@ export interface SemanticFactRecord {
   targetEntityId: string
   relation: string
   factText: string
+  description?: string | undefined
+  evidenceText?: string | undefined
+  factSearchText?: string | undefined
+  sourceChunkId?: string | undefined
   weight: number
   evidenceCount: number
   embedding?: number[] | undefined

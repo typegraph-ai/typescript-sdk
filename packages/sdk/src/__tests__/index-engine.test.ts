@@ -6,6 +6,9 @@ import { createMockEmbedding } from './helpers/mock-embedding.js'
 import { createMockBucket } from './helpers/mock-source.js'
 import { createTestDocument, createTestDocuments } from './helpers/mock-connector.js'
 import { defaultChunker } from '../index-engine/chunker.js'
+import { buildHashStoreKey, resolveIdempotencyKey } from '../index-engine/hash.js'
+import { chunkIdFor } from '../utils/id.js'
+import type { typegraphEvent } from '../types/events.js'
 
 describe('IndexEngine', () => {
   let adapter: ReturnType<typeof createMockAdapter>
@@ -52,6 +55,31 @@ describe('IndexEngine', () => {
       expect(result2.inserted).toBe(0)
     })
 
+    it('skips unchanged group-visible documents', async () => {
+      const docs = createTestDocuments(2)
+      const { bucket, ingestOptions } = createMockBucket({ documents: docs })
+      const engine = new IndexEngine(adapter, embedding)
+
+      await ingestDocs(engine, bucket.id, docs, ingestOptions, {
+        groupId: 'Novel-30752',
+        visibility: 'group',
+      })
+      const result2 = await ingestDocs(engine, bucket.id, docs, ingestOptions, {
+        groupId: 'Novel-30752',
+        visibility: 'group',
+      })
+
+      expect(result2.total).toBe(2)
+      expect(result2.skipped).toBe(2)
+      expect(result2.inserted).toBe(0)
+      expect(result2.updated).toBe(0)
+      const countCalls = adapter.calls.filter(c => c.method === 'countChunks')
+      expect(countCalls.at(-1)!.args[1]).toEqual(expect.objectContaining({
+        groupId: 'Novel-30752',
+        idempotencyKey: 'doc-2',
+      }))
+    })
+
     it('re-indexes on content change', async () => {
       const docs = [createTestDocument({ id: 'doc-1', content: 'Original content' })]
       const { bucket, ingestOptions } = createMockBucket({ documents: docs })
@@ -73,7 +101,8 @@ describe('IndexEngine', () => {
 
       const engine2 = new IndexEngine(adapter, createMockEmbedding({ model: 'model-v2' }))
       const result = await ingestDocs(engine2, bucket.id, docs, ingestOptions)
-      expect(result.inserted).toBe(1)
+      expect(result.inserted).toBe(0)
+      expect(result.updated).toBe(1)
     })
 
     it('calls ensureModel', async () => {
@@ -189,6 +218,111 @@ describe('IndexEngine', () => {
 
       expect(adapter.calls.some(c => c.method === 'upsertDocumentRecord')).toBe(true)
     })
+
+    it('uses canonical document id when hash dedup is missing', async () => {
+      const doc = createTestDocument({
+        id: undefined,
+        content: 'Canonical document content about Alice and Bob.',
+        title: 'Canonical Batch Document',
+        url: 'https://example.com/canonical-batch',
+      })
+      const { bucket } = createMockBucket({ documents: [] })
+      const chunks = [{ content: 'Alice met Bob.', chunkIndex: 0 }]
+      const events: typegraphEvent[] = []
+      const persistPassageNodes = vi.fn().mockResolvedValue(undefined)
+      const extractFromChunk = vi.fn().mockResolvedValue({ entities: [] })
+      const engine = new IndexEngine(adapter, embedding, {
+        emit: event => { events.push(event) },
+      })
+      engine.tripleExtractor = { persistPassageNodes, extractFromChunk } as any
+
+      await engine.ingestBatch(bucket.id, [{ doc, chunks }], { graphExtraction: true })
+      const canonicalId = adapter._chunks.get(embeddingModelKey(embedding))![0]!.documentId
+      const ikey = resolveIdempotencyKey(doc, ['url'])
+      await adapter.hashStore.delete(buildHashStoreKey(undefined, bucket.id, ikey))
+      adapter.calls.length = 0
+      events.length = 0
+      persistPassageNodes.mockClear()
+      extractFromChunk.mockClear()
+
+      const result = await engine.ingestBatch(bucket.id, [{ doc, chunks }], { graphExtraction: true })
+
+      expect(result.inserted).toBe(0)
+      expect(result.updated).toBe(1)
+      const upsertCall = adapter.calls.find(c => c.method === 'upsertDocument')!
+      expect((upsertCall.args[1] as Array<{ documentId: string }>)[0]!.documentId).toBe(canonicalId)
+      expect(persistPassageNodes.mock.calls[0]![0][0].documentId).toBe(canonicalId)
+      expect(extractFromChunk.mock.calls[0]![3]).toBe(canonicalId)
+      expect(adapter.calls.filter(c => c.method === 'updateDocumentStatus').at(-1)!.args[0]).toBe(canonicalId)
+      expect(events.find(e => e.eventType === 'index.document')!.targetId).toBe(canonicalId)
+    })
+
+    it('leaves graph extraction failures retryable', async () => {
+      const doc = createTestDocument({
+        id: undefined,
+        content: 'Retryable graph extraction document.',
+        title: 'Retryable Graph Document',
+        url: 'https://example.com/retryable-graph',
+      })
+      const { bucket } = createMockBucket({ documents: [] })
+      const chunks = [{ content: 'Alice met Bob.', chunkIndex: 0 }]
+      const engine = new IndexEngine(adapter, embedding)
+      engine.tripleExtractor = {
+        extractFromChunk: vi.fn().mockRejectedValue(new Error('Graph write failed')),
+      } as any
+
+      const failed = await engine.ingestBatch(bucket.id, [{ doc, chunks }], { graphExtraction: true })
+
+      expect(failed.inserted).toBe(0)
+      expect(failed.updated).toBe(0)
+      expect(failed.extraction?.failed).toBe(1)
+      const failedStatus = adapter.calls.filter(c => c.method === 'updateDocumentStatus').at(-1)!
+      expect(failedStatus.args[1]).toBe('failed')
+      const ikey = resolveIdempotencyKey(doc, ['url'])
+      const storeKey = buildHashStoreKey(undefined, bucket.id, ikey)
+      expect(await adapter.hashStore.get(storeKey)).toBeNull()
+
+      adapter.calls.length = 0
+      engine.tripleExtractor = {
+        extractFromChunk: vi.fn().mockResolvedValue({ entities: [] }),
+      } as any
+      const retried = await engine.ingestBatch(bucket.id, [{ doc, chunks }], { graphExtraction: true })
+
+      expect(retried.skipped).toBe(0)
+      expect(retried.inserted).toBe(0)
+      expect(retried.updated).toBe(1)
+      expect(await adapter.hashStore.get(storeKey)).not.toBeNull()
+      expect(adapter.calls.some(c => c.method === 'upsertDocument')).toBe(true)
+      expect(adapter.calls.filter(c => c.method === 'updateDocumentStatus').at(-1)!.args[1]).toBe('complete')
+    })
+
+    it('serializes graph extraction even when concurrency is higher', async () => {
+      const docs = [
+        createTestDocument({ id: undefined, title: 'Doc A', url: 'https://example.com/a', content: 'Alice met Bob.' }),
+        createTestDocument({ id: undefined, title: 'Doc B', url: 'https://example.com/b', content: 'Carol met Dana.' }),
+      ]
+      const { bucket } = createMockBucket({ documents: [] })
+      let active = 0
+      let maxActive = 0
+      const extractFromChunk = vi.fn(async () => {
+        active++
+        maxActive = Math.max(maxActive, active)
+        await new Promise(resolve => setTimeout(resolve, 5))
+        active--
+        return { entities: [] }
+      })
+      const engine = new IndexEngine(adapter, embedding)
+      engine.tripleExtractor = { extractFromChunk } as any
+
+      await engine.ingestBatch(
+        bucket.id,
+        docs.map(doc => ({ doc, chunks: [{ content: doc.content, chunkIndex: 0 }] })),
+        { graphExtraction: true, concurrency: 2 },
+      )
+
+      expect(extractFromChunk).toHaveBeenCalledTimes(2)
+      expect(maxActive).toBe(1)
+    })
   })
 
   describe('ingestWithChunks', () => {
@@ -253,6 +387,37 @@ describe('IndexEngine', () => {
       }))
     })
 
+    it('uses canonical document id for pre-chunked reprocessing', async () => {
+      const doc = createTestDocument({
+        id: undefined,
+        content: 'Canonical pre-chunked content about Alice and Bob.',
+        title: 'Canonical Prechunked Document',
+        url: 'https://example.com/canonical-prechunked',
+      })
+      const { bucket } = createMockBucket({ documents: [] })
+      const chunks = [{ content: 'Alice met Bob.', chunkIndex: 0 }]
+      const persistPassageNodes = vi.fn().mockResolvedValue(undefined)
+      const extractFromChunk = vi.fn().mockResolvedValue({ entities: [] })
+      const engine = new IndexEngine(adapter, embedding)
+      engine.tripleExtractor = { persistPassageNodes, extractFromChunk } as any
+
+      await engine.ingestWithChunks(bucket.id, doc, chunks, { graphExtraction: true })
+      const canonicalId = adapter._chunks.get(embeddingModelKey(embedding))![0]!.documentId
+      adapter.calls.length = 0
+      persistPassageNodes.mockClear()
+      extractFromChunk.mockClear()
+
+      const result = await engine.ingestWithChunks(bucket.id, doc, chunks, { graphExtraction: true })
+
+      expect(result.inserted).toBe(0)
+      expect(result.updated).toBe(1)
+      const upsertCall = adapter.calls.find(c => c.method === 'upsertDocument')!
+      expect((upsertCall.args[1] as Array<{ documentId: string }>)[0]!.documentId).toBe(canonicalId)
+      expect(persistPassageNodes.mock.calls[0]![0][0].documentId).toBe(canonicalId)
+      expect(extractFromChunk.mock.calls[0]![3]).toBe(canonicalId)
+      expect(adapter.calls.filter(c => c.method === 'updateDocumentStatus').at(-1)!.args[0]).toBe(canonicalId)
+    })
+
     it('persists passage nodes before graph extraction', async () => {
       const doc = createTestDocument({ id: 'doc-passages' })
       const { bucket } = createMockBucket({ documents: [] })
@@ -266,6 +431,8 @@ describe('IndexEngine', () => {
       engine.tripleExtractor = { persistPassageNodes, extractFromChunk } as any
 
       await engine.ingestWithChunks(bucket.id, doc, chunks, { graphExtraction: true, tenantId: 'tenant-1' })
+      const ikey = resolveIdempotencyKey(doc, ['url'])
+      const modelId = embeddingModelKey(embedding)
 
       expect(persistPassageNodes).toHaveBeenCalledTimes(1)
       expect(persistPassageNodes.mock.calls[0]![0]).toEqual([
@@ -273,12 +440,14 @@ describe('IndexEngine', () => {
           bucketId: bucket.id,
           documentId: 'doc-passages',
           chunkIndex: 0,
+          chunkId: chunkIdFor({ embeddingModel: modelId, bucketId: bucket.id, idempotencyKey: ikey, chunkIndex: 0 }),
           tenantId: 'tenant-1',
         }),
         expect.objectContaining({
           bucketId: bucket.id,
           documentId: 'doc-passages',
           chunkIndex: 1,
+          chunkId: chunkIdFor({ embeddingModel: modelId, bucketId: bucket.id, idempotencyKey: ikey, chunkIndex: 1 }),
           tenantId: 'tenant-1',
         }),
       ])

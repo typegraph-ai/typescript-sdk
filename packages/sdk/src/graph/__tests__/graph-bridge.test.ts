@@ -166,6 +166,9 @@ describe('createKnowledgeGraphBridge', () => {
         subject: 'Vitamin D',
         predicate: 'prevents',
         object: 'osteoporosis',
+        relationshipDescription: 'Vitamin D helps prevent osteoporosis in elderly patients.',
+        evidenceText: 'Vitamin D prevents osteoporosis in elderly patients.',
+        sourceChunkId: 'chk-vitd-0',
         content: 'Vitamin D prevents osteoporosis in elderly patients.',
         bucketId: 'bucket-1',
         documentId: 'doc-1',
@@ -185,6 +188,11 @@ describe('createKnowledgeGraphBridge', () => {
       expect(edge.properties.content).toBeUndefined()
       expect(edge.properties.bucketId).toBeUndefined()
       expect(edge.properties.chunkIndex).toBeUndefined()
+      expect(edge.properties).toEqual(expect.objectContaining({
+        relationshipDescription: 'Vitamin D helps prevent osteoporosis in elderly patients.',
+        evidenceText: 'Vitamin D prevents osteoporosis in elderly patients.',
+        sourceChunkId: 'chk-vitd-0',
+      }))
 
       // Two mentions written to the junction (subject + object for the same chunk)
       expect(store.upsertEntityChunkMentions).toHaveBeenCalled()

@@ -1,7 +1,6 @@
 import type { VectorStoreAdapter, SearchOpts, UndeployResult } from '@typegraph-ai/sdk'
 import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from '@typegraph-ai/sdk'
 import type { Bucket, BucketListFilter } from '@typegraph-ai/sdk'
-import { generateId } from '@typegraph-ai/sdk'
 import Database from 'better-sqlite3'
 import * as sqliteVec from 'sqlite-vec'
 import { SqliteHashStore } from './hash-store.js'
@@ -201,6 +200,7 @@ export class SqliteVecAdapter implements VectorStoreAdapter {
         user_id         = excluded.user_id,
         agent_id        = excluded.agent_id,
         conversation_id = excluded.conversation_id,
+        document_id     = excluded.document_id,
         content         = excluded.content,
         embedding_model = excluded.embedding_model,
         total_chunks    = excluded.total_chunks,
@@ -222,9 +222,8 @@ export class SqliteVecAdapter implements VectorStoreAdapter {
 
     const transaction = this.db.transaction((chunks: EmbeddedChunk[]) => {
       for (const chunk of chunks) {
-        const id = generateId('chk')
         upsertChunk.run(
-          id,
+          chunk.id,
           chunk.bucketId,
           chunk.tenantId ?? null,
           chunk.groupId ?? null,
@@ -494,6 +493,7 @@ function mapRowToScoredChunk(row: Record<string, unknown>): ScoredChunk {
   const similarity = 1 - distance
 
   return {
+    id: row.id as string,
     idempotencyKey: row.idempotency_key as string,
     bucketId: row.bucket_id as string,
     tenantId: (row.tenant_id as string) ?? undefined,

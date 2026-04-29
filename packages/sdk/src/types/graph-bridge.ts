@@ -96,6 +96,9 @@ export interface KnowledgeGraphBridge {
     objectType?: string
     objectAliases?: string[]
     objectDescription?: string
+    relationshipDescription?: string | undefined
+    evidenceText?: string | undefined
+    sourceChunkId?: string | undefined
     confidence?: number
     content: string
     bucketId: string
@@ -239,6 +242,10 @@ export interface FactResult {
   targetEntityName?: string | undefined
   relation: string
   factText: string
+  description?: string | undefined
+  evidenceText?: string | undefined
+  factSearchText?: string | undefined
+  sourceChunkId?: string | undefined
   weight: number
   evidenceCount: number
   similarity?: number | undefined

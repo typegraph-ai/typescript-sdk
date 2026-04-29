@@ -28,6 +28,16 @@ type SqlExecutor = (
   params?: unknown[]
 ) => Promise<Record<string, unknown>[]>
 
+function isDuplicateFactIdError(err: unknown): boolean {
+  const code = (err as { code?: string })?.code
+  const constraint = (err as { constraint?: string })?.constraint
+  const message = err instanceof Error ? err.message : String(err)
+  return code === '23505' && (
+    constraint?.endsWith('_pkey') === true ||
+    /Key \(id\)=/i.test(message)
+  )
+}
+
 export interface PgMemoryAdapterConfig {
   sql: SqlExecutor
   /** Postgres schema name. Defaults to 'public'. */
@@ -319,6 +329,10 @@ const FACT_RECORDS_DDL = (t: string, dims?: number) => {
     target_entity_id TEXT NOT NULL,
     relation         TEXT NOT NULL,
     fact_text        TEXT NOT NULL,
+    description      TEXT,
+    evidence_text    TEXT,
+    fact_search_text TEXT NOT NULL,
+    source_chunk_id  TEXT,
     weight           REAL NOT NULL DEFAULT 1.0,
     evidence_count   INTEGER NOT NULL DEFAULT 1,
     embedding        VECTOR${dims ? `(${dims})` : ''},
@@ -1066,18 +1080,51 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
 
   async upsertFactRecord(fact: SemanticFactRecord): Promise<SemanticFactRecord> {
     const embeddingStr = fact.embedding ? `[${fact.embedding.join(',')}]` : null
-    const rows = await this.sqlWithRetry(
-      `INSERT INTO ${this.factRecordsTable}
-        (id, edge_id, source_entity_id, target_entity_id, relation, fact_text, weight,
+    const params = [
+      fact.id,
+      fact.edgeId,
+      fact.sourceEntityId,
+      fact.targetEntityId,
+      fact.relation,
+      fact.factText,
+      fact.description ?? null,
+      fact.evidenceText ?? null,
+      fact.factSearchText ?? fact.factText,
+      fact.sourceChunkId ?? null,
+      fact.weight,
+      fact.evidenceCount,
+      embeddingStr,
+      JSON.stringify(fact.scope),
+      fact.scope.tenantId ?? null,
+      fact.scope.groupId ?? null,
+      fact.scope.userId ?? null,
+      fact.scope.agentId ?? null,
+      fact.scope.conversationId ?? null,
+      fact.visibility ?? null,
+      fact.updatedAt.toISOString(),
+    ]
+    const table = unqualified(this.factRecordsTable)
+    const buildSql = (conflictTarget: 'edge_id' | 'id') => `INSERT INTO ${this.factRecordsTable}
+        (id, edge_id, source_entity_id, target_entity_id, relation, fact_text,
+         description, evidence_text, fact_search_text, source_chunk_id, weight,
          evidence_count, embedding, scope, tenant_id, group_id, user_id, agent_id,
          conversation_id, visibility, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::vector,$10,$11,$12,$13,$14,$15,$16,$17)
-       ON CONFLICT (edge_id) DO UPDATE SET
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::vector,$14,$15,$16,$17,$18,$19,$20,$21)
+       ON CONFLICT (${conflictTarget}) DO UPDATE SET
+         ${conflictTarget === 'id'
+           ? `edge_id = EXCLUDED.edge_id,
+         source_entity_id = EXCLUDED.source_entity_id,
+         target_entity_id = EXCLUDED.target_entity_id,`
+           : ''}
          relation = EXCLUDED.relation,
          fact_text = EXCLUDED.fact_text,
-         weight = GREATEST(${unqualified(this.factRecordsTable)}.weight, EXCLUDED.weight),
-         evidence_count = GREATEST(${unqualified(this.factRecordsTable)}.evidence_count, EXCLUDED.evidence_count),
-         embedding = COALESCE(EXCLUDED.embedding, ${unqualified(this.factRecordsTable)}.embedding),
+         description = EXCLUDED.description,
+         evidence_text = EXCLUDED.evidence_text,
+         fact_search_text = EXCLUDED.fact_search_text,
+         source_chunk_id = COALESCE(EXCLUDED.source_chunk_id, ${table}.source_chunk_id),
+         weight = GREATEST(${table}.weight, EXCLUDED.weight),
+         evidence_count = GREATEST(${table}.evidence_count, EXCLUDED.evidence_count),
+         embedding = COALESCE(EXCLUDED.embedding, ${table}.embedding),
          scope = EXCLUDED.scope,
          tenant_id = EXCLUDED.tenant_id,
          group_id = EXCLUDED.group_id,
@@ -1086,27 +1133,14 @@ export class PgMemoryStoreAdapter implements MemoryStoreAdapter {
          conversation_id = EXCLUDED.conversation_id,
          visibility = EXCLUDED.visibility,
          updated_at = EXCLUDED.updated_at
-       RETURNING *`,
-      [
-        fact.id,
-        fact.edgeId,
-        fact.sourceEntityId,
-        fact.targetEntityId,
-        fact.relation,
-        fact.factText,
-        fact.weight,
-        fact.evidenceCount,
-        embeddingStr,
-        JSON.stringify(fact.scope),
-        fact.scope.tenantId ?? null,
-        fact.scope.groupId ?? null,
-        fact.scope.userId ?? null,
-        fact.scope.agentId ?? null,
-        fact.scope.conversationId ?? null,
-        fact.visibility ?? null,
-        fact.updatedAt.toISOString(),
-      ]
-    )
+       RETURNING *`
+    let rows: Record<string, unknown>[]
+    try {
+      rows = await this.sqlWithRetry(buildSql('edge_id'), params)
+    } catch (err) {
+      if (!isDuplicateFactIdError(err)) throw err
+      rows = await this.sqlWithRetry(buildSql('id'), params)
+    }
     return mapRowToFact(rows[0]!)
   }
 
@@ -1714,6 +1748,10 @@ function mapRowToFact(row: Record<string, unknown>): SemanticFactRecord {
     targetEntityId: row.target_entity_id as string,
     relation: row.relation as string,
     factText: row.fact_text as string,
+    description: (row.description as string | null) ?? undefined,
+    evidenceText: (row.evidence_text as string | null) ?? undefined,
+    factSearchText: (row.fact_search_text as string | null) ?? undefined,
+    sourceChunkId: (row.source_chunk_id as string | null) ?? undefined,
     weight: row.weight as number,
     evidenceCount: row.evidence_count as number,
     embedding: undefined,

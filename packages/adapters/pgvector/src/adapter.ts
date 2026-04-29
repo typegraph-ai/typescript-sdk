@@ -3,7 +3,7 @@ import type { EmbeddedChunk, ChunkFilter, ScoredChunk } from '@typegraph-ai/sdk'
 import type { typegraphDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput } from '@typegraph-ai/sdk'
 import type { Bucket } from '@typegraph-ai/sdk'
 import type { Job, JobFilter, UpsertJobInput, JobStatusPatch, PaginationOpts, PaginatedResult } from '@typegraph-ai/sdk'
-import { generateId, DEFAULT_BUCKET_ID } from '@typegraph-ai/sdk'
+import { DEFAULT_BUCKET_ID } from '@typegraph-ai/sdk'
 import {
   REGISTRY_SQL, MODEL_TABLE_SQL, HASH_TABLE_SQL, DOCUMENTS_TABLE_SQL,
   BUCKETS_TABLE_SQL, EVENTS_TABLE_SQL, POLICIES_TABLE_SQL, JOBS_TABLE_SQL,
@@ -289,7 +289,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
     const indexedAts: string[] = []
 
     for (const chunk of chunks) {
-      chunkIds.push(generateId('chk'))
+      chunkIds.push(chunk.id)
       sourceIds.push(chunk.bucketId)
       tenantIds.push(chunk.tenantId ?? null)
       groupIds.push(chunk.groupId ?? null)
@@ -327,6 +327,8 @@ export class PgVectorAdapter implements VectorStoreAdapter {
         $12::text[], $13::int[], $14::int[], $15::text[], $16::jsonb[], $17::timestamptz[]
        )
        ON CONFLICT (idempotency_key, chunk_index, bucket_id) DO UPDATE SET
+        id              = EXCLUDED.id,
+        document_id     = EXCLUDED.document_id,
         content         = EXCLUDED.content,
         embedding       = EXCLUDED.embedding,
         embedding_model = EXCLUDED.embedding_model,
@@ -523,7 +525,7 @@ export class PgVectorAdapter implements VectorStoreAdapter {
 
   // --- Document record methods ---
 
-  async upsertDocumentRecord(input: UpsertDocumentInput): Promise<typegraphDocument> {
+  async upsertDocumentRecord(input: UpsertDocumentInput): Promise<typegraphDocument & { wasCreated?: boolean | undefined }> {
     return this.documentStore.upsert(input)
   }
 
@@ -935,6 +937,7 @@ function mapRowToScoredChunk(
   scores: { semantic?: number; keyword?: number; rrf?: number }
 ): ScoredChunk {
   return {
+    id: row.id as string,
     idempotencyKey: row.idempotency_key as string,
     bucketId: row.bucket_id as string,
     tenantId: (row.tenant_id as string) ?? undefined,

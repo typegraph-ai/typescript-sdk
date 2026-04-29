@@ -1,6 +1,8 @@
 import type { typegraphDocument, DocumentFilter, DocumentStatus, UpsertDocumentInput, PaginationOpts, PaginatedResult } from '@typegraph-ai/sdk'
 import type { SqlExecutor } from './adapter.js'
 
+type UpsertedDocumentRecord = typegraphDocument & { wasCreated?: boolean | undefined }
+
 function mapDocRow(row: Record<string, unknown>): typegraphDocument {
   return {
     id: row.id as string,
@@ -30,7 +32,7 @@ export class PgDocumentStore {
     private tableName: string
   ) {}
 
-  async upsert(input: UpsertDocumentInput): Promise<typegraphDocument> {
+  async upsert(input: UpsertDocumentInput): Promise<UpsertedDocumentRecord> {
     const rows = await this.sql(
       `INSERT INTO ${this.tableName}
         (id, bucket_id, tenant_id, group_id, user_id, agent_id, conversation_id,
@@ -52,7 +54,7 @@ export class PgDocumentStore {
            metadata = EXCLUDED.metadata,
            indexed_at = NOW(),
            updated_at = NOW()
-       RETURNING *`,
+       RETURNING *, (xmax = 0) AS was_created`,
       [
         input.id,
         input.bucketId,
@@ -71,7 +73,10 @@ export class PgDocumentStore {
         JSON.stringify(input.metadata ?? {}),
       ]
     )
-    return mapDocRow(rows[0]!)
+    return {
+      ...mapDocRow(rows[0]!),
+      wasCreated: rows[0]!.was_created as boolean,
+    }
   }
 
   async get(id: string): Promise<typegraphDocument | null> {

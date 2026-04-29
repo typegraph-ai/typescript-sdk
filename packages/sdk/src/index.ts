@@ -45,6 +45,7 @@ export type {
   Visibility,
   DocumentFilter,
   UpsertDocumentInput,
+  UpsertedDocumentRecord,
   typegraphHooks,
   LLMProvider,
   LLMGenerateOptions,
@@ -133,7 +134,8 @@ export { mergeAndRank, minMaxNormalize, calibrateSemantic, calibrateKeyword, nor
 export { resolveSignals, signalLabel, computeCompositeScore, classifyQuery, type QueryClassification, type QueryType } from './query/index.js'
 
 // Utilities
-export { generateId } from './utils/id.js'
+export { generateId, chunkIdFor } from './utils/id.js'
+export type { ChunkIdInput } from './utils/id.js'
 
 // Cloud mode
 export { createCloudInstance, HttpClient, TypegraphApiError } from './cloud/index.js'

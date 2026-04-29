@@ -5,6 +5,7 @@ import type { EmbeddedChunk } from '../types/document.js'
 
 function makeChunk(overrides: Partial<EmbeddedChunk> = {}): EmbeddedChunk {
   return {
+    id: overrides.id ?? `chunk-${overrides.idempotencyKey ?? 'key-1'}-${overrides.chunkIndex ?? 0}`,
     idempotencyKey: 'key-1',
     bucketId: 'src-1',
     documentId: 'doc-1',
